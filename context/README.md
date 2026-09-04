@@ -5,14 +5,12 @@ templating instead of replacing them: a grammar the files are written in, a host
 compiles and composes them, a catalog that sources patterns from several places under
 namespaces, an engine sub-module that owns the engine's syntax, and a lint that enforces the
 conventions. It is a standalone library any Go project can adopt, and it imports only the
-standard library at its root. The Standards Lab organization builds it adjacent to its Go
-Elemental architecture: the architecture's libraries consume it, and it is the blueprint for
-how a DSL gains host-language support, but it is not a layer of the architecture.
+standard library at its root.
 
 The user guide is the repository's own: `README.md` is the index and `docs/` the documents it
-orders. What the library implies for the architecture is documented in the organization's
-[documentation landing zone](https://github.com/standards-lab/docs); the pages that describe
-it there are the docs pass's to write. This context records only working knowledge the guide,
+orders. The organization's [documentation landing zone](https://github.com/standards-lab/docs)
+documents the library's place in the organization's work; the pages that describe it there
+are the docs pass's to write. This context records only working knowledge the guide,
 the landing zone, and the code do not express.
 
 ## Capability map
@@ -30,8 +28,8 @@ their use. Detail for what is unbuilt is added when it is about to be built.
 - **sqltest** is the scripted driver every consumer's unit tier runs over. Built.
 - **postgres** (sub-module) is the PostgreSQL dialect: placeholders, error classification, the
   advisory lock, the exported native forms, and the integration tier's proofs. Built.
-- **sqlint** (sub-module) is the conventions lint as a package with a thin command. Built.
+- **sqlint** (sub-module) is the conventions linter as a package with a thin command. Built.
 
 A second engine is a second sub-module named for the engine, with its own dialect and
-`sqlint.toml`, and an overlay where its syntax differs from PostgreSQL's, the standard spelling
-of every library pattern.
+`sqlint.toml`, and an overlay for each library pattern it does not accept as written in
+standard SQL.

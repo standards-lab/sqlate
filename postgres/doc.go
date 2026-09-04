@@ -2,7 +2,7 @@
 // renders the nth bind parameter, how its driver's errors classify, and the
 // session-level advisory lock the migrate protocol takes. It is a
 // sub-module so the driver it names, pgx, enters a consumer's build only
-// through this import, made once at the composition root; a consumer opens
+// through this import, made once where it opens its pool; a consumer opens
 // its own pool with the driver and hands it to sqlate.Wrap with [Dialect].
 //
 // # Error classification
@@ -29,6 +29,7 @@
 //
 // The sqlint.toml beside this file exports the engine's native forms: the
 // spellings a standard-tier SQL file must not use, each a regular
-// expression under the name a finding reports. PostgreSQL is the standard
-// spelling of every library pattern, so the module ships no overlay.
+// expression under the name a finding reports. PostgreSQL accepts every
+// library pattern as written in standard SQL, so the module supplies no
+// overlay.
 package postgres

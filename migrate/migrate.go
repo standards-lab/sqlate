@@ -16,8 +16,8 @@ type Options struct {
 	// Table names the history table; default "schema_version".
 	Table string
 	// LockName names the lock a run holds; default "migrate.<table>", so two
-	// migrators over different tables never contend and no domain lock can
-	// collide with it by number.
+	// migrators over different tables never contend and no lock of the
+	// program's own can collide with it by number.
 	LockName string
 	// Unlocked allows runs on a dialect without the lock capability, or with
 	// it, without taking the lock; concurrent starters are then unsafe.

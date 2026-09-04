@@ -28,7 +28,7 @@ func lint(fsys fs.FS, resolve sqlint.Resolver) []string {
 	return lines
 }
 
-// tree is a module the way the lint sees it: a configuration naming the
+// tree is a module the way the linter sees it: a configuration naming the
 // library and the engine as directories of the tree, their exports, and
 // the files each convention catches.
 func tree(config string) fstest.MapFS {

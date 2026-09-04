@@ -15,10 +15,10 @@ import (
 	"github.com/standards-lab/sqlate/header"
 )
 
-// Statements is a domain's statements, compiled from one directory: the
-// inventory the verification step and an administrative listing walk,
-// keyed by file name. It is not a registry; a domain fetches each statement
-// once, in its constructor.
+// Statements is a set of related statements compiled from one directory:
+// the inventory the verification step and an administrative listing walk,
+// keyed by file name. It is not a registry; a program fetches each
+// statement once, where it binds them.
 type Statements struct {
 	statements map[string]Statement
 }
@@ -27,8 +27,8 @@ type Statements struct {
 // header, expands its includes against the catalog, and resolves its
 // parameters against d's placeholders. A file without a header, with an
 // unknown declaration, with a header the grammar rejects, or with an include
-// the catalog cannot resolve is a load error naming the file; the domain
-// treats it as a defect in its constructor.
+// the catalog cannot resolve is a load error naming the file; a program
+// treats it as a defect in its own files.
 func (c *Catalog) Compile(fsys fs.FS, dir string, d sqlate.Dialect) (*Statements, error) {
 	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
@@ -52,8 +52,8 @@ func (c *Catalog) Compile(fsys fs.FS, dir string, d sqlate.Dialect) (*Statements
 	return stmts, nil
 }
 
-// MustCompile is Compile for constructors and composition roots, where a
-// load error is a defect.
+// MustCompile is Compile for the place a program binds its statements,
+// where a load error is a defect.
 func (c *Catalog) MustCompile(fsys fs.FS, dir string, d sqlate.Dialect) *Statements {
 	stmts, err := c.Compile(fsys, dir, d)
 	if err != nil {

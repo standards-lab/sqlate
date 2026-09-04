@@ -13,7 +13,7 @@ import (
 // operation; delete is both a verb and a command and is allowed.
 var verbNamed = regexp.MustCompile(`^(insert|select|update|upsert|merge)(_|\.)`)
 
-// lintStatements compiles a statement directory the way a domain does,
+// lintStatements compiles a statement directory the way a program does,
 // against the resolved catalog, then applies the rules the compiler
 // leaves to review.
 func (l *linter) lintStatements(dir string, on map[string]bool) {

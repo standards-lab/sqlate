@@ -3,8 +3,8 @@
 # regular expression (RE2) under the name a finding reports, so the engine
 # states in what position a spelling counts (word boundaries, case) and
 # not just which spelling. The lint matches code only: string literals and
-# comments are stripped first. PostgreSQL is the standard spelling of every
-# library pattern, so it supplies no overlay.
+# comments are stripped first. PostgreSQL accepts every library pattern as
+# written in standard SQL, so it supplies no overlay.
 
 [export.native_forms]
 returning    = '(?i)\bRETURNING\b'

@@ -4,7 +4,7 @@ import "strconv"
 
 // stubDialect is the dialect statement directories compile against: $N
 // placeholders, no error mapping. Compilation needs a dialect only for
-// the placeholders, and the lint runs no SQL.
+// the placeholders, and the linter runs no SQL.
 type stubDialect struct{}
 
 func (stubDialect) Name() string { return "sqlint" }

@@ -19,7 +19,7 @@ import (
 // another, so it reads on its own. Two uses:
 //
 //   - at request time, the collection read composes count, page, and one
-//     from the library's patterns over a domain's base and the request's
+//     from the library's patterns over a program's base and the request's
 //     declarations; the library fills the slots with text it composed from
 //     other patterns, never with request input;
 //   - at load time, a statement includes a pattern with {{> namespace.name}},
@@ -29,8 +29,8 @@ import (
 // Any package may publish patterns: the library's own are Patterns(), an
 // application registers its namespace beside them, and an engine overlays
 // the library's request-time patterns it must spell differently. The
-// catalog is built once, at the composition root, and every domain's
-// statements are compiled against it.
+// catalog is built once, where the program starts, and every set of
+// statements is compiled against it.
 
 //go:embed patterns/*.sql
 var patternFiles embed.FS
@@ -182,8 +182,8 @@ func NewCatalog(sources ...Source) (*Catalog, error) {
 	return c, nil
 }
 
-// MustCatalog is NewCatalog for the composition root, where a catalog error
-// is a defect.
+// MustCatalog is NewCatalog for the place a program starts, where a catalog
+// error is a defect.
 func MustCatalog(sources ...Source) *Catalog {
 	c, err := NewCatalog(sources...)
 	if err != nil {

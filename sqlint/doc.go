@@ -13,7 +13,7 @@
 //
 // # Configuration
 //
-// sqlint.toml at the module root configures the lint, one file per module,
+// sqlint.toml at the module root configures the linter, one file per module,
 // read by [Load]: a table per role (statements, patterns, migrations)
 // with the directory globs it covers and the switches of its checks, an
 // override table per directory set that needs an exception, the pattern

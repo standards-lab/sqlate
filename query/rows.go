@@ -19,8 +19,8 @@ func Scalar[T any](rows *sql.Rows) (T, error) {
 	return v, err
 }
 
-// Rows is a statement bound to a scan function: the typed handle a domain
-// holds for a query that returns rows.
+// Rows is a statement bound to a scan function: the typed handle a program
+// keeps for a query that returns rows.
 type Rows[T any] struct {
 	stmt Statement
 	scan ScanFunc[T]

@@ -4,7 +4,7 @@
 // driver error through the engine's dialect at that boundary, and owns the
 // transaction runner. The package depends on the standard library alone;
 // each engine lives in a sub-module (postgres) that supplies the dialect, so
-// a consumer imports its engine once, at the composition root. The packages
+// a consumer imports its engine once, where it opens its pool. The packages
 // above it, query and migrate, take a Session and never a driver.
 //
 // # Wrapper
@@ -13,7 +13,7 @@
 // Lifecycle (opening, readiness, closing) belongs to whoever owns the
 // pool; DB adds error mapping, prepare, options on Begin, and pinned
 // connections. It performs no I/O: a nil pool or dialect is a defect in
-// the composition root and panics. [DB.Conn] pins one connection for a
+// the caller and panics. [DB.Conn] pins one connection for a
 // protocol that needs session scope, such as a session-level lock or a run
 // of non-transactional DDL; [DB.Dialect] returns the dialect statements are
 // compiled against.

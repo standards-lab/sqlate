@@ -1,29 +1,26 @@
 # sqlate
 
 The SQL templating library: authored `.sql` files made dynamic and composable, with the
-PostgreSQL dialect in the `postgres` sub-module and the conventions lint in the `sqlint`
+PostgreSQL dialect in the `postgres` sub-module and the conventions linter in the `sqlint`
 sub-module. A standalone library any Go project can adopt, built by the Standards Lab
-organization and adjacent to its Go Elemental architecture: the architecture's Go libraries
-consume it, and it is the blueprint for how a DSL gains host-language support, but it is not a
-layer of the architecture. Managed with the marathon workflow; start from `context/README.md`.
+organization. Managed with the marathon workflow; start from `context/README.md`.
 
 ## Where the documentation lives
 
 The user guide is this repository's own: `README.md` is the index, and the `docs/` documents
-are read in the order it lists. What the library implies for the architecture, the
-DSL-driven-services principle and the grammar as a standard artifact, is documented in the
-organization's [documentation landing zone](https://github.com/standards-lab/docs), which is
-the authority for that. `context/` records only working knowledge the guide, the landing zone,
-and the code do not express; do not restate documented design here. A change that alters
-documented behavior updates the guide, and the landing zone page where one exists, in the same
-effort.
+are read in the order it lists. The organization's
+[documentation landing zone](https://github.com/standards-lab/docs) documents the library's
+place in the organization's work and is the authority for that. `context/` records only
+working knowledge the guide, the landing zone, and the code do not express; do not restate
+documented design here. A change that alters documented behavior updates the guide, and the
+landing zone page where one exists, in the same effort.
 
 ## Repository specifics
 
 - **Module layout.** One base module rooted at `github.com/standards-lab/sqlate`, with the
   `sqlate` package at its root and `header`, `query`, `migrate`, and `sqltest` beside it, plus
   two sub-modules with their own `go.mod`: `postgres`, named for the engine, and `sqlint`,
-  the lint with its command at `sqlint/cmd/sqlint`.
+  the linter with its command at `sqlint/cmd/sqlint`.
 - **Dependency line.** The base module imports the standard library alone. A sourced
   dependency enters only through a sub-module's `go.mod`: pgx through `postgres`, the TOML
   parser through `sqlint`.

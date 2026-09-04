@@ -1,13 +1,13 @@
 # Changelog
 
-All notable changes to the conventions lint (`github.com/standards-lab/sqlate/sqlint`) are
+All notable changes to the conventions linter (`github.com/standards-lab/sqlate/sqlint`) are
 documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and the module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). This
 changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
-The first release of the lint, against `github.com/standards-lab/sqlate v0.1.0`.
+The first release of the linter, against `github.com/standards-lab/sqlate v0.1.0`.
 
 ### Added
 

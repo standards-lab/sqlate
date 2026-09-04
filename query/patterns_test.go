@@ -12,7 +12,7 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// A domain file includes the guard patterns; the spliced text binds the
+// A statement file includes the guard patterns; the spliced text binds the
 // pattern's parameters like the file's own.
 func TestLoad_ExpandsPatternIncludes(t *testing.T) {
 	st := load(t, "--| tier: standard\nUPDATE t SET a = {{a}}, {{> sql.guard_set}}\nWHERE {{> sql.guard_where}}")

@@ -68,7 +68,7 @@ var (
 
 // Wrap builds the session over pool with dialect, the engine's or a
 // capability-adding wrapper of it. Nil arguments are a defect in the
-// composition root and panic.
+// caller and panic.
 func Wrap(pool *sql.DB, dialect Dialect) *DB {
 	if pool == nil || dialect == nil {
 		panic("sqlate: Wrap requires a pool and a dialect")

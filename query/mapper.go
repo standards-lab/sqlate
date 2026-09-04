@@ -10,11 +10,11 @@ import (
 )
 
 // The struct-tag mapper: an entity's tags are its binding and scan
-// contract, so a domain writes neither scan functions nor Args literals.
+// contract, so a program writes neither scan functions nor Args literals.
 // A field's column name is its `db` tag, else its `json` tag's name, else
 // the field name lowercased; `db:"-"` excludes it. Column and parameter
-// names coincide with the API vocabulary by the architecture's own rule,
-// that the base aliases its output columns to the contract names, which is why
+// names coincide with the API vocabulary by convention, since a base aliases
+// its output columns to the contract names, which is why
 // the json tag is the usual source and db the override.
 
 // Scanner returns the ScanFunc for T from its tags: each row's columns are
