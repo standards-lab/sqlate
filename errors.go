@@ -14,8 +14,8 @@ var (
 
 	// ErrInvalidValue classifies a data exception: a bound value the engine
 	// could not read as the type it was cast to (SQLSTATE class 22). It is
-	// the engine-side half of request validation — a filter value that is
-	// not a uuid, a date that is not a date — and a dialect maps its
+	// the engine-side half of request validation (a filter value that is
+	// not a uuid, a date that is not a date), and a dialect maps its
 	// engine's form to it, wrapped in the same dual form.
 	ErrInvalidValue = errors.New("invalid value")
 
@@ -40,8 +40,8 @@ var (
 // ConstraintError is a classified constraint violation: the class sentinel,
 // the driver's own error, and the violated constraint's name when the driver
 // exposes it. Unwrap yields both wrapped errors, so errors.Is matches the
-// class while errors.As still reaches the driver error, and the constraint
-// name survives for a consumer's field mapping.
+// class and errors.As finds the driver error, and a consumer maps the
+// constraint name to its field.
 type ConstraintError struct {
 	Constraint string
 	Class      error

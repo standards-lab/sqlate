@@ -1,0 +1,95 @@
+[tools]
+go = "1.27"
+golangci-lint = "2.13.2"
+
+# Space-separated list of module directories, kept in sync with the go.work
+# use-list and the ci.yml matrix. "." is the base module; postgres and sqlint
+# are the sub-modules.
+[env]
+GO_MODULES = ". postgres sqlint"
+SQLATE_DSN = "postgres://app:app@127.0.0.1:5433/app?sslmode=disable"
+
+# Maintenance.
+[tasks.tidy]
+description = "Run go mod tidy across all modules"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  echo "==> tidy: $mod"
+  (cd "$mod" && go mod tidy)
+done
+'''
+
+# Verification.
+[tasks.fmt]
+description = "Format all Go source"
+run = "gofmt -w ."
+
+[tasks.lint]
+description = "Run golangci-lint across all modules, then sqlint over the repository"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  echo "==> lint: $mod"
+  (cd "$mod" && golangci-lint run ./...)
+done
+echo "==> sqlint"
+go run github.com/standards-lab/sqlate/sqlint/cmd/sqlint .
+'''
+
+[tasks.build]
+description = "Build each module with the workspace off, proving it resolves its own pins standalone"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  echo "==> build (GOWORK=off): $mod"
+  (cd "$mod" && GOWORK=off go build ./...)
+done
+'''
+
+[tasks.vet]
+description = "Run go vet across all modules"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  echo "==> vet: $mod"
+  (cd "$mod" && go vet ./...)
+done
+'''
+
+# Testing.
+[tasks.test]
+description = "Run the unit tier across all modules"
+run = '''
+set -e
+for mod in $GO_MODULES; do
+  echo "==> test: $mod"
+  (cd "$mod" && go test -race ./...)
+done
+'''
+
+[tasks.integration]
+description = "Run the integration tier against the PostgreSQL named by SQLATE_DSN"
+run = "cd postgres && go test -race -tags integration -count=1 ./..."
+
+[tasks.acceptance]
+description = "The one-shot engine proof: db-up, integration, then db-reset regardless of the result"
+run = '''
+set -e
+trap 'mise run db-reset' EXIT
+mise run db-up
+mise run integration
+'''
+
+# Services.
+[tasks.db-up]
+description = "Start the compose PostgreSQL and wait until it is healthy"
+run = "docker compose up -d --wait"
+
+[tasks.db-down]
+description = "Stop the compose PostgreSQL, keeping its volume"
+run = "docker compose down"
+
+[tasks.db-reset]
+description = "Stop the compose PostgreSQL and drop its volume"
+run = "docker compose down -v"

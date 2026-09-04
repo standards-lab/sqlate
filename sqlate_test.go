@@ -57,7 +57,7 @@ func TestDB_EveryMethodMaps(t *testing.T) {
 		t.Error("MapError(nil) != nil")
 	}
 	if db.Dialect().Name() != "test" {
-		t.Error("Dialect not carried")
+		t.Error("Dialect not returned")
 	}
 }
 

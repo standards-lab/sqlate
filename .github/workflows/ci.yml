@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# The module matrix, the go.work use-list, and mise GO_MODULES name the same
+# modules and are updated together. Steps are guarded on the module's go.mod
+# so a matrix entry stays green until that module lands. The GOWORK=off build
+# proves each module resolves its pins standalone, as a consumer sees it.
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - "."
+          - "postgres"
+          - "sqlint"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27"
+
+      - name: go build (GOWORK=off)
+        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
+        working-directory: ${{ matrix.module }}
+        env:
+          GOWORK: off
+        run: go build ./...
+
+      - name: go vet
+        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
+        working-directory: ${{ matrix.module }}
+        run: go vet ./...
+
+      - name: gofmt
+        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
+        working-directory: ${{ matrix.module }}
+        run: |
+          unformatted=$(gofmt -l .)
+          [ -z "$unformatted" ] || { echo "$unformatted"; exit 1; }
+
+      - name: go mod tidy -diff
+        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
+        working-directory: ${{ matrix.module }}
+        run: go mod tidy -diff
+
+      - name: go test -race
+        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
+        working-directory: ${{ matrix.module }}
+        run: go test -race ./...
+
+  lint:
+    strategy:
+      fail-fast: false
+      matrix:
+        module:
+          - "."
+          - "postgres"
+          - "sqlint"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: golangci-lint
+        if: ${{ hashFiles(format('{0}/go.mod', matrix.module)) != '' }}
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.13.2
+          working-directory: ${{ matrix.module }}
+
+  sqlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27"
+
+      - name: sqlint
+        run: go run github.com/standards-lab/sqlate/sqlint/cmd/sqlint .

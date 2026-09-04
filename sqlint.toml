@@ -1,0 +1,15 @@
+# sqlint: the module's SQL conventions, one file per module at its root.
+# [export] is what a consumer reads when it names this module as a source:
+# the directory its patterns publish under the consumer's chosen namespace.
+# The roles below lint the module's own files against the PostgreSQL
+# sub-module's native forms.
+
+engine = "postgres"
+
+[export]
+patterns = "query/patterns"
+
+[patterns]
+dirs = ["query/patterns"]
+delimiter = true
+native_forms = true

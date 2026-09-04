@@ -1,0 +1,42 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - '**/v*'
+
+concurrency:
+  group: release-${{ github.ref }}
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Determine module from tag
+        id: module
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          if [[ "$TAG" == */v* ]]; then
+            PREFIX="${TAG%/v*}"
+            echo "prefix=$PREFIX/" >> "$GITHUB_OUTPUT"
+            echo "changelog=$PREFIX/CHANGELOG.md" >> "$GITHUB_OUTPUT"
+          else
+            echo "prefix=" >> "$GITHUB_OUTPUT"
+            echo "changelog=CHANGELOG.md" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create GitHub Release
+        uses: taiki-e/create-gh-release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          changelog: ${{ steps.module.outputs.changelog }}
+          prefix: ${{ steps.module.outputs.prefix }}
