@@ -1,0 +1,21 @@
+# The engine's sqlint.toml. A consumer that configures this engine reads
+# [export]: the native forms a standard-tier file must not use, each a
+# regular expression (RE2) under the name a finding reports, so the engine
+# states in what position a spelling counts — word boundaries, case — and
+# not just which spelling. The lint matches code only: string literals and
+# comments are stripped first. PostgreSQL is the standard spelling of every
+# library pattern, so it supplies no overlay.
+
+[export.native_forms]
+returning    = '(?i)\bRETURNING\b'
+on_conflict  = '(?i)\bON\s+CONFLICT\b'
+ilike        = '(?i)\bILIKE\b'
+concurrently = '(?i)\bCONCURRENTLY\b'
+limit        = '(?i)\bLIMIT\b'
+serial       = '(?i)\b(?:BIG|SMALL)?SERIAL\b'
+jsonb        = '(?i)\bJSONB\b'
+timestamptz  = '(?i)\btimestamptz\b'
+cast         = '::'
+pg_catalog   = '\bpg_\w+'
+now          = '(?i)\bnow\(\)'
+uuidv7       = '\buuidv7\(\)'
