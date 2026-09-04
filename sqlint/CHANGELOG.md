@@ -7,6 +7,8 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.1.0] - 2026-09-04
+
 The first release of the linter, against `github.com/standards-lab/sqlate v0.1.0`.
 
 ### Added
@@ -19,3 +21,6 @@ The first release of the linter, against `github.com/standards-lab/sqlate v0.1.0
   one statement.
 - `cmd/sqlint`, the command: one root argument, findings as `path:line: message`, exit 1 on
   any finding.
+
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.1.0...HEAD
+[v0.1.0]: https://github.com/standards-lab/sqlate/releases/tag/sqlint/v0.1.0

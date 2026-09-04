@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/standards-lab/sqlate v0.0.0
+	github.com/standards-lab/sqlate v0.1.0
 )
 
 require (
@@ -14,5 +14,3 @@ require (
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 )
-
-replace github.com/standards-lab/sqlate => ../
