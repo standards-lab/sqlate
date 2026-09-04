@@ -7,6 +7,8 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.1.1] - 2026-09-04
+
 ### Added
 
 - `Dialect.ServerVersion`, the statement an administrative layer runs to read the engine's
