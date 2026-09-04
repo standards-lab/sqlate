@@ -7,6 +7,8 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.1.0] - 2026-09-04
+
 The first release of the SQL templating library, created from the `v1.data.sql.prototype`
 experiment's library packages.
 
@@ -28,3 +30,6 @@ experiment's library packages.
   `StandardCatalog`, and the protocol's error types.
 - `sqltest`, the scripted `database/sql` driver every consumer's unit tier runs over: `Open`,
   `Recorder`, `Response`, and the stub `Dialect`.
+
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.1.0...HEAD
+[v0.1.0]: https://github.com/standards-lab/sqlate/releases/tag/v0.1.0
