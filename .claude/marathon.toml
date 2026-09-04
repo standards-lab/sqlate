@@ -1,0 +1,8 @@
+# Project kind: this repository holds production Go source.
+[project]
+kind = "code"
+
+# Remote platform and the command that publishes a finished branch.
+[remote]
+platform = "github"
+publish = "gh pr create"

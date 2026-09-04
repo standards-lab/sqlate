@@ -1,0 +1,17 @@
+{
+  "plansDirectory": "./.claude/plans",
+  "permissions": {
+    "allow": [
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(go work:*)",
+      "Bash(go fmt:*)",
+      "Bash(go doc:*)",
+      "Bash(go list:*)",
+      "Bash(mise run:*)",
+      "Bash(mise tasks:*)",
+      "Skill(marathon:marathon)"
+    ]
+  }
+}
