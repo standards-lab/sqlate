@@ -22,6 +22,12 @@ func TestDialect_NameAndPlaceholder(t *testing.T) {
 	}
 }
 
+func TestDialect_ServerVersion(t *testing.T) {
+	if got := (postgres.Dialect{}).ServerVersion(); got != "SELECT version()" {
+		t.Errorf("ServerVersion() = %q", got)
+	}
+}
+
 func TestMapError_ClassifiesConstraints(t *testing.T) {
 	d := postgres.Dialect{}
 	cases := map[string]struct {

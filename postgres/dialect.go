@@ -13,7 +13,8 @@ import (
 )
 
 // Dialect is the PostgreSQL dialect: sqlate.Dialect plus the sqlate.Locker
-// capability. It has no fields; the zero value is the dialect.
+// capability and the server-version statement. It has no fields; the zero
+// value is the dialect.
 type Dialect struct{}
 
 var (
@@ -57,6 +58,12 @@ func (Dialect) MapError(err error) error {
 	}
 	return &sqlate.ConstraintError{Constraint: pgErr.ConstraintName, Class: class, Err: err}
 }
+
+// ServerVersion returns the statement an administrative read runs to learn
+// the server's version: one row, one text column. Every engine spells it
+// differently, so the dialect carries it as a capability an administrative
+// layer discovers by type assertion.
+func (Dialect) ServerVersion() string { return "SELECT version()" }
 
 // Lock takes the session-level advisory lock for name on conn, blocking
 // until it is granted or ctx ends. The name enters the engine's 32-bit key
