@@ -205,7 +205,7 @@ func TestUp_NonTransactionalFailureLeavesTheRowDirty(t *testing.T) {
 	err := m.Up(context.Background())
 	var dirty *migrate.DirtyError
 	if !errors.As(err, &dirty) || dirty.Version != 2 || !errors.Is(err, migrate.ErrDirty) || !errors.Is(err, errDriver) {
-		t.Fatalf("Up = %v, want a DirtyError for version 2 carrying the engine error", err)
+		t.Fatalf("Up = %v, want a DirtyError for version 2 wrapping the engine error", err)
 	}
 	assertOps(t, rec,
 		sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery,

@@ -1,10 +1,10 @@
 //go:build integration
 
 // The live-engine acceptance proofs run against the PostgreSQL named by
-// SQLATE_DSN — the compose stack, `mise run db-up` then
-// `mise run test-integration` — and skip when it is unset. They are not
+// SQLATE_DSN (the compose stack: `mise run db-up`, then
+// `mise run integration`) and skip when it is unset. They are not
 // part of the unit tier: each is a proof the engine alone can give,
-// demonstrated in the session that lands the claim.
+// demonstrated in the session that establishes the claim.
 package postgres_test
 
 import (

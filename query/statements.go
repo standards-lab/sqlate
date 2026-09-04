@@ -15,10 +15,10 @@ import (
 	"github.com/standards-lab/sqlate/header"
 )
 
-// Statements is a domain's statements, compiled from one directory: the inventory
-// the verification step and the management surface walk, keyed by file
-// name. It is not a registry; a domain fetches each statement once at
-// wiring.
+// Statements is a domain's statements, compiled from one directory: the
+// inventory the verification step and an administrative listing walk,
+// keyed by file name. It is not a registry; a domain fetches each statement
+// once, in its constructor.
 type Statements struct {
 	statements map[string]Statement
 }
@@ -28,7 +28,7 @@ type Statements struct {
 // parameters against d's placeholders. A file without a header, with an
 // unknown declaration, with a header the grammar rejects, or with an include
 // the catalog cannot resolve is a load error naming the file; the domain
-// treats it as a wiring defect.
+// treats it as a defect in its constructor.
 func (c *Catalog) Compile(fsys fs.FS, dir string, d sqlate.Dialect) (*Statements, error) {
 	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {
@@ -52,7 +52,7 @@ func (c *Catalog) Compile(fsys fs.FS, dir string, d sqlate.Dialect) (*Statements
 	return stmts, nil
 }
 
-// MustCompile is Compile for wiring functions, where a
+// MustCompile is Compile for constructors and composition roots, where a
 // load error is a defect.
 func (c *Catalog) MustCompile(fsys fs.FS, dir string, d sqlate.Dialect) *Statements {
 	stmts, err := c.Compile(fsys, dir, d)
@@ -63,7 +63,7 @@ func (c *Catalog) MustCompile(fsys fs.FS, dir string, d sqlate.Dialect) *Stateme
 }
 
 // Statement returns the statement named by its file's base name; a missing
-// name is a wiring defect and panics.
+// name is a defect in the caller's constructor and panics.
 func (s *Statements) Statement(name string) Statement {
 	st, ok := s.statements[name]
 	if !ok {
@@ -104,8 +104,8 @@ type Verifier interface {
 	Verify(ctx context.Context, db sqlate.Session) error
 }
 
-// Verify runs every verifier and joins their failures; startup and the
-// management surface call it with the same arguments.
+// Verify runs every verifier and joins their failures; startup and an
+// administrative check call it with the same arguments.
 func Verify(ctx context.Context, db sqlate.Session, vs ...Verifier) error {
 	var errs []error
 	for _, v := range vs {
@@ -118,9 +118,10 @@ func Verify(ctx context.Context, db sqlate.Session, vs ...Verifier) error {
 
 // parse reads the header, expands the body's pattern includes, and rewrites
 // its parameters; the engine receives the body, less a trailing semicolon
-// so the statement composes as a derived table. The header grammar, from the sketch: tier required
-// (standard | native); native required when the tier is native, the reach
-// and the port as free text; transaction optional (required); key optional,
+// so the statement composes as a derived table. The header grammar: tier
+// required (standard | native); native required when the tier is native,
+// the engine feature used and the port as free text; transaction optional
+// (required); key optional,
 // naming a field; field repeated, "<name> <type>", the name an identifier.
 func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, error) {
 	st := Statement{name: name, dialect: d, catalog: c}
@@ -147,7 +148,7 @@ func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, error) 
 	}
 	st.native, _ = h.Get("native")
 	if st.tier == TierNative && st.native == "" {
-		return st, errors.New("a native statement declares its reach and port in a native declaration")
+		return st, errors.New("a native statement declares the engine feature it uses and the port in a native declaration")
 	}
 	if st.tier == TierStandard && st.native != "" {
 		return st, errors.New("a standard statement has no native declaration")

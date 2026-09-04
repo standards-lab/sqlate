@@ -1,7 +1,7 @@
 # The engine's sqlint.toml. A consumer that configures this engine reads
 # [export]: the native forms a standard-tier file must not use, each a
 # regular expression (RE2) under the name a finding reports, so the engine
-# states in what position a spelling counts — word boundaries, case — and
+# states in what position a spelling counts (word boundaries, case) and
 # not just which spelling. The lint matches code only: string literals and
 # comments are stripped first. PostgreSQL is the standard spelling of every
 # library pattern, so it supplies no overlay.

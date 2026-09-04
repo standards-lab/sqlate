@@ -10,7 +10,7 @@ import (
 // hazard, a transaction-scoped lock outside one, made loud.
 var ErrTransactionRequired = errors.New("query: statement requires a transaction")
 
-// ArgumentError reports a parameter the Args did not carry. It is a
+// ArgumentError reports a parameter the Args did not include. It is a
 // programming error in the caller, not request input, and matches no
 // request sentinel.
 type ArgumentError struct {
@@ -34,7 +34,7 @@ func (e *ArgumentError) Error() string {
 var ErrDirectives = errors.New("query: invalid declarations")
 
 // FieldUse names the declaration position where a contract field was
-// referenced, carried by UnknownFieldError.
+// referenced; UnknownFieldError records it.
 type FieldUse string
 
 const (
@@ -43,8 +43,8 @@ const (
 )
 
 // UnknownFieldError reports a sort or filter naming a field the projection
-// does not declare. It is the field contract's boundary: the name never
-// reaches the SQL.
+// does not declare. It is the field contract's boundary: the name is never
+// written into the SQL.
 type UnknownFieldError struct {
 	Field string
 	Use   FieldUse
@@ -56,8 +56,8 @@ func (e *UnknownFieldError) Error() string {
 
 func (e *UnknownFieldError) Unwrap() error { return ErrDirectives }
 
-// UnknownOperatorError reports a filter carrying an operator the vocabulary
-// does not define.
+// UnknownOperatorError reports a filter whose operator the vocabulary does
+// not define.
 type UnknownOperatorError struct {
 	Op Op
 }
@@ -71,7 +71,7 @@ func (e *UnknownOperatorError) Unwrap() error { return ErrDirectives }
 // InvalidValueError reports a filter value the projection or the engine
 // could not use: a value of the wrong shape for its operator, named by
 // field, or a bound value the engine rejected for the field's type, in
-// which case Field is empty and Err carries the engine's reason.
+// which case Field is empty and Err is the engine's error.
 type InvalidValueError struct {
 	Field string
 	Err   error

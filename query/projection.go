@@ -24,7 +24,7 @@ type Sort struct {
 }
 
 // Op is a filter declaration's operator. The values are short strings so a
-// read contract can carry them verbatim.
+// read contract can state them verbatim.
 type Op string
 
 const (
@@ -42,7 +42,7 @@ const (
 
 // Filter is one filter declaration: a contract field, an operator, and the
 // value. OpIsNull and OpIsNotNull ignore Value; OpIn requires a []any. A
-// value binds as given — a request's text included — cast to the field's
+// value binds as given, a request's text included, cast to the field's
 // declared type, so the engine parses it and a value it cannot read is an
 // InvalidValueError.
 type Filter struct {
@@ -62,13 +62,13 @@ type Directives struct {
 
 // Projection is a base statement bound to a scan function and its declared
 // field contract: the typed handle for a collection read. The collection
-// pattern wraps the base as a derived table, so the base may be any query —
-// a recursive CTE, a join tree — and the only names a declaration can
+// pattern wraps the base as a derived table, so the base may be any query,
+// a recursive CTE or a join tree, and the only names a declaration can
 // reference are the base's output columns the header declared.
 //
-// Every piece of the composed text is a pattern of the library's namespace
+// Every part of the composed text is a pattern of the library's namespace
 // in the base's catalog, as the library published it or an engine overlaid it;
-// this code holds only what cannot be text: the whitelist check against
+// this code does only what cannot be text: the whitelist check against
 // the header, list arity, and parameter positions.
 type Projection[T any] struct {
 	base   Statement
@@ -257,9 +257,9 @@ func (p Projection[T]) order(sorts []Sort) (string, error) {
 	return p.base.catalog.render("order", map[string]string{"terms": strings.Join(terms, ", ")}), nil
 }
 
-// engine classifies a query failure: a data exception is the request's
-// fault — a value the engine could not read as the field's type — and
-// becomes an InvalidValueError; anything else passes through mapped.
+// engine classifies a query failure: a data exception (a value the engine
+// could not read as the field's type) is the request's fault and becomes
+// an InvalidValueError; anything else is returned mapped.
 func (p Projection[T]) engine(err error) error {
 	if errors.Is(err, sqlate.ErrInvalidValue) {
 		return &InvalidValueError{Err: err}

@@ -10,12 +10,12 @@
 // production would reject: a statement with no response scripted for it
 // fails (ErrUnscripted), an argument count that does not match the
 // statement's $N placeholders fails (ErrArguments), and a scripted response
-// that does not fit its call — rows for an exec, an affected count for a
-// query, a row of the wrong width or holding a non-driver.Value — fails
+// that does not fit its call (rows for an exec, an affected count for a
+// query, a row of the wrong width or containing a non-driver.Value) fails
 // (ErrScript). The one leniency it keeps is the argument set: a real driver
 // rejects a value it cannot encode, and this one records it.
 //
 // [Open] returns the pool and its [Recorder]; [Dialect] is the stub dialect
-// whose MapError wraps every error in a [MappedError], so a test proves an
-// error crossed the mapping boundary with one errors.As.
+// whose MapError wraps every error in a [MappedError], so a test proves
+// with one errors.As that an error passed through MapError.
 package sqltest

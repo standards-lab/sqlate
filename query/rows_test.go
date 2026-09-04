@@ -79,7 +79,7 @@ func TestExec_BindsByNameInPositionOrder(t *testing.T) {
 		t.Errorf("missing argument: err = %v", err)
 	}
 	if len(rec.Calls()) != 1 {
-		t.Error("a missing argument reached the driver")
+		t.Error("a missing argument was sent to the driver")
 	}
 }
 
@@ -158,7 +158,7 @@ func TestExec_TransactionRequired(t *testing.T) {
 		t.Fatalf("Exec on the pool = %v, want ErrTransactionRequired", err)
 	}
 	if len(rec.Calls()) != 0 {
-		t.Error("the statement reached the driver outside a transaction")
+		t.Error("the statement was sent to the driver outside a transaction")
 	}
 	_, err := db.Transact(ctx, func(tx *sqlate.Tx) (struct{}, error) {
 		_, err := lock.Exec(ctx, tx, query.Args{"key": int64(1)})

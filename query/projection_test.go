@@ -164,11 +164,11 @@ func TestList_DirectiveErrorsUnwrapToErrDirectivesBeforeAnyIO(t *testing.T) {
 		t.Errorf("unknown sort = %v", err)
 	}
 	if len(rec.Calls()) != 0 {
-		t.Errorf("rejected declarations reached the driver: %v", rec.Ops())
+		t.Errorf("rejected declarations were sent to the driver: %v", rec.Ops())
 	}
 }
 
-// dataException is a driver error carrying an SQLSTATE, the shape an
+// dataException is a driver error that exposes an SQLSTATE, the shape an
 // engine's dialect classifies.
 type dataException struct{ code, msg string }
 

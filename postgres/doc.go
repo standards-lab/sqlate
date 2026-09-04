@@ -1,5 +1,5 @@
 // Package postgres is the PostgreSQL dialect of sqlate: how the engine
-// spells the nth bind parameter, how its driver's errors classify, and the
+// renders the nth bind parameter, how its driver's errors classify, and the
 // session-level advisory lock the migrate protocol takes. It is a
 // sub-module so the driver it names, pgx, enters a consumer's build only
 // through this import, made once at the composition root; a consumer opens
@@ -8,13 +8,13 @@
 // # Error classification
 //
 // [Dialect.MapError] reads the SQLSTATE the driver exposes. Class 22, a
-// data exception — invalid text for a type, a value out of range, a bad
-// datetime — becomes sqlate.ErrInvalidValue wrapping the driver error, the
+// data exception (invalid text for a type, a value out of range, a bad
+// datetime), becomes sqlate.ErrInvalidValue wrapping the driver error, the
 // engine-side half of request validation. Class 23 constraint violations
-// become a sqlate.ConstraintError carrying the class sentinel and the
-// violated constraint's name: 23505 unique, 23503 foreign key, 23514 check,
-// 23502 not null. Everything else, sql.ErrNoRows included, passes through
-// unchanged with the driver error always reachable.
+// become a sqlate.ConstraintError whose fields are the class sentinel, the
+// driver error, and the violated constraint's name: 23505 unique, 23503 foreign key, 23514 check,
+// 23502 not null. MapError returns everything else unchanged, sql.ErrNoRows
+// included, and errors.As finds the driver error through every wrap.
 //
 // # Locking
 //

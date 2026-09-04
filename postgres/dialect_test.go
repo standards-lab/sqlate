@@ -41,11 +41,11 @@ func TestMapError_ClassifiesConstraints(t *testing.T) {
 		}
 		ce, ok := errors.AsType[*sqlate.ConstraintError](err)
 		if !ok || ce.Constraint != "uq_organization_parent_code" {
-			t.Errorf("%s: error = %v, want ConstraintError carrying the constraint name", name, err)
+			t.Errorf("%s: error = %v, want a ConstraintError with the constraint name", name, err)
 			continue
 		}
-		if reached, ok := errors.AsType[*pgconn.PgError](err); !ok || reached != pgErr {
-			t.Errorf("%s: the driver error is no longer reachable through the wrap", name)
+		if found, ok := errors.AsType[*pgconn.PgError](err); !ok || found != pgErr {
+			t.Errorf("%s: errors.As no longer finds the driver error through the wrap", name)
 		}
 	}
 }
@@ -55,10 +55,10 @@ func TestMapError_DataExceptionIsErrInvalidValue(t *testing.T) {
 	pgErr := &pgconn.PgError{Code: "22P02", Message: `invalid input syntax for type uuid: "nope"`}
 	err := d.MapError(pgErr)
 	if !errors.Is(err, sqlate.ErrInvalidValue) || !strings.Contains(err.Error(), "invalid input syntax") {
-		t.Errorf("class 22 = %v, want ErrInvalidValue carrying the engine error", err)
+		t.Errorf("class 22 = %v, want ErrInvalidValue wrapping the engine error", err)
 	}
-	if reached, ok := errors.AsType[*pgconn.PgError](err); !ok || reached != pgErr {
-		t.Error("the driver error is no longer reachable through the wrap")
+	if found, ok := errors.AsType[*pgconn.PgError](err); !ok || found != pgErr {
+		t.Error("errors.As no longer finds the driver error through the wrap")
 	}
 }
 

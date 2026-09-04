@@ -14,8 +14,8 @@ import (
 )
 
 // The pattern catalog: reusable protocol SQL, authored as files, each
-// declaring its tier, published under a namespace. A pattern's body holds
-// slots in the {{ }} syntax; a pattern holds slots only and never includes
+// declaring its tier, published under a namespace. A pattern's body contains
+// slots in the {{ }} syntax; a pattern contains slots only and never includes
 // another, so it reads on its own. Two uses:
 //
 //   - at request time, the collection read composes count, page, and one
@@ -42,8 +42,8 @@ var (
 	namespace = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 )
 
-// Namespace is the library's own namespace: every include is qualified —
-// {{> sql.guard_where}} — so a pattern's origin is visible in the statement
+// Namespace is the library's own namespace: every include is qualified, as
+// {{> sql.guard_where}}, so a pattern's origin is visible in the statement
 // and two sources cannot collide. A registrant aliases it with As, the way
 // an import is aliased, as the last resort against a collision.
 const Namespace = "sql"
@@ -83,7 +83,7 @@ func Publish(namespace string, fsys fs.FS, dir string) Source {
 
 // Patterns is the library's own patterns under Namespace: the collection
 // read's request-time patterns and the protocol patterns a statement
-// includes. A catalog that serves a Projection holds it, under Namespace or
+// includes. A catalog that serves a Projection includes it, under Namespace or
 // an alias.
 func Patterns() Source {
 	s := Publish(Namespace, patternFiles, "patterns")
@@ -102,9 +102,9 @@ func (s Source) As(namespace string) Source {
 }
 
 // Overlay replaces patterns of the source by name with the files under dir
-// in fsys: an engine supplies its own paging. The replacement is explicit —
-// a file that names no pattern of the source, or declares different slots,
-// is a catalog error — so an overlay can only respell what the source
+// in fsys: an engine supplies its own paging. The replacement is explicit (a
+// file that names no pattern of the source, or declares different slots,
+// is a catalog error), so an overlay can only respell what the source
 // already defines. A later overlay wins over an earlier one.
 func (s Source) Overlay(fsys fs.FS, dir string) Source {
 	overlays := make([]layer, 0, len(s.overlays)+1)
@@ -260,7 +260,7 @@ func readLayer(ns string, l layer) (map[string]pattern, error) {
 		}
 		p.native, _ = h.Get("native")
 		if p.tier == TierNative && p.native == "" {
-			fail(e.Name(), errors.New("a native pattern declares its reach and port in a native declaration"))
+			fail(e.Name(), errors.New("a native pattern declares the engine feature it uses and the port in a native declaration"))
 			continue
 		}
 		if p.tier == TierStandard && p.native != "" {
@@ -269,7 +269,7 @@ func readLayer(ns string, l layer) (map[string]pattern, error) {
 		}
 		p.text = strings.TrimRight(string(text)[h.End():], "\n")
 		if bare.MatchString(p.text) {
-			fail(e.Name(), errors.New("a pattern holds slots only and includes no pattern"))
+			fail(e.Name(), errors.New("a pattern contains slots only and includes no pattern"))
 			continue
 		}
 		for _, m := range slot.FindAllStringSubmatch(p.text, -1) {
@@ -318,7 +318,7 @@ func (c *Catalog) lookup(ns, name string) (pattern, bool) {
 // overlay, not a request error, and panics.
 func (c *Catalog) render(name string, fill map[string]string) string {
 	if c.builtin == "" {
-		panic("query: the catalog holds no library source; a projection needs the library's patterns")
+		panic("query: the catalog contains no library source; a projection needs the library's patterns")
 	}
 	p, ok := c.lookup(c.builtin, name)
 	if !ok {
@@ -335,9 +335,9 @@ func (c *Catalog) render(name string, fill map[string]string) string {
 }
 
 // expand splices {{> namespace.name}} includes into a statement body, so a
-// statement carries a pattern's text as if authored there. An unqualified
+// statement contains a pattern's text as if authored there. An unqualified
 // include, an unknown namespace or pattern, or a native pattern in a
-// standard-tier statement is a load error naming it. Patterns hold no
+// standard-tier statement is a load error naming it. Patterns contain no
 // includes, so one pass expands everything.
 func (c *Catalog) expand(body string, tier Tier) (string, error) {
 	var err error

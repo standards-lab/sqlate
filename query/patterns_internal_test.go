@@ -16,7 +16,7 @@ func TestPatterns_EveryPatternDeclaresItsTierAndSlots(t *testing.T) {
 		t.Errorf("collection slots = %v", p.slots)
 	}
 	if n := len(c.namespaces[Namespace]); n != 22 {
-		t.Errorf("builtin holds %d patterns", n)
+		t.Errorf("builtin contains %d patterns", n)
 	}
 }
 

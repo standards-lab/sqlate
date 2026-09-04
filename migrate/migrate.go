@@ -44,8 +44,8 @@ type Migrator struct {
 
 var tableName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
-// New validates the set — versions positive and strictly increasing, names
-// and up texts present — and prepares the migrator: the lock capability and
+// New validates the set (versions positive and strictly increasing, names
+// and up texts present) and prepares the migrator: the lock capability and
 // the Catalog are taken from the dialect when it has them. It performs no
 // I/O.
 func New(db *sqlate.DB, migrations []Migration, opts Options) (*Migrator, error) {
@@ -115,7 +115,7 @@ func (m *Migrator) Version(ctx context.Context) (Version, error) {
 
 // Verify checks, without the lock, that the history is a clean, complete
 // prefix of the set: a dirty row is a *DirtyError, a row the set does not
-// carry is an *UnknownVersionError, and unapplied migrations are a
+// contain is an *UnknownVersionError, and unapplied migrations are a
 // *PendingError.
 func (m *Migrator) Verify(ctx context.Context) error {
 	ok, err := m.tableExists(ctx, m.db)
@@ -332,8 +332,8 @@ func (m *Migrator) revert(ctx context.Context, conn *sql.Conn, mig Migration) er
 // inTx runs fn in a transaction on the pinned connection, rolling back on
 // error and mapping the failure. Once ctx has ended, database/sql rolls the
 // transaction back itself and the driver discards the connection, so the
-// explicit rollback's result carries nothing and is not joined; nor is
-// ErrTxDone, the same fact reported when that rollback lands first.
+// explicit rollback's result reports nothing new and is not joined; nor is
+// ErrTxDone, the same fact reported when that rollback runs first.
 func (m *Migrator) inTx(ctx context.Context, conn *sql.Conn, fn func(*sql.Tx) error) error {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -357,8 +357,8 @@ type row struct {
 
 // querier is the read half of the session, satisfied by *sqlate.DB and by a
 // pinned *sql.Conn. Single-row reads go through QueryContext because the
-// seam deliberately leaves QueryRowContext out: *sql.Row defers its error to
-// Scan, where nothing can map it.
+// Session interface deliberately leaves QueryRowContext out: *sql.Row
+// defers its error to Scan, where nothing can map it.
 type querier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }

@@ -9,9 +9,9 @@ import (
 )
 
 // A parameter is written {{name}}, or {{name:type}} to bind it through
-// CAST to an SQL type — standard or the engine's own, as the file's tier
-// declares; the type is the author's and reaches the engine verbatim, where
-// Verify catches a name the engine does not know. {{name...}} and
+// CAST to an SQL type, standard or the engine's own as the file's tier
+// declares; the type is the author's and is written into the SQL verbatim,
+// where Verify catches a name the engine does not know. {{name...}} and
 // {{name...:type}} expand: the argument is a non-empty slice, and the
 // parameter renders as one placeholder per element, so an IN list binds
 // as values and never as text. Whitespace inside the braces is allowed.

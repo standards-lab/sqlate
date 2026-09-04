@@ -53,7 +53,7 @@ func (e *PendingError) Error() string {
 func (e *PendingError) Unwrap() error { return ErrPending }
 
 // UnknownVersionError reports an applied row the migration set does not
-// carry at that position: a version the set lacks, or a name that differs.
+// contain at that position: a version the set lacks, or a name that differs.
 type UnknownVersionError struct {
 	Version int
 	Name    string

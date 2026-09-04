@@ -41,7 +41,7 @@ func (StandardCatalog) HistoryExists(param string) string {
 
 // statements are the texts one migrator runs, rendered once with the
 // dialect's placeholders: the catalog pair from the Catalog, the rest
-// standard DML. Booleans travel as parameters, never as literals.
+// standard DML. Booleans bind as parameters, never as literals.
 type statements struct {
 	create, exists, all, head, insert, setDirty, del, delAbove string
 }

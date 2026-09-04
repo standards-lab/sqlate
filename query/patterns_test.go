@@ -116,7 +116,7 @@ func TestCompile_IncludesAcrossNamespacesAndAliases(t *testing.T) {
 		t.Errorf("edit params = %v", got)
 	}
 	if stmts.Statement("edit").Catalog() == nil {
-		t.Error("the statement carries no catalog")
+		t.Error("Catalog() returned nil")
 	}
 	if _, err := query.MustCatalog(query.Patterns().As("lib"), app).Compile(fstest.MapFS{
 		"sql/s.sql": {Data: []byte("--| tier: standard\nUPDATE t SET a = 1 WHERE {{> sql.guard_where}}")},

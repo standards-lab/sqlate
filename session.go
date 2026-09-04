@@ -6,10 +6,10 @@ import (
 	"fmt"
 )
 
-// Dialect is what the library needs from an engine: its name, how it spells
+// Dialect is what the library needs from an engine: its name, how it renders
 // the nth bind parameter, and how its driver's errors classify. An engine
 // sub-module implements it; a provider library's dialect satisfies it
-// structurally. Capabilities beyond it — Locker, ErrorMapper — are separate
+// structurally. Capabilities beyond it, Locker and ErrorMapper, are separate
 // interfaces a protocol asserts.
 type Dialect interface {
 	// Name identifies the engine.
@@ -18,7 +18,7 @@ type Dialect interface {
 	// postgres, "@p1" for a future mssql).
 	Placeholder(n int) string
 	// MapError translates a driver error into the library's sentinels;
-	// sql.ErrNoRows always flows through unchanged.
+	// it returns sql.ErrNoRows unchanged.
 	MapError(err error) error
 }
 
@@ -34,16 +34,16 @@ type Session interface {
 }
 
 // ErrorMapper is the capability both sessions expose for errors that arise
-// after a call returns — rows.Err and Scan — which the seam cannot see. A
-// runner type-asserts it on its Session.
+// after a call returns, from rows.Err and Scan, which the session's methods
+// cannot see. A runner type-asserts it on its Session.
 type ErrorMapper interface {
 	MapError(err error) error
 }
 
 // Locker is the dialect capability a concurrent-starter protocol takes: a
 // session-scoped exclusive lock on a dedicated connection, identified by
-// name. Locks are named, never numbered — <owner>.<structure>, such as
-// migrate.schema_version or organization.tree — and the dialect maps the
+// name. Locks are named, never numbered (<owner>.<structure>, such as
+// migrate.schema_version or organization.tree), and the dialect maps the
 // name to its engine's lock space. A provider without the capability cannot
 // serialize migrations across processes.
 type Locker interface {
@@ -51,8 +51,8 @@ type Locker interface {
 	Unlock(ctx context.Context, conn *sql.Conn, name string) error
 }
 
-// DB is the pool session over a plain *sql.DB. Lifecycle — opening,
-// readiness, closing — belongs to whoever owns the pool; DB adds mapping,
+// DB is the pool session over a plain *sql.DB. Lifecycle (opening,
+// readiness, closing) belongs to whoever owns the pool; DB adds mapping,
 // prepare, options on Begin, and pinned connections.
 type DB struct {
 	pool    *sql.DB
@@ -67,8 +67,8 @@ var (
 )
 
 // Wrap builds the session over pool with dialect, the engine's or a
-// capability-adding wrapper of it. Nil arguments are a wiring defect and
-// panic.
+// capability-adding wrapper of it. Nil arguments are a defect in the
+// composition root and panic.
 func Wrap(pool *sql.DB, dialect Dialect) *DB {
 	if pool == nil || dialect == nil {
 		panic("sqlate: Wrap requires a pool and a dialect")
@@ -87,7 +87,7 @@ func (d *DB) MapError(err error) error {
 	return d.dialect.MapError(err)
 }
 
-// Conn pins one connection for a protocol that needs session scope — a
+// Conn pins one connection for a protocol that needs session scope: a
 // session-level lock, a run of non-transactional DDL. The caller closes it.
 func (d *DB) Conn(ctx context.Context) (*sql.Conn, error) {
 	conn, err := d.pool.Conn(ctx)

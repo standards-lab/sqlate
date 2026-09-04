@@ -122,7 +122,7 @@ func TestLive_DirtyStateAndForce(t *testing.T) {
 	err := m.Up(ctx)
 	var dirty *migrate.DirtyError
 	if !errors.As(err, &dirty) || dirty.Version != 3 || !errors.Is(err, sqlate.ErrUniqueViolation) {
-		t.Fatalf("Up = %v, want DirtyError{3} carrying the unique violation", err)
+		t.Fatalf("Up = %v, want DirtyError{3} wrapping the unique violation", err)
 	}
 	if exists, valid := indexValid(t, db, "live_dirty_uq"); !exists || valid {
 		t.Fatalf("orphan: exists=%v valid=%v, want an INVALID index left behind", exists, valid)
@@ -315,7 +315,7 @@ func TestLive_CancelledContext(t *testing.T) {
 	}
 	t.Logf("cancelled run reported: %v", err)
 	if msg := err.Error(); strings.Contains(msg, "rollback") || strings.Contains(msg, "unlock") || errors.Is(err, postgres.ErrLockNotHeld) {
-		t.Errorf("the cancellation carried connection noise: %v", err)
+		t.Errorf("the cancellation reported connection noise: %v", err)
 	}
 	if v, verr := m.Version(context.Background()); verr != nil || v.Version != 0 {
 		t.Errorf("after cancellation: head = %+v, %v, want nothing recorded", v, verr)

@@ -16,8 +16,8 @@ const (
 	// TierStandard is standard SQL: it runs on every engine the standard
 	// covers with no port.
 	TierStandard Tier = "standard"
-	// TierNative uses one engine's reach; the native note names the reach
-	// and the port.
+	// TierNative uses one engine's own feature; the native declaration names
+	// the feature and the port.
 	TierNative Tier = "native"
 )
 
@@ -36,9 +36,9 @@ type Args map[string]any
 
 // Statement is one authored file, compiled: its text with the dialect's
 // placeholders and its includes spliced, its parameters in position order,
-// and its header. It carries the catalog it compiled against as it carries
-// its dialect, so a projection over it composes from the same patterns. It
-// is a value, fetched by name once at wiring and held in a typed handle.
+// and its header. It references the catalog it compiled against and its dialect,
+// so a projection over it composes from the same patterns. It is a value,
+// fetched by name once in a constructor and held in a typed handle.
 type Statement struct {
 	name       string
 	compiled   compiled
@@ -69,8 +69,8 @@ func (st Statement) Text() string { return st.compiled.text }
 // Tier is the declared tier.
 func (st Statement) Tier() Tier { return st.tier }
 
-// Native is the native note: the reach used and the port, for a native
-// statement; empty for a standard one.
+// Native is the native declaration: the engine feature used and the port,
+// for a native statement; empty for a standard one.
 func (st Statement) Native() string { return st.native }
 
 // TransactionRequired reports the "-- transaction: required" header.
@@ -93,7 +93,8 @@ func (st Statement) Scan[T any](scan ScanFunc[T]) Rows[T] {
 
 // Project binds the statement, a projection base, to scan: the typed
 // handle for the collection read. A base without a key or field contract,
-// or one that binds parameters of its own, is a wiring defect and panics.
+// or one that binds parameters of its own, is a defect in the caller's
+// constructor and panics.
 func (st Statement) Project[T any](scan ScanFunc[T]) Projection[T] {
 	return newProjection(st, scan)
 }
@@ -180,9 +181,9 @@ func (st Statement) bind(s sqlate.Session, args Args) (string, []any, error) {
 	return text, values, nil
 }
 
-// mapErr routes an error that arose after a call returned — rows.Err, Scan,
-// RowsAffected — through the session's mapper, the path the seam cannot
-// cover itself.
+// mapErr routes an error that arose after a call returned (rows.Err, Scan,
+// RowsAffected) through the session's mapper, since the session's methods
+// cannot see it.
 func mapErr(s sqlate.Session, err error) error {
 	if err == nil {
 		return nil

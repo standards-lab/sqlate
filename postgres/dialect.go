@@ -13,7 +13,7 @@ import (
 )
 
 // Dialect is the PostgreSQL dialect: sqlate.Dialect plus the sqlate.Locker
-// capability. It carries no state; the zero value is the dialect.
+// capability. It has no fields; the zero value is the dialect.
 type Dialect struct{}
 
 var (
@@ -29,7 +29,7 @@ func (Dialect) Placeholder(n int) string { return "$" + strconv.Itoa(n) }
 
 // MapError classifies a driver error by its SQLSTATE: class 22 as
 // sqlate.ErrInvalidValue with the engine's message reachable, the four
-// class-23 constraint violations as a sqlate.ConstraintError carrying the
+// class-23 constraint violations as a sqlate.ConstraintError with the
 // constraint name, and everything else unchanged. nil stays nil.
 func (Dialect) MapError(err error) error {
 	if err == nil {

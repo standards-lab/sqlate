@@ -32,8 +32,8 @@ type Call struct {
 
 // Response scripts the outcome of the next exec or query call: an error, or
 // the affected count (exec) or the columns and rows (query). An exec
-// response carries no columns or rows and a query response no affected
-// count; every row is as wide as Columns and holds driver.Value types only,
+// response has no columns or rows and a query response no affected
+// count; every row is as wide as Columns and contains driver.Value types only,
 // as a real driver returns them. Prepare, begin, commit, and rollback do not
 // consume responses; their failures are set on the Recorder directly.
 type Response struct {
@@ -164,7 +164,7 @@ func (resp Response) fits(op Op) error {
 			}
 			for j, v := range row {
 				if !driver.IsValue(v) {
-					return fmt.Errorf("row %d column %s holds %T, not a driver.Value", i, resp.Columns[j], v)
+					return fmt.Errorf("row %d column %s is %T, not a driver.Value", i, resp.Columns[j], v)
 				}
 			}
 		}
