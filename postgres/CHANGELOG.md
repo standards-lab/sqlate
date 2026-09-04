@@ -7,6 +7,13 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.1.1] - 2026-09-04
+
+### Added
+
+- `Dialect.ServerVersion`, the statement an administrative layer runs to read the engine's
+  version (`SELECT version()`), carried as a capability beside `Lock` and `Unlock`.
+
 ## [v0.1.0] - 2026-09-04
 
 The first release of the PostgreSQL dialect, against `github.com/standards-lab/sqlate v0.1.0`.

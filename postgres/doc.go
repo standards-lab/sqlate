@@ -1,6 +1,7 @@
 // Package postgres is the PostgreSQL dialect of sqlate: how the engine
-// renders the nth bind parameter, how its driver's errors classify, and the
-// session-level advisory lock the migrate protocol takes. It is a
+// renders the nth bind parameter, how its driver's errors classify, the
+// session-level advisory lock the migrate protocol takes, and the statement
+// that reads the server's version. It is a
 // sub-module so the driver it names, pgx, enters a consumer's build only
 // through this import, made once where it opens its pool; a consumer opens
 // its own pool with the driver and hands it to sqlate.Wrap with [Dialect].
@@ -24,6 +25,13 @@
 // never numbered; the lock belongs to the connection's session and outlives
 // any transaction on it. Unlock of a lock the session does not hold is
 // [ErrLockNotHeld].
+//
+// # Server version
+//
+// [Dialect.ServerVersion] returns SELECT version(), the statement an
+// administrative layer runs to report the engine's version. It is a
+// capability rather than part of sqlate.Dialect, since every engine spells
+// the read differently and the session layer never needs it.
 //
 // # Native forms
 //
