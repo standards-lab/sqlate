@@ -5,7 +5,10 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
+	"net"
 	"slices"
+	"syscall"
 	"testing"
 
 	"github.com/standards-lab/sqlate"
@@ -199,5 +202,73 @@ func TestConn_PinsAConnection(t *testing.T) {
 	}
 	if got := rec.SQL(sqltest.OpExec); len(got) != 1 {
 		t.Errorf("exec recorded %v", got)
+	}
+}
+
+// A connectivity failure is the driver's, not the engine's: a network error
+// from any session call, or driver.ErrBadConn after database/sql's retries,
+// wraps ErrConnectionFailed before the dialect sees it, on the pool session
+// and inside a transaction alike, with the driver's error still reachable.
+func TestMapError_ClassifiesConnectivityBeforeTheDialect(t *testing.T) {
+	ctx := context.Background()
+	refused := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
+	db, rec := wrap(t,
+		sqltest.Response{Err: refused}, // pool exec
+		sqltest.Response{Err: refused}, // pool query
+		sqltest.Response{Err: refused}, // tx exec
+		sqltest.Response{Err: refused}, // tx query
+	)
+	rec.FailPrepare = func(string) error { return refused }
+	rec.FailCommit = refused
+
+	connectionFailed := func(err error) {
+		t.Helper()
+		if !errors.Is(err, sqlate.ErrConnectionFailed) {
+			t.Errorf("not classified as ErrConnectionFailed: %v", err)
+		}
+		if _, mapped := errors.AsType[*sqltest.MappedError](err); mapped {
+			t.Errorf("the dialect saw a connectivity failure: %v", err)
+		}
+	}
+
+	_, err := db.ExecContext(ctx, "UPDATE t SET a = 1")
+	connectionFailed(err)
+	if !errors.Is(err, syscall.ECONNREFUSED) {
+		t.Errorf("driver error not reachable: %v", err)
+	}
+	_, err = db.QueryContext(ctx, "SELECT 1")
+	connectionFailed(err)
+	_, err = db.PrepareContext(ctx, "SELECT 1")
+	connectionFailed(err)
+	// database/sql retries ErrBadConn on fresh connections before surfacing
+	// it, so it is asserted through the mapper rather than the driver.
+	connectionFailed(db.MapError(fmt.Errorf("query: %w", driver.ErrBadConn)))
+
+	tx, err := db.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	_, err = tx.ExecContext(ctx, "x")
+	connectionFailed(err)
+	_, err = tx.QueryContext(ctx, "x")
+	connectionFailed(err)
+	_, err = tx.PrepareContext(ctx, "x")
+	connectionFailed(err)
+	connectionFailed(tx.Commit())
+}
+
+// A context deadline implements net.Error but reports the caller's budget,
+// not the engine's reachability: it is not a connectivity failure, and the
+// dialect maps it like any other error.
+func TestMapError_ContextDeadlineIsNotConnectivity(t *testing.T) {
+	db, _ := wrap(t)
+	for _, ctxErr := range []error{context.DeadlineExceeded, context.Canceled} {
+		err := db.MapError(fmt.Errorf("query: %w", ctxErr))
+		if errors.Is(err, sqlate.ErrConnectionFailed) {
+			t.Errorf("%v classified as ErrConnectionFailed", ctxErr)
+		}
+		if _, mapped := errors.AsType[*sqltest.MappedError](err); !mapped {
+			t.Errorf("%v did not reach the dialect: %v", ctxErr, err)
+		}
 	}
 }

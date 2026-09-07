@@ -21,8 +21,8 @@ func ReadOnly() TxOption {
 	return func(o *sql.TxOptions) { o.ReadOnly = true }
 }
 
-// Tx is one transaction, a Session whose errors are mapped on every call
-// and on commit.
+// Tx is one transaction, a Session whose errors are classified and mapped
+// on every call and on commit.
 type Tx struct {
 	tx      *sql.Tx
 	dialect Dialect
@@ -42,13 +42,9 @@ func (d *DB) Begin(ctx context.Context, opts ...TxOption) (*Tx, error) {
 	return &Tx{tx: tx, dialect: d.dialect}, nil
 }
 
-// MapError routes err through the dialect; nil stays nil.
-func (t *Tx) MapError(err error) error {
-	if err == nil {
-		return nil
-	}
-	return t.dialect.MapError(err)
-}
+// MapError classifies a connectivity failure as ErrConnectionFailed and
+// routes every other error through the dialect; nil stays nil.
+func (t *Tx) MapError(err error) error { return mapError(t.dialect, err) }
 
 func (t *Tx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
 	res, err := t.tx.ExecContext(ctx, query, args...)
