@@ -28,5 +28,6 @@ The first release of the PostgreSQL dialect, against `github.com/standards-lab/s
 - The integration tier: the migrate and query proofs against a live engine, behind the
   `integration` build tag.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/postgres/v0.1.0...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/postgres/v0.1.1...HEAD
+[v0.1.1]: https://github.com/standards-lab/sqlate/releases/tag/postgres/v0.1.1
 [v0.1.0]: https://github.com/standards-lab/sqlate/releases/tag/postgres/v0.1.0
