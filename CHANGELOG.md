@@ -7,6 +7,16 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.1.1] - 2026-09-07
+
+### Fixed
+
+- The session classifies a connectivity failure on every call, not only on `Conn` and
+  `Begin`: a network error or `driver.ErrBadConn` from exec, query, prepare, or commit wraps
+  `ErrConnectionFailed` before the dialect maps it, so a read against an unreachable engine
+  classifies the same way a transaction does. A context deadline or cancellation is not a
+  connectivity failure and stays the dialect's to map.
+
 ## [v0.1.0] - 2026-09-04
 
 The first release of the SQL templating library, created from the `v1.data.sql.prototype`
@@ -31,5 +41,6 @@ experiment's library packages.
 - `sqltest`, the scripted `database/sql` driver every consumer's unit tier runs over: `Open`,
   `Recorder`, `Response`, and the stub `Dialect`.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.1.1...HEAD
+[v0.1.1]: https://github.com/standards-lab/sqlate/compare/v0.1.0...v0.1.1
 [v0.1.0]: https://github.com/standards-lab/sqlate/releases/tag/v0.1.0

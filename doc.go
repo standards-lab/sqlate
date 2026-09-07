@@ -44,7 +44,10 @@
 // [ErrConnectionFailed] classifies a connectivity failure and
 // [ErrInvalidValue] a data exception, each wrapped in the dual form
 // fmt.Errorf("%w: %w", sentinel, err) so errors.Is classifies while the
-// driver's error stays recoverable. A dialect's MapError returns the four
+// driver's error stays recoverable. The session classifies connectivity
+// itself, before the dialect: a network error or driver.ErrBadConn from any
+// call means the engine never saw the statement, so the dialect's
+// vocabulary does not apply. A dialect's MapError returns the four
 // constraint classes ([ErrUniqueViolation], [ErrForeignKeyViolation],
 // [ErrCheckViolation], [ErrNotNullViolation]) inside a [ConstraintError],
 // with the constraint name when the driver exposes it. sql.ErrNoRows is

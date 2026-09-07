@@ -3,7 +3,10 @@ package sqlate
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"fmt"
+	"net"
 )
 
 // Dialect is what the library needs from an engine: its name, how it renders
@@ -24,9 +27,9 @@ type Dialect interface {
 
 // Session is the stdlib method set a runner needs, implemented by *DB and
 // *Tx, so the same statement handle runs against the pool or inside a
-// transaction. Every method maps driver errors through the dialect; the
-// dialect itself is not on the interface, because runners never need it at
-// request time.
+// transaction. Every method classifies a connectivity failure and maps every
+// other driver error through the dialect; the dialect itself is not on the
+// interface, because runners never need it at request time.
 type Session interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -79,12 +82,36 @@ func Wrap(pool *sql.DB, dialect Dialect) *DB {
 // Dialect returns the dialect statements are compiled against.
 func (d *DB) Dialect() Dialect { return d.dialect }
 
-// MapError routes err through the dialect; nil stays nil.
-func (d *DB) MapError(err error) error {
+// MapError classifies a connectivity failure as ErrConnectionFailed and
+// routes every other error through the dialect; nil stays nil.
+func (d *DB) MapError(err error) error { return mapError(d.dialect, err) }
+
+// mapError is the mapping both sessions share. A connectivity failure is
+// classified here, before the dialect, because it is the driver's and not
+// the engine's: the engine never saw the statement, so the dialect's
+// vocabulary does not apply to it.
+func mapError(dialect Dialect, err error) error {
 	if err == nil {
 		return nil
 	}
-	return d.dialect.MapError(err)
+	if connectionFailed(err) {
+		return fmt.Errorf("%w: %w", ErrConnectionFailed, err)
+	}
+	return dialect.MapError(err)
+}
+
+// connectionFailed reports whether err is the driver failing to reach the
+// engine: a network error anywhere in the chain (a refused or reset
+// connection, a dial that timed out), or driver.ErrBadConn once
+// database/sql has exhausted its retries. A context deadline is excluded:
+// it implements net.Error but reports the caller's budget, not the
+// engine's reachability, and stays the dialect's to map.
+func connectionFailed(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return false
+	}
+	var netErr net.Error
+	return errors.As(err, &netErr) || errors.Is(err, driver.ErrBadConn)
 }
 
 // Conn pins one connection for a protocol that needs session scope: a

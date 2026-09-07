@@ -6,10 +6,11 @@ import (
 )
 
 var (
-	// ErrConnectionFailed classifies a failure to obtain a connection or
-	// begin a transaction, wrapped as fmt.Errorf("%w: %w",
-	// ErrConnectionFailed, err) so errors.Is matches it and the driver's
-	// error stays reachable.
+	// ErrConnectionFailed classifies a failure to reach the engine: a
+	// failure to obtain a connection or begin a transaction, and a network
+	// error or driver.ErrBadConn raised by any session call. It is wrapped
+	// as fmt.Errorf("%w: %w", ErrConnectionFailed, err) so errors.Is
+	// matches it and the driver's error stays reachable.
 	ErrConnectionFailed = errors.New("database connection failed")
 
 	// ErrInvalidValue classifies a data exception: a bound value the engine
