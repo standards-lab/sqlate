@@ -7,10 +7,9 @@ namespaces, an engine sub-module that owns the engine's syntax, and a lint that 
 conventions. It is a standalone library any Go project can adopt.
 
 The user guide is the repository's own: `README.md` is the index and `docs/` the documents it
-orders. The organization's [documentation landing zone](https://github.com/standards-lab/docs)
-documents the library's place in the organization's work; the pages that describe it there
-are the docs pass's to write. This context records only working knowledge the guide,
-the landing zone, and the code do not express.
+orders. The library is adjacent to the organization's Go Elemental standard, and the standard's
+[catalog](https://github.com/standards-lab/architecture/blob/main/standards/go-elemental/README.md) names it as such. This context records only working knowledge the guide and
+the code do not express.
 
 ## Capability map
 
