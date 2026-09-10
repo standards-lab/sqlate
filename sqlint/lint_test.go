@@ -36,8 +36,13 @@ func tree(config string) fstest.MapFS {
 		"sqlint.toml":                          {Data: []byte(config)},
 		"lib/sqlint.toml":                      {Data: []byte("[export]\npatterns = \"patterns\"\n")},
 		"lib/patterns/guard_where.sql":         {Data: []byte("--| tier: standard\nid = {{id}} AND version = {{version}}")},
+		"lib/patterns/guard_set.sql":           {Data: []byte("--| tier: standard\nupdated_at = CURRENT_TIMESTAMP, version = version + 1")},
 		"engine/sqlint.toml":                   {Data: []byte("[export.native_forms]\nreturning = '(?i)\\bRETURNING\\b'\ncast = '::'\n")},
-		"domain/a/statements/edit.sql":         {Data: []byte("--| tier: standard\nUPDATE t SET a = {{a}} WHERE {{> sql.guard_where}}")},
+		"domain/a/statements/edit.sql":         {Data: []byte("--| tier: standard\nUPDATE t\nSET a = {{a}}, {{> sql.guard_set}}\nWHERE {{> sql.guard_where}}")},
+		"domain/a/statements/forgetful.sql":    {Data: []byte("--| tier: standard\nUPDATE t\nSET a = {{a}}, version = version + 1\nWHERE {{> sql.guard_where}}")},
+		"domain/a/statements/unchecked.sql":    {Data: []byte("--| tier: standard\nUPDATE t SET a = {{a}}, {{> sql.guard_set}} WHERE id = {{id}}")},
+		"domain/a/statements/version.sql":      {Data: []byte("--| tier: standard\nSELECT version FROM t WHERE {{> sql.guard_where}}")},
+		"domain/a/statements/delete.sql":       {Data: []byte("--| tier: standard\nDELETE FROM t WHERE {{> sql.guard_where}}")},
 		"domain/a/statements/insert_thing.sql": {Data: []byte("--| tier: standard\nINSERT INTO t VALUES ({{x}})")},
 		"domain/a/statements/list.sql":         {Data: []byte("--| tier: standard\n-- header prose may mention {{x}}\nSELECT 1 -- but body comments may not: {{docs}}\n, '{{x}}', id::text FROM t RETURNING id")},
 		"domain/a/statements/native.sql":       {Data: []byte("--| tier: native\n--| native: postgres — RETURNING\nINSERT INTO t VALUES (1) RETURNING id")},
@@ -105,8 +110,10 @@ func TestLint_FindsEachConvention(t *testing.T) {
 		"admin/x/patterns: query: pattern identity.sql (lint): a native pattern declares",
 		"0001_a.up.sql: a non-transactional migration contains exactly one statement",
 		"0002_b.up.sql: header: line 1",
+		"forgetful.sql:4: includes guard_where in a SET statement without guard_set",
+		"unchecked.sql:2: includes guard_set without guard_where",
 	)
-	reject(t, findings, "native.sql", "edit.sql", "sqlint.toml")
+	reject(t, findings, "native.sql", "edit.sql", "version.sql", "delete.sql", "sqlint.toml")
 }
 
 // An override refines the role's switches for one directory set; the
@@ -119,15 +126,16 @@ func TestLint_OverrideRefinesOneDirectorySet(t *testing.T) {
 
 // A switch off at the role turns the check off everywhere.
 func TestLint_RoleSwitchesOff(t *testing.T) {
-	cfg := strings.NewReplacer("[statements]\n", "[statements]\nnative_forms = false\n", "[migrations]\n", "[migrations]\nsingle_statement = false\n").Replace(config)
+	cfg := strings.NewReplacer("[statements]\n", "[statements]\nnative_forms = false\nguard = false\n", "[migrations]\n", "[migrations]\nsingle_statement = false\n").Replace(config)
 	findings := lint(tree(cfg), nil)
-	reject(t, findings, "in a standard-tier file", "contains exactly one statement")
+	reject(t, findings, "in a standard-tier file", "contains exactly one statement", "includes guard_")
 	want(t, findings, "0002_b.up.sql: header")
 }
 
 // Without a configuration the roles are every directory of the role's
 // name, every check on, and no source: an include is a load error and
-// the native-forms list is empty.
+// the native-forms list is empty. The guard check reads the include's
+// name from the body, so it holds without a catalog.
 func TestLint_Defaults(t *testing.T) {
 	fsys := tree(config)
 	delete(fsys, "sqlint.toml")
@@ -135,7 +143,8 @@ func TestLint_Defaults(t *testing.T) {
 	want(t, findings,
 		"insert_thing.sql: named for its SQL verb",
 		"list.sql:4: {{ inside a string literal",
-		`edit.sql: include of unknown namespace "sql" (registered: )`,
+		`delete.sql: include of unknown namespace "sql" (registered: )`,
+		"forgetful.sql:4: includes guard_where in a SET statement without guard_set",
 		"0001_a.up.sql: a non-transactional migration contains exactly one statement",
 	)
 	reject(t, findings, "in a standard-tier file", "lib/patterns", "sqlint.toml")
@@ -218,6 +227,7 @@ func TestLint_ResolvesPackagePaths(t *testing.T) {
 			"sqlint.toml":              {Data: []byte("[export]\npatterns = \"patterns\"\n")},
 			"patterns/paging.sql":      {Data: []byte("--| tier: standard\n OFFSET {{offset}} ROWS FETCH NEXT {{fetch}} ROWS ONLY")},
 			"patterns/guard_where.sql": {Data: []byte("--| tier: standard\nid = {{id}} AND version = {{version}}")},
+			"patterns/guard_set.sql":   {Data: []byte("--| tier: standard\nupdated_at = CURRENT_TIMESTAMP, version = version + 1")},
 		},
 		"github.com/standards-lab/sqlate/mysql": {
 			"sqlint.toml":         {Data: []byte("[export]\noverlay = \"patterns\"\n[export.native_forms]\nlimit = '(?i)\\bLIMIT\\b'\n")},
@@ -238,11 +248,12 @@ lib = { path = "github.com/standards-lab/sqlate", overlay = "github.com/standard
 [statements]
 dirs = ["domain/*/statements"]
 `)},
-		"domain/a/statements/edit.sql": {Data: []byte("--| tier: standard\nUPDATE t SET a = {{a}} WHERE {{> lib.guard_where}}")},
-		"domain/a/statements/top.sql":  {Data: []byte("--| tier: standard\nSELECT 1 FROM t LIMIT 1")},
+		"domain/a/statements/edit.sql":      {Data: []byte("--| tier: standard\nUPDATE t SET a = {{a}}, {{> lib.guard_set}} WHERE {{> lib.guard_where}}")},
+		"domain/a/statements/forgetful.sql": {Data: []byte("--| tier: standard\nUPDATE t SET a = {{a}} WHERE {{> lib.guard_where}}")},
+		"domain/a/statements/top.sql":       {Data: []byte("--| tier: standard\nSELECT 1 FROM t LIMIT 1")},
 	}
 	findings := lint(fsys, resolve)
-	want(t, findings, `top.sql:2: "LIMIT" (limit) in a standard-tier file`)
+	want(t, findings, `top.sql:2: "LIMIT" (limit) in a standard-tier file`, "forgetful.sql:2: includes guard_where in a SET statement without guard_set")
 	reject(t, findings, "edit.sql", "sqlint.toml")
 
 	fsys["sqlint.toml"] = &fstest.MapFile{Data: []byte("[sources]\nlib = \"github.com/standards-lab/sqlate\"\n[statements]\ndirs = [\"domain/*/statements\"]\n")}

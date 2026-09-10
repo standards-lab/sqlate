@@ -755,6 +755,7 @@ validates the pattern directory, and checks the conventions:
 - a file named for its operation
 - the delimiter kept out of comments and literals
 - no native form in a standard-tier file
+- a guarded command that includes `guard_where` or `guard_set` includes both
 - one statement per non-transactional migration
 
 A finding prints as `path:line: message` and exits 1.
