@@ -289,6 +289,7 @@ dirs = ["internal/*/statements"]
 verb_named = true
 delimiter = true
 native_forms = true
+guard = true
 
 # A directory set that needs an exception overrides the role's switches under its glob.
 [statements."internal/legacy/statements"]
@@ -333,6 +334,7 @@ and comments stripped first. The PostgreSQL module exports `returning`, `on_conf
 | statements | A file is named for its operation, not its SQL verb (`insert_`, `select_`, `update_`, `upsert_`, `merge_`). | `verb_named` |
 | statements, patterns | `{{` appears in no comment and no string literal. | `delimiter` |
 | statements, patterns | A standard-tier file matches none of the engine's native forms. | `native_forms` |
+| statements | A statement that includes one of the guard protocol's patterns includes both: a statement with a `SET` list that includes `guard_where` also includes `guard_set`, and a statement that includes `guard_set` also includes `guard_where`. The guard's check and a guarded delete include `guard_where` alone. The include is matched by pattern name under any namespace. | `guard` |
 | patterns | The directory validates as a catalog source: a tier on every file, a port on every native file, parameters only. | always |
 | migrations | A file headed `transaction: none` contains exactly one statement. | `single_statement` |
 

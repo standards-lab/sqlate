@@ -7,6 +7,16 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.1.1] - 2026-09-10
+
+### Added
+
+- The `guard` check of the statements role, on by default: a statement with a `SET` list that
+  includes `guard_where` also includes `guard_set`, and a statement that includes `guard_set`
+  also includes `guard_where`. The guard's check and a guarded delete include `guard_where`
+  alone and pass. The include is matched by pattern name under any namespace, so an overlay or
+  another source that publishes the guard patterns is recognized.
+
 ## [v0.1.0] - 2026-09-04
 
 The first release of the linter, against `github.com/standards-lab/sqlate v0.1.0`.
@@ -22,5 +32,6 @@ The first release of the linter, against `github.com/standards-lab/sqlate v0.1.0
 - `cmd/sqlint`, the command: one root argument, findings as `path:line: message`, exit 1 on
   any finding.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.1.0...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.1.1...HEAD
+[v0.1.1]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.1.0...sqlint/v0.1.1
 [v0.1.0]: https://github.com/standards-lab/sqlate/releases/tag/sqlint/v0.1.0

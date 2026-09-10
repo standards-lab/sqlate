@@ -10,6 +10,9 @@
 //     literal
 //   - a standard-tier file uses no native form the configured engine
 //     declares
+//   - a statement that includes one of the guard protocol's patterns
+//     includes both: guard_set beside guard_where in a SET statement, and
+//     guard_where beside guard_set
 //   - a migration headed "transaction: none" contains exactly one statement
 //
 // It is a sub-module of sqlate so the TOML parser it sources

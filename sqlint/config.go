@@ -58,7 +58,7 @@ type Role struct {
 
 // The checks each role knows, by switch name.
 var roleChecks = map[string][]string{
-	"statements": {"verb_named", "delimiter", "native_forms"},
+	"statements": {"verb_named", "delimiter", "native_forms", "guard"},
 	"patterns":   {"delimiter", "native_forms"},
 	"migrations": {"single_statement"},
 }

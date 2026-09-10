@@ -43,6 +43,6 @@ func (l *linter) lintFiles(dir string, on map[string]bool) {
 			continue // reported by the compile or the catalog
 		}
 		tier, _ := h.Get("tier")
-		l.lintBody(p, string(text), h.End(), on["delimiter"], on["native_forms"] && tier == "standard")
+		l.lintBody(p, string(text), h.End(), on["delimiter"], on["native_forms"] && tier == "standard", on["guard"])
 	}
 }
