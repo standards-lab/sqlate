@@ -3,9 +3,9 @@ package sqltest
 import "errors"
 
 // The driver's own failures, each the counterpart of a failure a real driver
-// or engine raises: a statement no response was scripted for is a statement
+// or engine raises. A statement no response was scripted for is a statement
 // the test did not expect to run; a response whose shape does not fit the
-// call is a script defect; an argument count that does not match the
+// call is a script defect. An argument count that does not match the
 // statement's placeholders is what the engine rejects at bind time.
 var (
 	ErrUnscripted = errors.New("sqltest: unscripted call")

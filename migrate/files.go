@@ -29,7 +29,7 @@ var fileName = regexp.MustCompile(`^(\d+)_([A-Za-z0-9_-]+)\.(up|down)\.sql$`)
 // the "transaction" declaration, "none" opting out and "required" or absence
 // keeping the transaction; a down file that declares differently is an
 // error. Up and Down are the files' bodies; the engine never sees a header.
-// Versions must be unique; a down without its up is an error; an up without
+// Versions must be unique. A down without its up is an error; an up without
 // its down is allowed.
 func Files(fsys fs.FS, dir string) ([]Migration, error) {
 	entries, err := fs.ReadDir(fsys, dir)

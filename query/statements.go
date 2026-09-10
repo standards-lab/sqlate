@@ -25,10 +25,14 @@ type Statements struct {
 
 // Compile reads every .sql file under dir in fsys, parses its
 // header, expands its includes against the catalog, and resolves its
-// parameters against d's placeholders. A file without a header, with an
-// unknown declaration, with a header the grammar rejects, or with an include
-// the catalog cannot resolve is a load error naming the file; a program
-// treats it as a defect in its own files.
+// parameters against d's placeholders. A load error names the file and is a
+// defect in the program's own files, not a runtime condition. It's a load
+// error when a file:
+//
+//   - has no header
+//   - has an unknown declaration
+//   - has a header the grammar rejects
+//   - has an include the catalog cannot resolve
 func (c *Catalog) Compile(fsys fs.FS, dir string, d sqlate.Dialect) (*Statements, error) {
 	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {

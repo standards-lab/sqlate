@@ -37,7 +37,7 @@ it.
 **Dialect.** `Dialect` is what the library needs from an engine: `Name`, `Placeholder(n)`, the
 engine's syntax for the nth bind parameter, and `MapError`, the classification of a driver
 error into the library's sentinels. A sub-module named for the engine implements it. `Locker`
-is a capability a dialect may add, `Lock` and `Unlock` of a named session-level lock on a
+is a capability a dialect may add: `Lock` and `Unlock` of a named session-level lock on a
 pinned connection; `migrate` asserts it.
 
 **Errors.** The root package defines the errors a consumer matches on, and every package keeps
@@ -319,8 +319,8 @@ publish, the overlay directory an engine supplies, and the native forms an engin
 bare directory is the pattern files themselves. An engine is always a producer.
 
 Native forms are a deny list: each is a regular expression under the name a finding reports, so
-the engine states in what position a spelling counts (word boundaries, case), not just which
-spelling. The linter matches them against code only, with string literals, quoted identifiers,
+the engine states in what position a spelling counts, word boundaries and case, and not only
+which spelling. The linter matches them against code only, with string literals, quoted identifiers,
 and comments stripped first. The PostgreSQL module exports `returning`, `on_conflict`, `ilike`,
 `concurrently`, `limit`, `serial`, `jsonb`, `timestamptz`, `cast` (the `::` operator),
 `pg_catalog` (any `pg_` function), `now`, and `uuidv7`.

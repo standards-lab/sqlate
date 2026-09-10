@@ -1,9 +1,16 @@
 # Quick start
 
-A tutorial that builds a working program from an empty directory: a `teams` package with
-validated commands and a store over a `team` table, a migration, a shared pattern, seed data,
-a test that needs no database, the linter over the SQL, and a program whose startup and
-runtime are split into layers. The library is used on its own, over a plain `*sql.DB`. Every
+A tutorial that builds a working program from an empty directory:
+
+- a `teams` package with validated commands and a store over a `team` table
+- a migration
+- a shared pattern
+- seed data
+- a test that needs no database
+- the linter over the SQL
+- a program whose startup and runtime are split into layers
+
+The library is used on its own, over a plain `*sql.DB`. Every
 file is written in full at the step that needs it, and every block is taken from a program
 that compiles, runs against PostgreSQL 18, and passes its tests. The [concepts](concepts.md)
 document explains the grammar the files use, and the [features](features.md) document
@@ -472,8 +479,13 @@ func validName(name string) error {
 ## 8. Write the store
 
 The store compiles the package's statements against the catalog and binds each one, once, to
-the value that runs it: `Project` for the collection read, `Scan` for a statement that returns
-rows, `Guarded` for a command with its check, and the bare `Statement` for one run with `Exec`.
+the value that runs it:
+
+- `Project` for the collection read
+- `Scan` for a statement that returns rows
+- `Guarded` for a command with its check
+- the bare `Statement` for one run with `Exec`
+
 Each operation takes the session, so it runs against the pool here and inside a transaction in
 `Seed` and `Replace`.
 
@@ -738,10 +750,14 @@ sqlint: ok
 ```
 
 The linter compiles the statement directory against the same catalog the program builds,
-validates the pattern directory, and checks the conventions: a file named for its operation,
-the delimiter kept out of comments and literals, no native form in a standard-tier file, and
-one statement per non-transactional migration. A finding prints as `path:line: message` and
-exits 1.
+validates the pattern directory, and checks the conventions:
+
+- a file named for its operation
+- the delimiter kept out of comments and literals
+- no native form in a standard-tier file
+- one statement per non-transactional migration
+
+A finding prints as `path:line: message` and exits 1.
 
 ## 11. Write the seed, the store layer, the work, and the program
 

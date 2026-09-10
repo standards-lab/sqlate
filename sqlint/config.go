@@ -41,7 +41,7 @@ type Source struct {
 // publishes, the overlay directory an engine supplies, and the native
 // forms an engine names, each a regular expression under the name the
 // finding reports, so the engine states in what position a spelling
-// counts (word boundaries, case), not just which spelling.
+// counts, word boundaries and case, and not only which spelling.
 type Export struct {
 	Patterns    string            `toml:"patterns"`
 	Overlay     string            `toml:"overlay"`
