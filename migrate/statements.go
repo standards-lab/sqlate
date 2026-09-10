@@ -7,10 +7,12 @@ package migrate
 // with bound parameters.
 type Catalog interface {
 	// CreateHistory returns the DDL that creates table when it does not
-	// exist, with the columns the protocol reads and writes: version
-	// (integer, primary key), name (text, not null), applied_at (timestamp,
-	// not null, defaulting to the current time), dirty (boolean, not null,
-	// defaulting to false).
+	// exist, with the columns the protocol reads and writes:
+	//
+	//   - version (integer, primary key)
+	//   - name (text, not null)
+	//   - applied_at (timestamp, not null, defaulting to the current time)
+	//   - dirty (boolean, not null, defaulting to false)
 	CreateHistory(table string) string
 	// HistoryExists returns the query that yields one row whose first
 	// column is nonzero when the history table exists. The table name is

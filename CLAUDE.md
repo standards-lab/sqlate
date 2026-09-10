@@ -1,9 +1,10 @@
 # sqlate
 
-The SQL templating library: authored `.sql` files made dynamic and composable, with the
-PostgreSQL dialect in the `postgres` sub-module and the conventions linter in the `sqlint`
-sub-module. A standalone library any Go project can adopt, built by the Standards Lab
-organization. Managed with the marathon workflow; start from `context/README.md`.
+sqlate is the SQL templating library: authored `.sql` files made dynamic and composable, with
+the PostgreSQL dialect in the `postgres` sub-module and the conventions linter in the `sqlint`
+sub-module. It is a standalone library any Go project can adopt, built by the Standards Lab
+organization. The repository is managed with the marathon workflow; start from
+`context/README.md`.
 
 ## Where the documentation lives
 
@@ -16,10 +17,10 @@ here. A change that alters documented behavior updates the guide in the same eff
 
 ## Repository specifics
 
-- **Module layout.** One base module rooted at `github.com/standards-lab/sqlate`, with the
-  `sqlate` package at its root and `header`, `query`, `migrate`, and `sqltest` beside it, plus
-  two sub-modules with their own `go.mod`: `postgres`, named for the engine, and `sqlint`,
-  the linter with its command at `sqlint/cmd/sqlint`.
+- **Module layout.** The base module is rooted at `github.com/standards-lab/sqlate`, with
+  `sqlate` at its root and `header`, `query`, `migrate`, and `sqltest` beside it. Two
+  sub-modules have their own `go.mod`: `postgres` names the engine, and `sqlint` is the linter,
+  with its command at `sqlint/cmd/sqlint`.
 - **Dependency line.** The base module imports the standard library alone. A sourced
   dependency enters only through a sub-module's `go.mod`: pgx through `postgres`, the TOML
   parser through `sqlint`.

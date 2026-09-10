@@ -130,11 +130,15 @@ type Catalog struct {
 	builtin    string
 }
 
-// NewCatalog reads every source and validates it: each file declares a
-// tier, a native file names its port, a pattern includes no other pattern,
-// an overlay respells only what its source defines with the same slots,
-// and no two sources share a namespace. Every failure is reported, joined,
-// each naming the namespace and file.
+// NewCatalog reads every source and validates it:
+//
+//   - each file declares a tier
+//   - a native file names its port
+//   - a pattern includes no other pattern
+//   - an overlay respells only what its source defines with the same slots
+//   - no two sources share a namespace
+//
+// Every failure is reported, joined, each naming the namespace and file.
 func NewCatalog(sources ...Source) (*Catalog, error) {
 	c := &Catalog{namespaces: map[string]map[string]pattern{}}
 	var errs []error

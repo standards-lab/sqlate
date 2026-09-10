@@ -6,6 +6,6 @@
 // never one. The header is the loader's; End marks where the body the
 // engine receives begins. The package knows no keys; each consumer decides
 // which keys it accepts and what their values mean. query reads tier,
-// native, transaction, key, and field; migrate reads transaction; sqlint
+// native, transaction, key, and field. migrate reads transaction; sqlint
 // reads what each role's checks need.
 package header

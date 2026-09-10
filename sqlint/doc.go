@@ -1,23 +1,33 @@
 // Package sqlint checks the authored SQL files of a module against the
-// conventions the loader cannot, or should not, enforce at runtime: every
-// statement directory compiles against the pattern sources the runtime
-// registers (the header grammar, the parameter syntax, the field contract,
-// includes resolving), every pattern directory validates as a catalog
-// source, a file is named for its operation and not its SQL verb, the
-// parameter delimiter does not appear inside a comment or a string
-// literal, a standard-tier file uses no native form the configured engine
-// declares, and a migration headed "transaction: none" contains exactly one
-// statement. It is a sub-module of sqlate so the TOML parser it sources
+// conventions the loader cannot, or should not, enforce at runtime:
+//
+//   - every statement directory compiles against the pattern sources the
+//     runtime registers (the header grammar, the parameter syntax, the
+//     field contract, includes resolving)
+//   - every pattern directory validates as a catalog source
+//   - a file is named for its operation and not its SQL verb
+//   - the parameter delimiter does not appear inside a comment or a string
+//     literal
+//   - a standard-tier file uses no native form the configured engine
+//     declares
+//   - a migration headed "transaction: none" contains exactly one statement
+//
+// It is a sub-module of sqlate so the TOML parser it sources
 // enters a build only through this import; cmd/sqlint is its command, and
 // a harness calls the package.
 //
 // # Configuration
 //
 // sqlint.toml at the module root configures the linter, one file per module,
-// read by [Load]: a table per role (statements, patterns, migrations)
-// with the directory globs it covers and the switches of its checks, an
-// override table per directory set that needs an exception, the pattern
-// sources by namespace, and the engine. A source or the engine is a path:
+// read by [Load]:
+//
+//   - a table per role (statements, patterns, migrations) with the
+//     directory globs it covers and the switches of its checks
+//   - an override table per directory set that needs an exception
+//   - the pattern sources by namespace
+//   - the engine
+//
+// A source or the engine is a path:
 // a directory of the tree, or a module path resolved through the
 // [Resolver] to the version go.mod pins. A producer, a module or a
 // directory that contains its own sqlint.toml, declares in its [export] table
