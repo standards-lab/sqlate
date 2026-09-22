@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -46,10 +47,10 @@ func memberView(t *testing.T) query.Projection[member] {
 
 // issue lists one page over the member base and returns the cursor it
 // issued, failing the test when it issued none.
-func issue(t *testing.T, sorts []query.Sort) query.Cursor {
+func issue(t *testing.T, sorts []query.Sort, filters ...query.Filter) query.Cursor {
 	t.Helper()
 	db, _ := session(t, count(9), members("a", "b", "c"))
-	got, err := memberView(t).List(context.Background(), db, query.Directives{Sort: sorts}, query.Page{Number: 1, Size: 2})
+	got, err := memberView(t).List(context.Background(), db, query.Directives{Sort: sorts, Filters: filters}, query.Page{Number: 1, Size: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,10 +104,11 @@ func TestContinue_ADescendingOrderingComparesTheOtherWay(t *testing.T) {
 }
 
 func TestContinue_CursorIsBoundAfterTheRequestsFilters(t *testing.T) {
-	c := issue(t, nil)
+	byName := query.Filter{Field: "name", Op: query.OpEq, Value: "M"}
+	c := issue(t, nil, byName)
 	db, rec := session(t, count(9), members("c"))
 	_, err := memberView(t).Continue(context.Background(), db, query.Directives{
-		Filters: []query.Filter{{Field: "name", Op: query.OpEq, Value: "M"}},
+		Filters: []query.Filter{byName},
 	}, c, 2)
 	if err != nil {
 		t.Fatal(err)
@@ -158,6 +160,59 @@ func TestContinue_RefusesAnotherOrderingOrAnotherBase(t *testing.T) {
 	var cursor *query.CursorError
 	if !errors.As(err, &cursor) || cursor.Reason != query.CursorMismatch {
 		t.Errorf("another base = %v, want a mismatch", err)
+	}
+}
+
+func TestContinue_RefusesOtherFilters(t *testing.T) {
+	c := issue(t, nil, query.Filter{Field: "name", Op: query.OpEq, Value: "M"})
+	cases := map[string][]query.Filter{
+		"no filters":     nil,
+		"another value":  {{Field: "name", Op: query.OpEq, Value: "N"}},
+		"another op":     {{Field: "name", Op: query.OpNe, Value: "M"}},
+		"another filter": {{Field: "name", Op: query.OpEq, Value: "M"}, {Field: "org", Op: query.OpEq, Value: "o"}},
+		// A value with no JSON form cannot be shown to match.
+		"unrepresentable": {{Field: "name", Op: query.OpEq, Value: math.NaN()}},
+	}
+	for name, filters := range cases {
+		db, rec := session(t)
+		_, err := memberView(t).Continue(context.Background(), db, query.Directives{Filters: filters}, c, 2)
+		var cursor *query.CursorError
+		if !errors.As(err, &cursor) || cursor.Reason != query.CursorMismatch {
+			t.Errorf("%s: err = %v, want a mismatch", name, err)
+		}
+		if len(rec.Calls()) != 0 {
+			t.Errorf("%s: the refused cursor reached the driver: %v", name, rec.Ops())
+		}
+	}
+
+	// The same filters rebuilt as a new slice continue: the cursor compares
+	// their content, not their identity.
+	db, _ := session(t, count(9), members("c"))
+	same := []query.Filter{{Field: "name", Op: query.OpEq, Value: "M"}}
+	if _, err := memberView(t).Continue(context.Background(), db, query.Directives{Filters: same}, c, 2); err != nil {
+		t.Errorf("the same filters = %v, want the page", err)
+	}
+
+	// No filters and an empty filter slice are the same request.
+	unfiltered := issue(t, nil)
+	db, _ = session(t, count(9), members("c"))
+	if _, err := memberView(t).Continue(context.Background(), db, query.Directives{Filters: []query.Filter{}}, unfiltered, 2); err != nil {
+		t.Errorf("an empty filter slice after none = %v, want the page", err)
+	}
+}
+
+func TestList_FiltersWithNoSignatureIssueNoCursor(t *testing.T) {
+	// A NaN has no JSON form, so the filters cannot be bound into a cursor:
+	// the page still reports that a further page exists, without one.
+	db, _ := session(t, count(9), members("a", "b", "c"))
+	got, err := memberView(t).List(context.Background(), db, query.Directives{
+		Filters: []query.Filter{{Field: "name", Op: query.OpEq, Value: math.NaN()}},
+	}, query.Page{Number: 1, Size: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Items) != 2 || !got.More || got.Next != "" {
+		t.Errorf("List = %+v, want two items, a further page, and no cursor", got)
 	}
 }
 

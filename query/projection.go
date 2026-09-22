@@ -181,7 +181,7 @@ func (p Projection[T]) list(ctx context.Context, s sqlate.Session, d Directives,
 	}
 	var afterValues []string
 	if after != "" {
-		if afterValues, err = p.decodeCursor(after, o); err != nil {
+		if afterValues, err = p.decodeCursor(after, o, d.Filters); err != nil {
 			return none, err
 		}
 	}
@@ -252,7 +252,11 @@ func (p Projection[T]) list(ctx context.Context, s sqlate.Session, d Directives,
 	}
 	c := Collection[T]{Items: out, Total: total, More: more}
 	if more && last != nil {
-		c.Next = p.encodeCursor(o, last)
+		// Filters with no signature cannot be bound into a cursor, so the
+		// page reports a further page without one.
+		if sig, ok := filterSignature(d.Filters); ok {
+			c.Next = p.encodeCursor(o, sig, last)
+		}
 	}
 	return c, nil
 }

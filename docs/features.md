@@ -256,8 +256,10 @@ standard spelling of the predicate is a chain of disjuncts, `(a > x) OR (a = x A
 engine may overlay it as a row-value comparison, `(a, b) > (x, y)`. A cursor is opaque,
 URL-safe text a caller relays unchanged. It records the base, the keyed fields, the direction,
 and the values, under a hash of those and each keyed field's declared type, so a cursor from
-before a contract change is refused. It records no filter: `Continue` reads under the
-directives the caller passes, which are the first page's to continue the same result.
+before a contract change is refused. It also records the filters, so `Continue` under other
+filters than the page that issued it is refused as a `CursorMismatch`. Filters with a value
+that has no JSON form, such as a float NaN, cannot be recorded, and their page reports `More`
+without a `Next`.
 
 Every error a request's declarations can cause unwraps to `ErrDirectives`, so a caller's
 check for a bad request is one `errors.Is`:
@@ -268,7 +270,7 @@ check for a bad request is one `errors.Is`:
   or wraps the engine's error (and `sqlate.ErrInvalidValue`) for a value the engine rejected.
 - `CursorError`, whose `Reason` says why `Continue` refused a cursor: `CursorMalformed`, a
   cursor that does not decode or verify; `CursorMismatch`, a cursor issued for another base,
-  keyed fields, or direction; `CursorUnsupported`, a sort that is not cursorable.
+  keyed fields, direction, or filters; `CursorUnsupported`, a sort that is not cursorable.
 - A page number or size below 1, an empty cursor, or an unknown `TotalMode`.
 
 ### Verification

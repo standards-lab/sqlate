@@ -93,7 +93,8 @@ const (
 	// CursorMalformed is a cursor List did not issue: it does not decode, or
 	// does not verify against the projection's keyed fields and their types.
 	CursorMalformed CursorReason = "malformed"
-	// CursorMismatch is a cursor issued for another base or another ordering.
+	// CursorMismatch is a cursor issued for another base, another ordering,
+	// or under other filters.
 	CursorMismatch CursorReason = "mismatch"
 	// CursorUnsupported is a request whose sort cannot continue from a
 	// cursor: the keyed prefix mixes directions or includes a nullable field.
@@ -108,7 +109,7 @@ type CursorError struct {
 func (e *CursorError) Error() string {
 	switch e.Reason {
 	case CursorMismatch:
-		return "query: cursor was issued for another base or ordering"
+		return "query: cursor was issued for another base, ordering, or filters"
 	case CursorUnsupported:
 		return "query: the sort cannot continue from a cursor"
 	default:
