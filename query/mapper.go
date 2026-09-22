@@ -70,6 +70,10 @@ func ArgsOf(v any) Args {
 	return out
 }
 
+// With binds one name: the first Args of a chain that continues with the
+// With method, for a base's own parameters passed to List and One.
+func With(name string, v any) Args { return Args{name: v} }
+
 // With returns a copy of a with name bound to v, for the inputs that arrive
 // outside a command's body: the path id, the If-Match version.
 func (a Args) With(name string, v any) Args {

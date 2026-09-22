@@ -347,9 +347,11 @@ func (c *Catalog) lookup(ns, name string) (pattern, bool) {
 }
 
 // render fills one of the library's request-time patterns, resolved under
-// Namespace, which only the library's source registers under. Every slot must
-// be filled and every fill must name a slot; a mismatch is a defect in the
-// library or an overlay, not a request error, and panics.
+// Namespace, which only the library's source registers under. Every slot the
+// pattern declares must be filled; a fill that names no slot is ignored,
+// which is how one call serves a pattern's own slots and its alternate set.
+// An unfilled slot is a defect in the library or an overlay, not a request
+// error, and panics.
 func (c *Catalog) render(name string, fill map[string]string) string {
 	set, ok := c.namespaces[Namespace]
 	if !ok {

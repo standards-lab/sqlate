@@ -101,8 +101,9 @@ func (st Statement) Scan[T any](scan ScanFunc[T]) Rows[T] {
 
 // Project binds the statement, a projection base, to scan: the typed
 // handle for the collection read. A base without a key or field contract,
-// or one that binds parameters of its own, is a defect in the caller's
-// constructor and panics.
+// or one that takes an expanded parameter, is a defect in the caller's
+// constructor and panics. A base's own non-expanded parameters bind from
+// the base arguments List and One take.
 func (st Statement) Project[T any](scan ScanFunc[T]) Projection[T] {
 	return newProjection(st, scan)
 }

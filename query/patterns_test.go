@@ -64,15 +64,15 @@ func TestOverlay_RespellsPagingForAPort(t *testing.T) {
 		"sql/v.sql": {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\nSELECT id FROM t")},
 	}, "sql", sqltest.Dialect{}).Statement("v").Project(query.Scalar[string])
 	db, rec := session(t, sqltest.Response{Columns: []string{"count"}, Rows: [][]driver.Value{{int64(0)}}}, sqltest.Response{Columns: []string{"id"}})
-	if _, _, err := view.List(context.Background(), db, query.Directives{Page: query.Page{Number: 3, Size: 4}}); err != nil {
+	if _, err := view.List(context.Background(), db, query.Directives{Page: query.Page{Number: 3, Size: 4}}); err != nil {
 		t.Fatal(err)
 	}
 	// The library binds offset then fetch, whatever order the port's text
-	// names them in.
+	// names them in; the page fetches one row past its size.
 	if got := rec.Calls()[1].SQL; got != "SELECT * FROM (SELECT id FROM t) q ORDER BY q.id LIMIT $2 OFFSET $1" {
 		t.Errorf("sql = %q", got)
 	}
-	if got := rec.Calls()[1].Args; got[0] != 8 || got[1] != 4 {
+	if got := rec.Calls()[1].Args; got[0] != 8 || got[1] != 5 {
 		t.Errorf("args = %v", got)
 	}
 }

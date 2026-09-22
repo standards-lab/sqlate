@@ -32,9 +32,14 @@ func scanPerson(rows *sql.Rows) (person, error) {
 // The base file ends with a semicolon, which the loader strips so the
 // statement composes as a derived table.
 var projectionFiles = fstest.MapFS{
-	"sql/person_view.sql": {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\n--| field: name text\n--| field: age integer\n" + base + ";\n")},
-	"sql/no_contract.sql": {Data: []byte("--| tier: standard\nSELECT 1")},
-	"sql/with_param.sql":  {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\nSELECT id FROM t WHERE tenant = {{tenant}}")},
+	"sql/person_view.sql":    {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\n--| field: name text\n--| field: age integer\n" + base + ";\n")},
+	"sql/no_contract.sql":    {Data: []byte("--| tier: standard\nSELECT 1")},
+	"sql/with_param.sql":     {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\nSELECT id FROM t WHERE tenant = {{tenant}}")},
+	"sql/two_params.sql":     {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\n--| field: name text\nSELECT id, name FROM t WHERE tenant = {{tenant}} AND region = {{region}}")},
+	"sql/expanded_param.sql": {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\nSELECT id FROM t WHERE id IN ({{ids...}})")},
+	// A composite key whose fields are declared not null: the contract a
+	// cursor needs.
+	"sql/member.sql": {Data: []byte("--| tier: standard\n--| key: org, id\n--| field: org uuid not null\n--| field: id uuid not null\n--| field: name text\nSELECT org, id, name FROM member")},
 }
 
 func projection(t *testing.T) query.Projection[person] {
@@ -56,23 +61,26 @@ func people(n int) sqltest.Response {
 
 func TestList_ComposesCountAndPageOverTheBase(t *testing.T) {
 	db, rec := session(t, count(12), people(2))
-	items, total, err := projection(t).List(context.Background(), db, query.Directives{
+	got, err := projection(t).List(context.Background(), db, query.Directives{
 		Page:    query.Page{Number: 2, Size: 10},
 		Sort:    []query.Sort{{Field: "name", Descending: true}},
 		Filters: []query.Filter{{Field: "age", Op: query.OpGe, Value: "21"}},
 	})
-	if err != nil || total != 12 || len(items) != 2 || items[1].ID != "b" {
-		t.Fatalf("List = %v, %d, %v", items, total, err)
+	if err != nil || got.Total != 12 || len(got.Items) != 2 || got.Items[1].ID != "b" {
+		t.Fatalf("List = %+v, %v", got, err)
+	}
+	if got.More || got.Next != "" {
+		t.Errorf("a short page reported more = %v, next = %q", got.More, got.Next)
 	}
 	calls := rec.Calls()
 	if calls[0].SQL != "SELECT COUNT(*) FROM ("+base+") q WHERE q.age >= CAST($1 AS integer)" || calls[0].Args[0] != "21" {
 		t.Errorf("count = %+v", calls[0])
 	}
-	if calls[1].SQL != "SELECT * FROM ("+base+") q WHERE q.age >= CAST($1 AS integer) ORDER BY q.name DESC, q.id OFFSET $2 ROWS FETCH NEXT $3 ROWS ONLY" {
+	if calls[1].SQL != "SELECT * FROM ("+base+") q WHERE q.age >= CAST($1 AS integer) ORDER BY q.name DESC, q.id DESC OFFSET $2 ROWS FETCH NEXT $3 ROWS ONLY" {
 		t.Errorf("page sql = %q", calls[1].SQL)
 	}
-	if a := calls[1].Args; a[0] != "21" || a[1] != 10 || a[2] != 10 {
-		t.Errorf("page args = %v, want the filter value then offset 10, fetch 10", a)
+	if a := calls[1].Args; a[0] != "21" || a[1] != 10 || a[2] != 11 {
+		t.Errorf("page args = %v, want the filter value then offset 10, fetch 11", a)
 	}
 	if rec.RowsLeaked() != 0 || rec.Pending() != 0 {
 		t.Errorf("leaked = %d, pending = %d", rec.RowsLeaked(), rec.Pending())
@@ -99,7 +107,7 @@ func TestList_OperatorLowering(t *testing.T) {
 	for op, c := range cases {
 		t.Run(string(op), func(t *testing.T) {
 			db, rec := session(t, count(0), people(0))
-			_, _, err := projection(t).List(context.Background(), db, query.Directives{
+			_, err := projection(t).List(context.Background(), db, query.Directives{
 				Page:    query.Page{Number: 1, Size: 5},
 				Filters: []query.Filter{{Field: "name", Op: op, Value: c.value}},
 			})
@@ -118,24 +126,29 @@ func TestList_OperatorLowering(t *testing.T) {
 }
 
 func TestList_KeyIsTheTieBreakerUnlessSortedBy(t *testing.T) {
-	db, rec := session(t, count(0), people(0), count(0), people(0), count(0), people(0))
+	db, rec := session(t, count(0), people(0), count(0), people(0), count(0), people(0), count(0), people(0))
 	p := projection(t)
 	ctx := context.Background()
-	_, _, _ = p.List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 5}})
-	_, _, _ = p.List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 5}, Sort: []query.Sort{{Field: "id", Descending: true}}})
-	_, _, _ = p.List(ctx, db, query.Directives{Page: query.Page{Number: 3, Size: 5}, Sort: []query.Sort{{Field: "age"}, {Field: "name", Descending: true}}})
+	_, _ = p.List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 5}})
+	_, _ = p.List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 5}, Sort: []query.Sort{{Field: "id", Descending: true}}})
+	_, _ = p.List(ctx, db, query.Directives{Page: query.Page{Number: 3, Size: 5}, Sort: []query.Sort{{Field: "age"}, {Field: "name", Descending: true}}})
+	_, _ = p.List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 5}, Sort: []query.Sort{{Field: "name", Descending: true}}})
 	pages := rec.SQL(sqltest.OpQuery)
 	for i, want := range []string{
 		" ORDER BY q.id OFFSET $1 ROWS FETCH NEXT $2 ROWS ONLY",
 		" ORDER BY q.id DESC OFFSET $1 ROWS FETCH NEXT $2 ROWS ONLY",
+		// The sorts run in two directions, so the tie-breaker takes neither
+		// and the ordering cannot be continued by a cursor.
 		" ORDER BY q.age, q.name DESC, q.id OFFSET $1 ROWS FETCH NEXT $2 ROWS ONLY",
+		// One direction across the sorts, so the tie-breaker takes it too.
+		" ORDER BY q.name DESC, q.id DESC OFFSET $1 ROWS FETCH NEXT $2 ROWS ONLY",
 	} {
 		if got := pages[2*i+1]; !strings.HasSuffix(got, want) {
 			t.Errorf("page %d = %q, want suffix %q", i, got, want)
 		}
 	}
-	if a := rec.Calls()[5].Args; a[0] != 10 || a[1] != 5 {
-		t.Errorf("page 3 of 5 bound %v, want offset 10, fetch 5", a)
+	if a := rec.Calls()[5].Args; a[0] != 10 || a[1] != 6 {
+		t.Errorf("page 3 of 5 bound %v, want offset 10, fetch 6", a)
 	}
 }
 
@@ -151,15 +164,19 @@ func TestList_DirectiveErrorsUnwrapToErrDirectivesBeforeAnyIO(t *testing.T) {
 		"unknown op":     {Page: ok, Filters: []query.Filter{{Field: "name", Op: "matches", Value: "x"}}},
 		"in not a slice": {Page: ok, Filters: []query.Filter{{Field: "name", Op: query.OpIn, Value: "x"}}},
 		"in empty":       {Page: ok, Filters: []query.Filter{{Field: "name", Op: query.OpIn, Value: []any{}}}},
+		"total mode":     {Page: ok, Total: 7},
+		// person_view declares no field not null, so no ordering over it can
+		// be continued by a cursor.
+		"cursor unsupported": {Page: query.Page{Size: 5}, After: "whatever"},
 	}
 	for name, d := range cases {
-		_, _, err := p.List(context.Background(), db, d)
+		_, err := p.List(context.Background(), db, d)
 		if !errors.Is(err, query.ErrDirectives) {
 			t.Errorf("%s: err = %v, want ErrDirectives", name, err)
 		}
 	}
 	var unknown *query.UnknownFieldError
-	_, _, err := p.List(context.Background(), db, cases["unknown sort"])
+	_, err := p.List(context.Background(), db, cases["unknown sort"])
 	if !errors.As(err, &unknown) || unknown.Use != query.FieldUseSort {
 		t.Errorf("unknown sort = %v", err)
 	}
@@ -189,7 +206,7 @@ func (d invalidValueDialect) MapError(err error) error {
 func TestList_EngineDataExceptionIsAnInvalidValue(t *testing.T) {
 	pool, _ := sqltest.Open(t, sqltest.Response{Err: dataException{"22P02", `invalid input syntax for type uuid: "nope"`}})
 	db := sqlate.Wrap(pool, invalidValueDialect{})
-	_, _, err := projection(t).List(context.Background(), db, query.Directives{
+	_, err := projection(t).List(context.Background(), db, query.Directives{
 		Page:    query.Page{Number: 1, Size: 5},
 		Filters: []query.Filter{{Field: "id", Op: query.OpEq, Value: "nope"}},
 	})
@@ -228,19 +245,31 @@ func TestVerify_ProbesEveryContractField(t *testing.T) {
 	if err := projection(t).Verify(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
-	want := "SELECT q.id, q.name, q.age FROM (" + base + ") q WHERE q.id = CAST(NULL AS uuid) AND q.name = CAST(NULL AS text) AND q.age = CAST(NULL AS integer)"
-	if got := rec.SQL(sqltest.OpPrepare); len(got) != 1 || got[0] != want {
-		t.Errorf("probe = %v", got)
+	fields := "SELECT q.id, q.name, q.age FROM (" + base + ") q WHERE q.id = CAST(NULL AS uuid) AND q.name = CAST(NULL AS text) AND q.age = CAST(NULL AS integer)"
+	// The cursor page probes the keyset predicate and the paging clause, so
+	// an engine's respelling of either is prepared at startup too.
+	cursor := "SELECT * FROM (" + base + ") q WHERE (q.id > CAST($1 AS uuid)) ORDER BY q.id OFFSET $2 ROWS FETCH NEXT $3 ROWS ONLY"
+	if got := rec.SQL(sqltest.OpPrepare); len(got) != 2 || got[0] != fields || got[1] != cursor {
+		t.Errorf("probes = %q", got)
 	}
 	rec.FailPrepare = func(string) error { return errors.New(`column q.age does not exist`) }
 	if err := projection(t).Verify(context.Background(), db); err == nil || !strings.Contains(err.Error(), "person_view: field contract") {
 		t.Errorf("Verify = %v, want the base named", err)
 	}
+	rec.FailPrepare = func(q string) error {
+		if strings.Contains(q, "ORDER BY") {
+			return errors.New("syntax error near FETCH")
+		}
+		return nil
+	}
+	if err := projection(t).Verify(context.Background(), db); err == nil || !strings.Contains(err.Error(), "person_view: cursor page") {
+		t.Errorf("Verify = %v, want the cursor page named", err)
+	}
 }
 
-func TestProject_RequiresAContractAndNoBaseParameters(t *testing.T) {
+func TestProject_RequiresAContractAndNoExpandedParameter(t *testing.T) {
 	stmts := catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{})
-	for _, name := range []string{"no_contract", "with_param"} {
+	for _, name := range []string{"no_contract", "expanded_param"} {
 		func() {
 			defer func() {
 				if recover() == nil {
@@ -249,5 +278,133 @@ func TestProject_RequiresAContractAndNoBaseParameters(t *testing.T) {
 			}()
 			stmts.Statement(name).Project(scanPerson)
 		}()
+	}
+	// A base that binds parameters of its own, none of them expanded, is
+	// projectable: List and One bind them from their base arguments.
+	stmts.Statement("with_param").Project(scanPerson)
+}
+
+// tenantView is the projection over a base that binds one parameter of its
+// own, so the request's placeholders are numbered after the base's.
+func tenantView(t *testing.T, name string) query.Projection[string] {
+	t.Helper()
+	return catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement(name).Project(query.Scalar[string])
+}
+
+func ids(values ...string) sqltest.Response {
+	r := sqltest.Response{Columns: []string{"id"}}
+	for _, v := range values {
+		r.Rows = append(r.Rows, []driver.Value{v})
+	}
+	return r
+}
+
+func TestList_BindsTheBasesOwnParametersBeforeTheRequests(t *testing.T) {
+	db, rec := session(t, count(1), ids("a"))
+	got, err := tenantView(t, "with_param").List(context.Background(), db, query.Directives{
+		Page:    query.Page{Number: 1, Size: 5},
+		Filters: []query.Filter{{Field: "id", Op: query.OpEq, Value: "a"}},
+	}, query.With("tenant", "t1"))
+	if err != nil || got.Total != 1 || len(got.Items) != 1 {
+		t.Fatalf("List = %+v, %v", got, err)
+	}
+	tenant := "SELECT id FROM t WHERE tenant = $1"
+	calls := rec.Calls()
+	if calls[0].SQL != "SELECT COUNT(*) FROM ("+tenant+") q WHERE q.id = CAST($2 AS uuid)" {
+		t.Errorf("count sql = %q", calls[0].SQL)
+	}
+	if a := calls[0].Args; len(a) != 2 || a[0] != "t1" || a[1] != "a" {
+		t.Errorf("count args = %v, want the base's value then the filter's", a)
+	}
+	if calls[1].SQL != "SELECT * FROM ("+tenant+") q WHERE q.id = CAST($2 AS uuid) ORDER BY q.id OFFSET $3 ROWS FETCH NEXT $4 ROWS ONLY" {
+		t.Errorf("page sql = %q", calls[1].SQL)
+	}
+	if a := calls[1].Args; len(a) != 4 || a[0] != "t1" || a[1] != "a" || a[2] != 0 || a[3] != 6 {
+		t.Errorf("page args = %v", a)
+	}
+}
+
+func TestOne_BindsTheBasesOwnParameters(t *testing.T) {
+	db, rec := session(t, ids("a"))
+	got, err := tenantView(t, "with_param").One(context.Background(), db, "id", "a", query.With("tenant", "t1"))
+	if err != nil || got != "a" {
+		t.Fatalf("One = %q, %v", got, err)
+	}
+	c := rec.Calls()[0]
+	if c.SQL != "SELECT * FROM (SELECT id FROM t WHERE tenant = $1) q WHERE q.id = CAST($2 AS uuid)" {
+		t.Errorf("sql = %q", c.SQL)
+	}
+	if a := c.Args; a[0] != "t1" || a[1] != "a" {
+		t.Errorf("args = %v", a)
+	}
+}
+
+func TestList_BaseArgumentsMergeLeftToRight(t *testing.T) {
+	db, rec := session(t, count(0), sqltest.Response{Columns: []string{"id", "name"}})
+	p := catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement("two_params").Project(query.Scalar[string])
+	d := query.Directives{Page: query.Page{Number: 1, Size: 5}}
+	if _, err := p.List(context.Background(), db, d, query.With("tenant", "first").With("region", "eu"), query.With("tenant", "second")); err != nil {
+		t.Fatal(err)
+	}
+	if a := rec.Calls()[0].Args; a[0] != "second" || a[1] != "eu" {
+		t.Errorf("args = %v, want the later tenant and the earlier region", a)
+	}
+}
+
+func TestList_MissingBaseArgumentIsAnArgumentErrorBeforeAnyIO(t *testing.T) {
+	db, rec := session(t)
+	p := tenantView(t, "with_param")
+	d := query.Directives{Page: query.Page{Number: 1, Size: 5}}
+	var missing *query.ArgumentError
+	_, err := p.List(context.Background(), db, d)
+	if !errors.As(err, &missing) || missing.Statement != "with_param" || missing.Name != "tenant" {
+		t.Errorf("List = %v, want an ArgumentError naming the base and the parameter", err)
+	}
+	if _, err := p.One(context.Background(), db, "id", "a"); !errors.As(err, &missing) {
+		t.Errorf("One = %v, want an ArgumentError", err)
+	}
+	if errors.Is(err, query.ErrDirectives) {
+		t.Error("a missing base argument is the caller's defect, not a request error")
+	}
+	if len(rec.Calls()) != 0 {
+		t.Errorf("a missing base argument reached the driver: %v", rec.Ops())
+	}
+}
+
+func TestList_TotalNoneSkipsTheCount(t *testing.T) {
+	db, rec := session(t, people(2))
+	got, err := projection(t).List(context.Background(), db, query.Directives{
+		Page:  query.Page{Number: 1, Size: 5},
+		Total: query.TotalNone,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Total != query.NoTotal || len(got.Items) != 2 {
+		t.Errorf("List = %+v, want %d rows and no total", got, 2)
+	}
+	if ops := rec.Ops(); len(ops) != 1 || ops[0] != sqltest.OpQuery {
+		t.Errorf("ops = %v, want the page alone", ops)
+	}
+}
+
+func TestList_MoreReportsTheRowPastThePage(t *testing.T) {
+	// The page reads one row past its size: three rows for a page of two
+	// means a further page, and the extra row is not scanned.
+	db, rec := session(t, count(9), people(3))
+	got, err := projection(t).List(context.Background(), db, query.Directives{Page: query.Page{Number: 1, Size: 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.More || len(got.Items) != 2 || got.Items[1].ID != "b" {
+		t.Fatalf("List = %+v", got)
+	}
+	// person_view declares no field not null, so the page reports a further
+	// page without issuing a cursor for it.
+	if got.Next != "" {
+		t.Errorf("next = %q, want none over a nullable key", got.Next)
+	}
+	if rec.RowsLeaked() != 0 {
+		t.Errorf("the row past the page leaked the row set")
 	}
 }
