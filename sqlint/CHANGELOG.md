@@ -5,7 +5,7 @@ documented here. The format follows [Keep a Changelog](https://keepachangelog.co
 and the module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). This
 changelog covers this sub-module only; the base module keeps its own.
 
-## [Unreleased]
+## [v0.1.2] - 2026-09-22
 
 ### Fixed
 
@@ -44,6 +44,7 @@ The first release of the linter, against `github.com/standards-lab/sqlate v0.1.0
 - `cmd/sqlint`, the command: one root argument, findings as `path:line: message`, exit 1 on
   any finding.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.1.1...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.1.2...HEAD
+[v0.1.2]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.1.1...sqlint/v0.1.2
 [v0.1.1]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.1.0...sqlint/v0.1.1
 [v0.1.0]: https://github.com/standards-lab/sqlate/releases/tag/sqlint/v0.1.0
