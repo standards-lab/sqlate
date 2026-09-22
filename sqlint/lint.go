@@ -103,9 +103,12 @@ func (l *linter) locate(value string) (fs.FS, string, error) {
 // against: each namespace's source, and for the library its engine
 // overlay. A producer, a module or a directory that contains its own
 // configuration, names its pattern directory in its export; a bare
-// directory is the pattern files themselves. A source that does not
-// resolve is a finding against the configuration; the catalog is built
-// from the rest.
+// directory is the pattern files themselves. The library's own namespace,
+// query.Namespace, always resolves to the patterns the query package
+// embeds: the path of a sources.sql entry is not read, and only its
+// overlay, when declared, is resolved as for any other source. A source
+// that does not resolve is a finding against the configuration; the
+// catalog is built from the rest.
 func (l *linter) resolveSources() {
 	var sources []query.Source
 	names := make([]string, 0, len(l.cfg.Sources))
@@ -115,25 +118,10 @@ func (l *linter) resolveSources() {
 	sort.Strings(names)
 	for _, ns := range names {
 		s := l.cfg.Sources[ns]
-		fsys, base, err := l.locate(s.Path)
-		if err != nil {
-			l.report(File, 0, fmt.Sprintf("sources.%s: %v", ns, err))
+		src, ok := l.source(ns, s.Path)
+		if !ok {
 			continue
 		}
-		dir := base
-		if isProducer(fsys, base) {
-			export, err := readExport(fsys, base)
-			if err != nil {
-				l.report(File, 0, fmt.Sprintf("sources.%s: %v", ns, err))
-				continue
-			}
-			if export.Patterns == "" {
-				l.report(File, 0, fmt.Sprintf("sources.%s: %s exports no patterns", ns, s.Path))
-				continue
-			}
-			dir = path.Join(base, export.Patterns)
-		}
-		src := query.Publish(ns, fsys, dir)
 		if s.Overlay != "" {
 			ofs, obase, err := l.locate(s.Overlay)
 			if err != nil {
@@ -163,6 +151,34 @@ func (l *linter) resolveSources() {
 		return
 	}
 	l.catalog = catalog
+}
+
+// source returns the base source of namespace ns, the library's embedded
+// patterns for query.Namespace and otherwise the patterns value names, and
+// false after reporting a value that does not resolve.
+func (l *linter) source(ns, value string) (query.Source, bool) {
+	if ns == query.Namespace {
+		return query.Patterns(), true
+	}
+	fsys, base, err := l.locate(value)
+	if err != nil {
+		l.report(File, 0, fmt.Sprintf("sources.%s: %v", ns, err))
+		return query.Source{}, false
+	}
+	dir := base
+	if isProducer(fsys, base) {
+		export, err := readExport(fsys, base)
+		if err != nil {
+			l.report(File, 0, fmt.Sprintf("sources.%s: %v", ns, err))
+			return query.Source{}, false
+		}
+		if export.Patterns == "" {
+			l.report(File, 0, fmt.Sprintf("sources.%s: %s exports no patterns", ns, value))
+			return query.Source{}, false
+		}
+		dir = path.Join(base, export.Patterns)
+	}
+	return query.Publish(ns, fsys, dir), true
 }
 
 // resolveEngine reads the native forms the configured engine declares and
