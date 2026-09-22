@@ -272,3 +272,37 @@ func TestMapError_ContextDeadlineIsNotConnectivity(t *testing.T) {
 		}
 	}
 }
+
+// A ConstraintError's message names the most specific handle the driver
+// exposed: the constraint, the column when the violation carries no
+// constraint name, and the class alone when the driver exposed neither.
+func TestConstraintError_ErrorNamesTheHandleTheDriverExposed(t *testing.T) {
+	cases := []struct {
+		name string
+		err  *sqlate.ConstraintError
+		want string
+	}{
+		{
+			"constraint",
+			&sqlate.ConstraintError{Constraint: "users_email_key", Table: "users", Column: "email", Class: sqlate.ErrUniqueViolation, Err: errDriver},
+			`unique constraint violation on constraint "users_email_key": driver says no`,
+		},
+		{
+			"column without a constraint name",
+			&sqlate.ConstraintError{Table: "users", Column: "email", Class: sqlate.ErrNotNullViolation, Err: errDriver},
+			`not-null constraint violation on column "email": driver says no`,
+		},
+		{
+			"neither",
+			&sqlate.ConstraintError{Class: sqlate.ErrCheckViolation, Err: errDriver},
+			"check constraint violation: driver says no",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.err.Error(); got != tc.want {
+				t.Errorf("Error() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

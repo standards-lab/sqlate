@@ -75,11 +75,36 @@ func TestParse_PlainCommentsAreProse(t *testing.T) {
 	}
 }
 
+func TestParse_FoldsContinuationLinesIntoOneValue(t *testing.T) {
+	const want = "SQL Server: OUTPUT INSERTED; Oracle: RETURNING INTO"
+	texts := map[string]string{
+		"value on the first line": "--| port: SQL Server: OUTPUT INSERTED;\n--|   [port]: Oracle: RETURNING INTO\nSELECT 1",
+		"value in the folds":      "--| port:\n--|   [port]: SQL Server: OUTPUT INSERTED;\n--|   [port]: Oracle: RETURNING INTO\nSELECT 1",
+	}
+	for name, text := range texts {
+		h := parse(t, text)
+		if got := h.All("port"); !slices.Equal(got, []string{want}) {
+			t.Errorf("%s: port = %v", name, got)
+		}
+		if ds := h.Declarations(); len(ds) != 1 || ds[0].Line != 1 {
+			t.Errorf("%s: declarations = %v", name, ds)
+		}
+	}
+	h := parse(t, "--| port: only text\n--|   [port]:\nSELECT 1")
+	if v, _ := h.Get("port"); v != "only text" {
+		t.Errorf("empty fold: port = %q", v)
+	}
+}
+
 func TestParse_RejectsMalformedAndMisplacedDirectives(t *testing.T) {
 	cases := map[string]string{
-		"no key":                 "--| just words\nSELECT 1",
-		"uppercase key":          "--| Tier: standard\nSELECT 1",
-		"declaration after body": "--| tier: standard\nSELECT 1\n--| key: id",
+		"no key":                  "--| just words\nSELECT 1",
+		"uppercase key":           "--| Tier: standard\nSELECT 1",
+		"declaration after body":  "--| tier: standard\nSELECT 1\n--| key: id",
+		"fold after a blank line": "--| port: OUTPUT INSERTED\n\n--|   [port]: RETURNING INTO\nSELECT 1",
+		"fold after prose":        "--| port: OUTPUT INSERTED\n-- prose\n--|   [port]: RETURNING INTO\nSELECT 1",
+		"fold of another key":     "--| port: OUTPUT INSERTED\n--|   [native]: RETURNING INTO\nSELECT 1",
+		"fold of nothing":         "--|   [port]: RETURNING INTO\nSELECT 1",
 	}
 	for name, text := range cases {
 		if _, err := header.Parse(text); err == nil {

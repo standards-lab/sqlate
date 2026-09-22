@@ -49,7 +49,9 @@ read in one place.
 | `ErrConnectionFailed` | A connection or a transaction could not be obtained. Wraps the driver's error. | `errors.Is` |
 | `ErrInvalidValue` | A data exception: a bound value the engine could not read as the type it was cast to (SQLSTATE class 22). Wraps the driver's error. | `errors.Is` |
 | `ErrUniqueViolation`, `ErrForeignKeyViolation`, `ErrCheckViolation`, `ErrNotNullViolation` | The four constraint classes. | `errors.Is` on the class |
-| `ConstraintError` | The value a dialect returns for a constraint violation: `Class` (one of the four), `Err` (the driver's error), and `Constraint`, the violated constraint's name when the driver exposes it. | `errors.As` |
+| `ConstraintError` | The value a dialect returns for a constraint violation: `Class` (one of the four), `Err` (the driver's error), and `Constraint`, `Table`, and `Column`, the violated constraint's name and the table and column it names, each filled when the driver exposes it. A not-null violation names no constraint, so `Column` is its only handle. | `errors.As` |
+| `ErrDependentObjects` | A drop the engine refused because another object still depends on the object dropped, such as a set's revert while a foreign key from a set above still references it. Wraps the driver's error. | `errors.Is` |
+| `ErrSerializationFailure` | A transaction the engine aborted under `SERIALIZABLE` isolation because it could not be serialized with a concurrent one. Wraps the driver's error. | `errors.Is` |
 
 `errors.As` finds the driver's error through every wrap. `sql.ErrNoRows` is never mapped.
 
@@ -59,8 +61,20 @@ read in one place.
 plain `--` comments (prose, skipped), and `--|` declaration lines of the form `--| key: value`.
 The header ends at the first line that is none of those. A `--|` line that is not a
 declaration is an error, and a declaration after the body has begun is an error. `Header.End()`
-is the byte offset where the body begins; `Get`, `All`, and `Keys` read the declarations. The
-package knows no keys; each consumer decides which it accepts.
+is the byte offset where the body begins; `Declarations`, `Get`, `All`, and `Keys` read the
+declarations. The package knows no keys; each consumer decides which it accepts.
+
+A long value folds across lines: a line `--| [key]: more` repeats in brackets the key of the
+declaration directly above it, and `Parse` appends its text to that declaration's value with
+one space between the pieces. A blank line, a prose line, or another declaration ends the run a
+fold may continue, and a fold whose key differs from the declaration it continues, or that
+continues nothing, is an error.
+
+```sql
+--| tier: native
+--| native: postgres, the row-value comparison (a, b) > (x, y).
+--| [native]: The standard tier spells it as a chain of disjuncts.
+```
 
 The keys `query` and `migrate` accept:
 
@@ -68,10 +82,12 @@ The keys `query` and `migrate` accept:
 |---|---|---|
 | `tier` | statements, patterns | Required: `standard` or `native`. |
 | `native` | statements, patterns | Required when the tier is native: the engine feature used and the port, as free text. |
+| `port` | statements | Optional, native tier only: the port as its own declaration, as free text. |
+| `alternate` | patterns | Optional: the comma-separated slots an overlay may declare in place of the pattern's own. |
 | `transaction` | statements | `required`: the statement refuses to run outside a transaction. |
 | `transaction` | migrations | `none`: the migration runs outside a transaction; `required` or absent keeps one. |
-| `key` | projection bases | The identity column and sort tie-breaker. |
-| `field` | projection bases | One per column a request may filter or sort by: `<name> <sql type>`. |
+| `key` | projection bases | The identity column and sort tie-breaker: one declared field, or several separated by commas (`id` or `org, id`), each named once. |
+| `field` | projection bases | One per column a request may filter or sort by: `<name> <sql type>`, with an optional trailing `not null`, matched case-insensitively, for a column that never holds a null. |
 
 ## query: authored statements
 
@@ -79,16 +95,30 @@ The keys `query` and `migrate` accept:
 
 `Publish(namespace, fsys, dir)` declares the `.sql` files under a directory as the patterns of
 a namespace; nothing is read until the catalog is built. `Patterns()` is the library's own
-source under the namespace `sql`. `Source.As(namespace)` registers a source under an alias,
-and `Source.Overlay(fsys, dir)` replaces its patterns by name with an engine's own; a later
-overlay wins over an earlier one.
+source under the namespace `sql`. The namespace is reserved: only the library's source
+registers under it, a source published or aliased as `sql` is refused, and the library's
+source is refused under any other name. `Source.As(namespace)` registers a source under an
+alias, and `Source.Overlay(fsys, dir)` replaces its patterns by name with an engine's own; a
+later overlay wins over an earlier one.
 
-`NewCatalog(sources...)` reads every source and validates it: each file declares a tier, a
-native file names its port, a pattern includes no other pattern, an overlay respells only what
-its source defines with the same parameters, and no two sources share a namespace. Every
-failure is reported, joined, each naming the namespace and file. `MustCatalog` panics instead,
-for the place a program starts. `Catalog.Namespaces()` and `Catalog.Patterns()` list the
-inventory, so a program can report what it compiled against.
+A pattern may declare `--| alternate:`, a second set of slots an overlay may fill in place of
+its own. The library's keyset predicate uses it: its standard body is a chain of disjuncts over
+one slot, and its alternate set is the column list, the operator, and the value list an engine
+needs to spell it as a row-value comparison.
+
+`NewCatalog(sources...)` reads every source and validates it:
+
+- each file declares a tier, and a native file names its port
+- a pattern includes no other pattern
+- an overlay respells only what its source defines, with the same slots or the pattern's
+  alternate set
+- no two sources share a namespace
+- only the library's source registers under `sql`, and it registers under no other namespace
+
+Every failure is reported, joined, each naming the namespace and file. `MustCatalog` panics
+instead, for the place a program starts. `Catalog.Namespaces()` and `Catalog.Patterns()` list
+the inventory, so a program can report what it compiled against; each `Pattern` reports its
+`Slots` and its `Alternate` slots.
 
 ### Compilation
 
@@ -102,9 +132,10 @@ a missing one, `Statements()` lists them in name order, and `Verify` prepares ea
 session.
 
 A `Statement` reports what its file declared: `Name`, `Text` (the body as the engine receives
-it, less a trailing semicolon), `Tier`, `Native`, `TransactionRequired`, `Key`, `Fields`,
-`Params` (the parameter names in position order), and `Catalog`, the catalog it compiled
-against.
+it, less a trailing semicolon), `Tier`, `Native`, `Port`, `TransactionRequired`, `Key` (the
+declared key, a composite key's parts joined by `", "`), `Keys` (the key's parts in
+header order), `Fields` (each with `Name`, `Type`, and `NotNull`), `Params` (the parameter names
+in position order), and `Catalog`, the catalog it compiled against.
 
 ### Parameters and casts
 
@@ -137,8 +168,9 @@ error passes through the session's mapper.
 |---|---|---|
 | `Exec(ctx, session, args)` | none | Returns the rows affected. |
 | `Scan(scan)` | `Rows[T]` | `One` returns the first row (`sql.ErrNoRows` when none); `All` returns every row; `Each` yields rows one at a time as an `iter.Seq2[T, error]`, closing the row set when the loop ends. |
-| `Project(scan)` | `Projection[T]` | `List(ctx, session, directives)` returns the page and the total count; `One(ctx, session, field, value)` is the base under one equality predicate; `Verify` probes the field contract. A base without a key or field contract, or one with parameters of its own, panics at binding. |
+| `Project(scan)` | `Projection[T]` | `List(ctx, session, directives, page, base...)` reads one page by offset and returns a `Collection[T]`; `Continue(ctx, session, directives, after, size, base...)` reads the `size` rows past a previous page's cursor and returns the same; `One(ctx, session, field, value, base...)` is the base under one equality predicate; `Verify` probes the field contract. A base without a key or field contract, or one with an expanded parameter (`{{name...}}`), panics at binding; a base's other parameters bind from the `base` arguments. |
 | `Guarded(check, version)` | `Guard` | `Run(ctx, session, version, args)` binds the expected version under the named parameter, runs the command, and returns the new version; when the command changed nothing it runs the check: no row is `sql.ErrNoRows`, a row is `ErrVersionMismatch` wrapping the expected and current versions. |
+| `GuardedRow(check, version, current)` | `RowGuard[T]` | For a command whose own predicate, beyond the key and the version, can refuse a row. `check` is a `Rows[T]` that reads the whole row, and `current` reads a row's version. `Run` has `Guard.Run`'s signature and outcomes, and adds one: a row at the expected version is a `*RefusedError[T]` carrying the row, which unwraps to `ErrRefused`. |
 
 A statement headed `transaction: required` refuses to run against `*DB` with
 `ErrTransactionRequired`.
@@ -149,6 +181,14 @@ An entity's tags are its scan and binding contract, so a program writes neither 
 nor argument literals. A field's column name is its `db` tag, else its `json` tag's name, else
 the field name lowercased; `db:"-"` excludes it.
 
+An untagged embedded struct flattens: its fields become columns of the outer type, as if
+declared there, so a read model that embeds a shared identity or audit type restates none of its
+fields. A field of the outer type shadows a field of the same name reached through an embedded
+struct, and between two embedded structs that offer one name, the one declared first wins. An
+embedded struct with a `db` or `json` tag is one column holding the whole embedded value
+instead. An embedded pointer contributes no column. The embedded type must be exported, since
+reflection cannot reach an unexported field.
+
 - `Scanner[T]()` returns the `ScanFunc[T]` for `T`: each row's columns are matched to fields by
   name and scanned into a fresh `T`. A column `T` has no field for is an error, so a `SELECT`
   list that grows past its entity fails; a field with no column stays zero.
@@ -158,14 +198,16 @@ the field name lowercased; `db:"-"` excludes it.
 - `Args` is `map[string]any`. A missing name is an `ArgumentError`, a programming error rather
   than request input; an extra name is ignored, so one map serves a guard's command and its
   narrower check. `Args.With(name, value)` returns a copy with one more binding, for an input
-  that arrives separately from the command's fields, such as the row's id.
+  that arrives separately from the command's fields, such as the row's id. `query.With(name,
+  value)` starts a chain with one binding, for a projection base's own parameters.
 
 ### Directives and composition
 
-`Directives` is one read request against a projection: `Page` (1-based `Number` and `Size`,
-both at least 1), `Sort` (a list of `{Field, Descending}`), and `Filters` (a list of
-`{Field, Op, Value}`). Field names reference the base's declared fields; an unknown name is
-rejected as an `UnknownFieldError` before any SQL is composed.
+`Directives` is one read request against a projection: `Sort` (a list of
+`{Field, Descending}`), `Filters` (a list of `{Field, Op, Value}`), and `Total`, a `TotalMode`.
+Field names reference the base's declared fields; an unknown name is rejected as an
+`UnknownFieldError` before any SQL is composed. `TotalExact`, the zero value, counts the rows
+under the filters; `TotalNone` skips the count.
 
 | `Op` | Predicate | Value |
 |---|---|---|
@@ -175,55 +217,133 @@ rejected as an `UnknownFieldError` before any SQL is composed.
 | `OpIn` | `IN (...)` | a `[]any` |
 | `OpIsNull`, `OpIsNotNull` | `IS NULL`, `IS NOT NULL` | ignored |
 
+The page is an argument of the read, not a directive. `List(ctx, session, directives, page,
+base...)` reads by offset: `Page` is a 1-based `Number` and a `Size`, both at least 1.
+`Continue(ctx, session, directives, after, size, base...)` reads the `size` rows past `after`,
+a `Cursor` a previous page returned; it refuses an empty cursor, since `List` reads a request's
+first page. Both return a `Collection[T]`:
+
+- `Items` is the page's rows.
+- `Total` is the count under the filters, or `NoTotal` (-1) when the request declined it. A
+  continued page reports the same total a first page does.
+- `More` reports whether a further page exists. The read fetches one row past the page's size
+  to find out, and never scans that row.
+- `Next` is the cursor that continues past the page's last row. It is empty when `More` is
+  false or the ordering cannot be continued by cursor.
+
+`base` is the base statement's own parameters, as `Args` merged left to right, a later value
+winning; a parameter no argument names is an `ArgumentError`. `query.With("org", id)` builds
+one.
+
 The library composes the read from its own patterns: the base as a derived table `q`, the
 predicates on `q.<field>`, the sort terms with the key appended as the tie-breaker, and the
 paging clause. Each value binds through `CAST(placeholder AS <declared type>)`, so the engine
 parses request text and a value it cannot read is the request's fault. The count under the same
-filters runs first and is the read's total. The composed text depends only on the signature,
-the directives with the values removed, so the driver's prepared-statement cache serves repeated
-requests.
+filters runs first, unless the request declined it, and is the read's total. The composed text
+depends only on the signature, the directives with the values removed, so the driver's
+prepared-statement cache serves repeated requests.
+
+The key makes the ordering total. After the caller's sorts, the read appends every key field
+the sorts do not name, in header order, so a composite key tie-breaks in the order its header
+declares. The keyed prefix is the shortest run of sort terms, from the first, that includes
+every key field: those terms order the rows uniquely, and a cursor records the last row's
+values for them. An appended key field takes the keyed prefix's direction.
+
+An ordering is cursorable when every term of its keyed prefix sorts in one direction and every
+field in it is declared `not null`. A cursorable read issues `Next`, and `Continue` adds the
+keyset predicate, the rows past the cursor's values in that direction, to the filters. The
+standard spelling of the predicate is a chain of disjuncts, `(a > x) OR (a = x AND b > y)`; an
+engine may overlay it as a row-value comparison, `(a, b) > (x, y)`. A cursor is opaque,
+URL-safe text a caller relays unchanged. It records the base, the keyed fields, the direction,
+and the values, under a hash of those and each keyed field's declared type, so a cursor from
+before a contract change is refused. It also records the filters, so `Continue` under other
+filters than the page that issued it is refused as a `CursorMismatch`. Filters with a value
+that has no JSON form, such as a float NaN, cannot be recorded, and their page reports `More`
+without a `Next`.
 
 Every error a request's declarations can cause unwraps to `ErrDirectives`, so a caller's
-check for a bad request is one `errors.Is`: `UnknownFieldError` (with `Field` and `Use`, sort or
-filter), `UnknownOperatorError`, and `InvalidValueError`, which names the field for a value of
-the wrong shape for its operator, or wraps the engine's error (and `sqlate.ErrInvalidValue`)
-for a value the engine rejected.
+check for a bad request is one `errors.Is`:
+
+- `UnknownFieldError`, with `Field` and `Use`, sort or filter.
+- `UnknownOperatorError`.
+- `InvalidValueError`, which names the field for a value of the wrong shape for its operator,
+  or wraps the engine's error (and `sqlate.ErrInvalidValue`) for a value the engine rejected.
+- `CursorError`, whose `Reason` says why `Continue` refused a cursor: `CursorMalformed`, a
+  cursor that does not decode or verify; `CursorMismatch`, a cursor issued for another base,
+  keyed fields, direction, or filters; `CursorUnsupported`, a sort that is not cursorable.
+- A page number or size below 1, an empty cursor, or an unknown `TotalMode`.
 
 ### Verification
 
 `Statements.Verify(ctx, session)` prepares every statement, so a reference the schema no
 longer satisfies fails at startup with the statement named. `Projection.Verify` prepares a
-probe naming every declared field and the key over the base, so a field the base no longer
-outputs, or a declared type the engine does not know, fails the same way. `query.Verify(ctx,
+probe that names every declared field over the base and compares each with a cast of its
+declared type, so a field the base no longer outputs, a declared type the engine does not know,
+or a type that no longer matches its column fails the same way. A second probe prepares one
+page past a cursor over the key, so the keyset predicate and the paging clause, an engine's
+overlay of either included, are checked at startup too. `query.Verify(ctx,
 session, verifiers...)` runs any number of them and joins their failures; startup and any
 later check call it with the same arguments.
 
 ## migrate: schema versioning
 
-**The set.** A `Migration` is one schema step: `Version`, `Name`, `Up` and `Down` (the SQL
-texts; `Down` may be empty), and `Transactional`. `Files(fsys, dir)` reads the
-`NNNN_name.up.sql` and `NNNN_name.down.sql` layout into a version-ordered set. The up file's
+**The migrations.** A `Migration` is one schema step: `Version`, `Name`, `Up` and `Down` (the
+SQL texts; `Down` may be empty), and `Transactional`. `Files(fsys, dir)` reads the
+`NNNN_name.up.sql` and `NNNN_name.down.sql` layout into a version-ordered list. The up file's
 header decides `Transactional`; a down file that declares differently is an error. Versions must
 be unique; a down without its up is an error; an up without its down is allowed.
 
-**The migrator.** `New(db, set, options)` validates the set (versions positive and strictly
-increasing, names and up texts present) and takes the lock capability and the `Catalog` from
-the dialect when it has them. `Options` has defaults for every field: `Table` (the history
-table, `schema_version`), `LockName` (`migrate.<table>`), `Unlocked`, and `Logger`.
+**The sets.** A `Set` is one layer of a schema, as a library ships it or a program declares it:
+`Name`, `Table` (its history table), and `Migrations`. A migrator runs one or more sets,
+declared bottom-first: a set's migrations may reference the objects of the sets declared before
+it, and never those of the sets after it. An empty `Table` is `DefaultTable`, `schema_version`,
+so at most one set may leave it empty. A program that ran a single list of migrations under an
+earlier release adopts sets with its history unchanged, since the default table and its columns
+are the same.
 
-| Method | Effect |
-|---|---|
-| `Up(ctx)` | Applies every pending migration. |
-| `Down(ctx, n)` | Reverts the n most recently applied; a migration without down text is `ErrNoDown`. |
-| `Steps(ctx, n)` | Applies the next n when positive, reverts the last -n when negative. |
-| `Force(ctx, version)` | Sets the history to the version as an operator override, clearing a dirty row; nothing runs against the schema. |
-| `Verify(ctx)` | Checks, without the lock, that the history is a clean, complete prefix of the set. |
-| `Version(ctx)` | Reads the history's head: the highest applied version and whether it is dirty. |
+```go
+m, err := migrate.New(db, []migrate.Set{
+	{Name: "audit", Table: "audit_schema_version", Migrations: auditMigrations},
+	{Name: "app", Migrations: appMigrations},
+}, migrate.Options{})
+```
+
+**The migrator.** `New(db, sets, options)` validates the sets (at least one, names and history
+tables distinct, and in each set versions positive and strictly increasing, names and up texts
+present) and takes the lock capability and the `Catalog` from the dialect when it has them. It
+performs no I/O. `Options` has defaults for every field: `LockName` (`migrate.<table>`, over the
+top set's table), `Unlocked`, and `Logger`.
+
+A method that names no set acts on the top set, the last one declared, so a migrator over one
+set acts on that set. `Up`, `Verify`, `Reset`, and `Status` cover every set.
+
+| Method | Sets | Effect |
+|---|---|---|
+| `Up(ctx)` | every | Applies every pending migration, sets in declared order. |
+| `Down(ctx, n)` | top | Reverts the n most recently applied; a migration without down text is `ErrNoDown`. |
+| `Steps(ctx, n)` | top | Applies the next n when positive, reverts the last -n when negative; fewer remaining is not an error. |
+| `Force(ctx, version)` | top | Sets the history to the version as an operator override, clearing a dirty row; nothing runs against the schema. |
+| `Reset(ctx)` | every | Reverts every set in reverse declared order and drops each set's history table once that set is reverted, so a later `Up` replays every set from zero. |
+| `Verify(ctx)` | every | Checks, without the lock, that each history is a clean, complete prefix of its set, and returns the first fault. |
+| `Status(ctx)` | every | Reads, without the lock, a `SetStatus` per set: `Name`, `Table`, `Version` (the highest applied), `Latest`, `Pending`, and `Dirty`. |
+| `Version(ctx)` | top | Reads the history's head: the highest applied version and whether it is dirty. |
+| `Migrations()` | top | Returns a copy of the set's migrations. |
+
+**Layers.** `Layers()` returns a `Layer` handle on every set in declared order, and
+`Layer(name)` returns the one named, reporting whether it exists. A `Layer` has `Name`, `Table`,
+`Migrations`, `Version`, `Verify`, `Status`, `Steps`, `Down`, and `Force`, each acting on that
+set alone. The ordering between sets holds for every verb that runs migrations: a revert is
+refused with `ErrAboveApplied` while a set above has applied migrations, and an apply is refused
+with `ErrBelowPending` while a set below has pending ones. The top set's `Down` and `Steps` on
+the migrator follow the same rule.
 
 **The lock.** A run pins one connection, takes the dialect's named lock on it, does its work,
 and releases the lock, so concurrent starters of the same program, in one process or across
-processes, apply the set once. A dialect without `Locker` fails with `ErrNoLocker` unless
-`Options.Unlocked` opts out, in which case concurrent starters are unsafe.
+processes, apply the sets once. A dialect without `Locker` fails with `ErrNoLocker` unless
+`Options.Unlocked` opts out, in which case concurrent starters are unsafe. Inside the lock,
+every run that applies or reverts migrations creates and reads every set's history table first,
+so a dirty set or a history that does not match its set refuses the run before any migration
+runs. `Force` is the exception, since it repairs a dirty history.
 
 **Transactions and dirty state.** A transactional migration runs inside a transaction and
 leaves nothing behind on failure. A migration headed `transaction: none` runs under autocommit
@@ -236,11 +356,14 @@ failure), `Verify` reports `ErrDirty`, and the repair is an operator's task: fix
 **The history table.** Standard DML with bound parameters, except the two statements whose
 syntax differs between engines: creating the table and checking that it exists. `Catalog` is
 that pair; a dialect provides it by implementing the two methods, and a dialect that does not
-gets `StandardCatalog`, which serves PostgreSQL, MySQL, and MariaDB.
+gets `StandardCatalog`, which serves MySQL and MariaDB. Its existence check matches the table
+name in every schema, so the `postgres` dialect implements `Catalog` itself.
 
 **Errors.** `ErrNoLocker`, `ErrDirty` (`DirtyError`), `ErrPending` (`PendingError`, the
 unapplied versions), `ErrUnknownVersion` (`UnknownVersionError`, an applied row the set does
-not contain), `ErrNoDown`, and `ErrVersionNotFound`.
+not contain), `ErrNoDown`, `ErrVersionNotFound`, `ErrAboveApplied`, and `ErrBelowPending`. An
+error from one set's history or migrations is a `*SetError` whose `Set` names the set; it
+unwraps to the set's own error, so `errors.Is` and `errors.As` reach the error inside it.
 
 ## sqltest: the scripted driver
 
@@ -317,7 +440,9 @@ segments. A source or the engine is a path: a directory of the tree, or a module
 first segment contains a dot). A producer, a module or a directory that contains its own
 `sqlint.toml`, declares in `[export]` what a consumer reads: the directory its patterns
 publish, the overlay directory an engine supplies, and the native forms an engine names. A
-bare directory is the pattern files themselves. An engine is always a producer.
+bare directory is the pattern files themselves. An engine is always a producer. The `sql`
+namespace always resolves to the patterns the library embeds: the linter does not read the path
+of a `sql` entry, and applies the entry's overlay, when one is declared, to those patterns.
 
 Native forms are a deny list: each is a regular expression under the name a finding reports, so
 the engine states in what position a spelling counts, word boundaries and case, and not only
@@ -366,16 +491,31 @@ package rather than the command.
 | 23503 | `ConstraintError` with `ErrForeignKeyViolation` |
 | 23514 | `ConstraintError` with `ErrCheckViolation` |
 | 23502 | `ConstraintError` with `ErrNotNullViolation` |
+| 2BP01 | `sqlate.ErrDependentObjects` wrapping the driver error |
+| 40001 | `sqlate.ErrSerializationFailure` wrapping the driver error |
 | anything else | the error unchanged, `sql.ErrNoRows` included |
+
+Each `ConstraintError` carries the constraint, table, and column names the server reports.
 
 `Lock` and `Unlock` implement `sqlate.Locker` over `pg_advisory_lock` and `pg_advisory_unlock`
 on a pinned connection. The name enters the engine's key space through `hashtext`, so locks are
 named and never numbered; the lock belongs to the connection's session and outlives any
 transaction on it. `Unlock` of a lock the session does not hold is `ErrLockNotHeld`.
 
-The module's `sqlint.toml` exports the engine's native forms. It supplies no overlay, since
-PostgreSQL accepts every library pattern as written in standard SQL. Its integration tier,
-behind the `integration` build tag, is the proofs only an engine can give: non-transactional
-DDL, dirty state and repair, concurrent starters in one process and across processes, the
-cancelled context, and request values parsed by the engine. `mise run acceptance` runs them
-against a compose PostgreSQL and tears it down.
+`CreateHistory` and `HistoryExists` implement `migrate.Catalog`. `CreateHistory` is
+`StandardCatalog`'s DDL unchanged. `HistoryExists` checks for the table in the session's
+current schema, so a table of the same name in another schema does not satisfy it.
+`ServerVersion` returns `SELECT version()`, the statement an administrative read runs to report
+the engine's version.
+
+`postgres.Patterns()` is the library's patterns with one overlaid: the keyset predicate a
+cursor continues by, spelled as the row-value comparison `(a, b) > (x, y)` in place of the
+standard chain of disjuncts. The engine accepts every other library pattern as written. A
+program passes `postgres.Patterns()` to `NewCatalog` in place of `query.Patterns()`, and only
+the text of a continued page's predicate changes.
+
+The module's `sqlint.toml` exports the engine's native forms and the overlay directory. Its
+integration tier, behind the `integration` build tag, is the proofs only an engine can give:
+non-transactional DDL, dirty state and repair, concurrent starters in one process and across
+processes, the cancelled context, and request values parsed by the engine. `mise run acceptance`
+runs them against a compose PostgreSQL and tears it down.

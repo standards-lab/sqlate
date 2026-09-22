@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/standards-lab/sqlate"
+	"github.com/standards-lab/sqlate/migrate"
 )
 
 // Dialect is the PostgreSQL dialect: sqlate.Dialect plus the sqlate.Locker
@@ -18,8 +19,9 @@ import (
 type Dialect struct{}
 
 var (
-	_ sqlate.Dialect = Dialect{}
-	_ sqlate.Locker  = Dialect{}
+	_ sqlate.Dialect  = Dialect{}
+	_ sqlate.Locker   = Dialect{}
+	_ migrate.Catalog = Dialect{}
 )
 
 // Name identifies the engine.
@@ -29,9 +31,11 @@ func (Dialect) Name() string { return "postgres" }
 func (Dialect) Placeholder(n int) string { return "$" + strconv.Itoa(n) }
 
 // MapError classifies a driver error by its SQLSTATE: class 22 as
-// sqlate.ErrInvalidValue with the engine's message reachable, the four
-// class-23 constraint violations as a sqlate.ConstraintError with the
-// constraint name, and everything else unchanged. nil stays nil.
+// sqlate.ErrInvalidValue with the engine's message reachable, 2BP01 as
+// sqlate.ErrDependentObjects, 40001 as sqlate.ErrSerializationFailure, the
+// four class-23 constraint violations as a sqlate.ConstraintError with the
+// constraint, table, and column names the server reports, and everything
+// else unchanged. nil stays nil.
 func (Dialect) MapError(err error) error {
 	if err == nil {
 		return nil
@@ -42,6 +46,12 @@ func (Dialect) MapError(err error) error {
 	}
 	if strings.HasPrefix(pgErr.Code, "22") {
 		return fmt.Errorf("%w: %w", sqlate.ErrInvalidValue, err)
+	}
+	switch pgErr.Code {
+	case "2BP01":
+		return fmt.Errorf("%w: %w", sqlate.ErrDependentObjects, err)
+	case "40001":
+		return fmt.Errorf("%w: %w", sqlate.ErrSerializationFailure, err)
 	}
 	var class error
 	switch pgErr.Code {
@@ -56,7 +66,13 @@ func (Dialect) MapError(err error) error {
 	default:
 		return err
 	}
-	return &sqlate.ConstraintError{Constraint: pgErr.ConstraintName, Class: class, Err: err}
+	return &sqlate.ConstraintError{
+		Constraint: pgErr.ConstraintName,
+		Table:      pgErr.TableName,
+		Column:     pgErr.ColumnName,
+		Class:      class,
+		Err:        err,
+	}
 }
 
 // ServerVersion returns the statement an administrative read runs to learn
@@ -64,6 +80,22 @@ func (Dialect) MapError(err error) error {
 // differently, so the dialect carries it as a capability an administrative
 // layer discovers by type assertion.
 func (Dialect) ServerVersion() string { return "SELECT version()" }
+
+// CreateHistory returns migrate.StandardCatalog's DDL unchanged: its CREATE
+// TABLE IF NOT EXISTS with text and boolean columns already suits the engine.
+func (Dialect) CreateHistory(table string) string {
+	return migrate.StandardCatalog{}.CreateHistory(table)
+}
+
+// HistoryExists returns the existence check restricted to the session's
+// current schema. migrate.StandardCatalog's form matches table_name in every
+// schema information_schema.tables lists, so a same-named table in another
+// schema satisfies it while the current schema's history table is missing.
+// current_schema() is a PostgreSQL function, so the fix lives here rather
+// than in StandardCatalog, whose other engines spell it differently.
+func (Dialect) HistoryExists(param string) string {
+	return "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = " + param
+}
 
 // Lock takes the session-level advisory lock for name on conn, blocking
 // until it is granted or ctx ends. The name enters the engine's 32-bit key

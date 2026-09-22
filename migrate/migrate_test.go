@@ -58,13 +58,20 @@ func (lockingDialect) Unlock(ctx context.Context, conn *sql.Conn, name string) e
 	return nil
 }
 
-// newMigrator builds a migrator over the driver fake with the lock
-// capability, so lock and unlock calls are part of the recorded script.
+// newMigrator builds a one-set migrator over the driver fake with the lock
+// capability, so lock and unlock calls are part of the recorded script. The
+// set leaves its table empty, so it uses migrate.DefaultTable.
 func newMigrator(t *testing.T, opts migrate.Options, responses ...sqltest.Response) (*migrate.Migrator, *sqltest.Recorder) {
+	t.Helper()
+	return newMigratorTable(t, "", opts, responses...)
+}
+
+// newMigratorTable is newMigrator with the set's history table named.
+func newMigratorTable(t *testing.T, table string, opts migrate.Options, responses ...sqltest.Response) (*migrate.Migrator, *sqltest.Recorder) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
 	db := sqlate.Wrap(pool, lockingDialect{})
-	m, err := migrate.New(db, set, opts)
+	m, err := migrate.New(db, []migrate.Set{{Name: "app", Table: table, Migrations: set}}, opts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -92,14 +99,20 @@ func TestNew_ValidatesTheSet(t *testing.T) {
 		"zero version": {{Version: 0, Name: "a", Up: "x"}},
 	}
 	for name, ms := range cases {
-		if _, err := migrate.New(db, ms, migrate.Options{}); err == nil {
+		if _, err := migrate.New(db, []migrate.Set{{Name: "app", Migrations: ms}}, migrate.Options{}); err == nil {
 			t.Errorf("%s: New accepted the set", name)
 		}
 	}
-	if _, err := migrate.New(db, set, migrate.Options{Table: "bad name; drop"}); err == nil {
+	if _, err := migrate.New(db, []migrate.Set{{Name: "app", Table: "bad name; drop", Migrations: set}}, migrate.Options{}); err == nil {
 		t.Error("New accepted a table name that is not an identifier")
 	}
-	m, err := migrate.New(db, set, migrate.Options{})
+	if _, err := migrate.New(db, nil, migrate.Options{}); err == nil {
+		t.Error("New accepted no sets")
+	}
+	if _, err := migrate.New(db, []migrate.Set{}, migrate.Options{}); err == nil {
+		t.Error("New accepted an empty set slice")
+	}
+	m, err := migrate.New(db, []migrate.Set{{Name: "app", Migrations: set}}, migrate.Options{})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -272,7 +285,7 @@ func TestDown_WithoutDownTextIsErrNoDown(t *testing.T) {
 		locked, created, history([]driver.Value{int64(1), "a", false}), unlocked,
 	)
 	db := sqlate.Wrap(pool, lockingDialect{})
-	m, err := migrate.New(db, []migrate.Migration{{Version: 1, Name: "a", Up: "x", Transactional: true}}, migrate.Options{})
+	m, err := migrate.New(db, []migrate.Set{{Name: "app", Migrations: []migrate.Migration{{Version: 1, Name: "a", Up: "x", Transactional: true}}}}, migrate.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -379,7 +392,7 @@ func TestNew_TakesTheCatalogFromTheDialect(t *testing.T) {
 	ctx := context.Background()
 	pool, rec := sqltest.Open(t, exists(false), locked, created, history(), unlocked)
 	d := catalogDialect{lockingDialect{}}
-	m, err := migrate.New(sqlate.Wrap(pool, d), set, migrate.Options{})
+	m, err := migrate.New(sqlate.Wrap(pool, d), []migrate.Set{{Name: "app", Migrations: set}}, migrate.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -401,7 +414,7 @@ func TestNew_TakesTheCatalogFromTheDialect(t *testing.T) {
 func TestLocked_DialectWithoutLockerFailsUnlessUnlocked(t *testing.T) {
 	pool, rec := sqltest.Open(t, created, history(), sqltest.Response{}, sqltest.Response{})
 	db := sqlate.Wrap(pool, sqltest.Dialect{}) // the stub dialect has no Locker
-	m, err := migrate.New(db, set[:1], migrate.Options{})
+	m, err := migrate.New(db, []migrate.Set{{Name: "app", Migrations: set[:1]}}, migrate.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,7 +425,7 @@ func TestLocked_DialectWithoutLockerFailsUnlessUnlocked(t *testing.T) {
 		t.Errorf("calls made before refusing: %v", rec.Ops())
 	}
 
-	m, err = migrate.New(db, set[:1], migrate.Options{Unlocked: true})
+	m, err = migrate.New(db, []migrate.Set{{Name: "app", Migrations: set[:1]}}, migrate.Options{Unlocked: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -423,7 +436,7 @@ func TestLocked_DialectWithoutLockerFailsUnlessUnlocked(t *testing.T) {
 }
 
 func TestOptions_TableAndLockNameDefaultsAndOverrides(t *testing.T) {
-	m, rec := newMigrator(t, migrate.Options{Table: "app_schema", LockName: "ops.schema"},
+	m, rec := newMigratorTable(t, "app_schema", migrate.Options{LockName: "ops.schema"},
 		locked, created, history(), sqltest.Response{}, sqltest.Response{}, unlocked,
 	)
 	if err := m.Steps(context.Background(), 1); err != nil {
@@ -438,7 +451,7 @@ func TestOptions_TableAndLockNameDefaultsAndOverrides(t *testing.T) {
 	}
 
 	m1, rec1 := newMigrator(t, migrate.Options{}, locked, created, history(), unlocked)
-	m2, rec2 := newMigrator(t, migrate.Options{Table: "other"}, locked, created, history(), unlocked)
+	m2, rec2 := newMigratorTable(t, "other", migrate.Options{}, locked, created, history(), unlocked)
 	_ = m1.Steps(context.Background(), 0) // no-op: no calls
 	_ = m1.Up(context.Background())
 	_ = m2.Up(context.Background())

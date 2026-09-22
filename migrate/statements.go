@@ -22,9 +22,10 @@ type Catalog interface {
 
 // StandardCatalog is the Catalog for engines that accept CREATE TABLE IF NOT
 // EXISTS with text and boolean columns and expose information_schema:
-// PostgreSQL, MySQL, and MariaDB as they ship. SQL Server (no IF NOT EXISTS,
-// no boolean), Oracle (no information_schema), and SQLite (sqlite_master)
-// provide their own.
+// MySQL and MariaDB as they ship, and PostgreSQL as a fallback for a dialect
+// that does not implement its own (see HistoryExists's limitation). SQL
+// Server (no IF NOT EXISTS, no boolean), Oracle (no information_schema),
+// and SQLite (sqlite_master) provide their own.
 type StandardCatalog struct{}
 
 var _ Catalog = StandardCatalog{}
@@ -37,15 +38,23 @@ func (StandardCatalog) CreateHistory(table string) string {
 		"dirty boolean NOT NULL DEFAULT FALSE)"
 }
 
+// HistoryExists checks information_schema.tables by name alone, which spans
+// every schema on the search path: a same-named table in an unrelated
+// schema satisfies the check even though the current schema's own history
+// table does not exist. A dialect for an engine where this matters — as
+// PostgreSQL's own Dialect does — implements Catalog itself with the
+// engine's own schema-qualified form instead of falling back to this one.
 func (StandardCatalog) HistoryExists(param string) string {
 	return "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = " + param
 }
 
-// statements are the texts one migrator runs, rendered once with the
-// dialect's placeholders: the catalog pair from the Catalog, the rest
-// standard DML. Booleans bind as parameters, never as literals.
+// statements are the texts one set's layer runs against its history table,
+// rendered once with the dialect's placeholders: the catalog pair from the
+// Catalog, the rest standard DML, and drop, the DDL Reset runs to remove
+// the set's own history table once that set is reverted. Booleans bind as
+// parameters, never as literals.
 type statements struct {
-	create, exists, all, head, insert, setDirty, del, delAbove string
+	create, exists, all, head, insert, setDirty, del, delAbove, drop string
 }
 
 // history renders the statements for the history table t over
@@ -60,5 +69,6 @@ func history(t string, p func(int) string, c Catalog) statements {
 		setDirty: "UPDATE " + t + " SET dirty = " + p(1) + " WHERE version = " + p(2),
 		del:      "DELETE FROM " + t + " WHERE version = " + p(1),
 		delAbove: "DELETE FROM " + t + " WHERE version > " + p(1),
+		drop:     "DROP TABLE " + t,
 	}
 }

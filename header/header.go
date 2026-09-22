@@ -11,8 +11,9 @@ import (
 // the header is the loader's, and a consumer hands the engine the body.
 const Marker = "--|"
 
-// Declaration is one "--| key: value" line of the header, with its 1-based
-// line number for a consumer's error messages.
+// Declaration is one "--| key: value" declaration of the header, with the
+// 1-based number of the line that opens it for a consumer's error messages. A
+// value folded across several lines is joined into one Value.
 type Declaration struct {
 	Key   string
 	Value string
@@ -26,17 +27,31 @@ type Header struct {
 	end          int
 }
 
-var declaration = regexp.MustCompile(`^([a-z][a-z0-9_-]*):\s*(.*)$`)
+var (
+	declaration  = regexp.MustCompile(`^([a-z][a-z0-9_-]*):\s*(.*)$`)
+	continuation = regexp.MustCompile(`^\[([a-z][a-z0-9_-]*)\]:\s*(.*)$`)
+)
 
 // Parse reads the header from text: the leading run of lines that are
 // blank, plain "--" comments (prose, skipped), or "--|" declarations. The
 // header ends at the first line that is none of those. A declaration line
 // that is not "--| key: value", or a declaration after the body has begun,
 // is an error.
+//
+// A long value folds across lines: "--| [key]: more" repeats the key of the
+// declaration it continues in brackets, and Parse appends its text to that
+// declaration's value with a single space between the pieces. A fold
+// continues the declaration on the line immediately above it, so a blank
+// line, a prose line, or another declaration ends the run a fold may join. A
+// fold whose key is not the one it continues, or that continues nothing, is
+// an error.
 func Parse(text string) (Header, error) {
 	var h Header
 	inHeader := true
 	offset := 0
+	// open is the index in h.declarations of the declaration a fold may
+	// continue, or -1 when no declaration is open.
+	open := -1
 	for n := 1; offset < len(text); n++ {
 		raw, next := text[offset:], len(text)
 		if i := strings.IndexByte(raw, '\n'); i >= 0 {
@@ -47,15 +62,39 @@ func Parse(text string) (Header, error) {
 			inHeader = false
 			h.end = offset
 		}
-		if strings.HasPrefix(line, Marker) {
-			if !inHeader {
-				return h, fmt.Errorf("header: line %d: declaration after the body", n)
-			}
-			m := declaration.FindStringSubmatch(strings.TrimSpace(line[len(Marker):]))
-			if m == nil {
-				return h, fmt.Errorf("header: line %d: %q is not \"--| key: value\"", n, line)
-			}
+		if !strings.HasPrefix(line, Marker) {
+			// A blank line, a prose line, and the body all close the
+			// declaration a fold may continue.
+			open = -1
+			offset = next
+			continue
+		}
+		if !inHeader {
+			return h, fmt.Errorf("header: line %d: declaration after the body", n)
+		}
+		rest := strings.TrimSpace(line[len(Marker):])
+		if m := declaration.FindStringSubmatch(rest); m != nil {
+			open = len(h.declarations)
 			h.declarations = append(h.declarations, Declaration{Key: m[1], Value: strings.TrimSpace(m[2]), Line: n})
+			offset = next
+			continue
+		}
+		m := continuation.FindStringSubmatch(rest)
+		if m == nil {
+			return h, fmt.Errorf("header: line %d: %q is not \"--| key: value\"", n, line)
+		}
+		if open < 0 {
+			return h, fmt.Errorf("header: line %d: %q continues no declaration", n, line)
+		}
+		if h.declarations[open].Key != m[1] {
+			return h, fmt.Errorf("header: line %d: %q continues %q, not the open %q", n, line, m[1], h.declarations[open].Key)
+		}
+		if piece := strings.TrimSpace(m[2]); piece != "" {
+			if h.declarations[open].Value == "" {
+				h.declarations[open].Value = piece
+			} else {
+				h.declarations[open].Value += " " + piece
+			}
 		}
 		offset = next
 	}

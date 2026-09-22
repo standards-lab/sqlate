@@ -196,8 +196,9 @@ func openDatabase(dsn string) (*Database, error) {
 func (d *Database) Close() error { return d.pool.Close() }
 ```
 
-The schema layer reads the embedded migrations and applies them under the engine's advisory
-lock, so several starters of the same program apply them once.
+The schema layer reads the embedded migrations as one set and applies them under the engine's
+advisory lock, so several starters of the same program apply them once. A set with no `Table`
+records its history in `schema_version`.
 
 `schema.go`:
 
@@ -219,13 +220,15 @@ type Schema struct {
 	migrator *migrate.Migrator
 }
 
-// newSchema reads the embedded migrations and builds the migrator.
+// newSchema reads the embedded migrations and builds the migrator over them
+// as one set.
 func newSchema(db *Database) (*Schema, error) {
-	set, err := migrate.Files(migrations, "migrations")
+	teams, err := migrate.Files(migrations, "migrations")
 	if err != nil {
 		return nil, err
 	}
-	migrator, err := migrate.New(db.DB, set, migrate.Options{})
+	sets := []migrate.Set{{Name: "teams", Migrations: teams}}
+	migrator, err := migrate.New(db.DB, sets, migrate.Options{})
 	if err != nil {
 		return nil, err
 	}
@@ -573,9 +576,9 @@ func (s *Store) Create(ctx context.Context, t NewTeam) (Identity, error) {
 }
 
 // List runs the collection read under the request's directives and returns
-// the page and the total count.
-func (s *Store) List(ctx context.Context, d query.Directives) ([]Team, int, error) {
-	return s.view.List(ctx, s.db, d)
+// one page of teams with the total count.
+func (s *Store) List(ctx context.Context, d query.Directives, page query.Page) (query.Collection[Team], error) {
+	return s.view.List(ctx, s.db, d, page)
 }
 
 // Find returns the team with the code; no row is sql.ErrNoRows.
@@ -617,8 +620,10 @@ func (s *Store) Replace(ctx context.Context, id string, version int64, t NewTeam
   `Exec` returns the rows affected, so the count is how many were new.
 - `Create` validates, then runs the command with `One`, which returns the first row; `ArgsOf`
   binds the command's fields by their tag names.
-- `List` runs the collection read under the request's directives and returns the page and the
-  total count. `Find` is the base under one equality predicate; no row is `sql.ErrNoRows`.
+- `List` runs the collection read under the request's directives, the sorts and filters, for
+  the page the caller names. The `Collection` it returns holds the page's `Items` and the
+  `Total` under the filters. `Find` is the base under one equality predicate; no row is
+  `sql.ErrNoRows`.
 - `FindByCodes` runs the expanded statement with `All`, which returns every row. `Each` yields
   rows one at a time as an iterator.
 - `Rename` validates, then runs the guarded command with the version the caller read and
@@ -860,15 +865,14 @@ import (
 // run is the program's work: the reads as JSON, then the commands, then the
 // errors a caller matches on.
 func run(ctx context.Context, stores *Stores) error {
-	page, total, err := stores.Teams.List(ctx, query.Directives{
-		Page: query.Page{Number: 1, Size: 10},
+	page, err := stores.Teams.List(ctx, query.Directives{
 		Sort: []query.Sort{{Field: "code"}},
-	})
+	}, query.Page{Number: 1, Size: 10})
 	if err != nil {
 		return err
 	}
-	fmt.Println("list:", len(page), "of", total)
-	printTable(page)
+	fmt.Println("list:", len(page.Items), "of", page.Total)
+	printTable(page.Items)
 
 	one, err := stores.Teams.Find(ctx, "core")
 	if err != nil {
@@ -914,10 +918,9 @@ func run(ctx context.Context, stores *Stores) error {
 		fmt.Println("duplicate:", violation.Constraint)
 	}
 
-	_, _, err = stores.Teams.List(ctx, query.Directives{
-		Page:    query.Page{Number: 1, Size: 10},
+	_, err = stores.Teams.List(ctx, query.Directives{
 		Filters: []query.Filter{{Field: "id", Op: query.OpEq, Value: "not-a-uuid"}},
-	})
+	}, query.Page{Number: 1, Size: 10})
 	fmt.Println("bad request:", errors.Is(err, query.ErrDirectives))
 
 	_, err = stores.Teams.Rename(ctx, one.ID, one.Version-1, teams.RenameTeam{Name: "Stale"})

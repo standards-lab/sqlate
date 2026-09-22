@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"path"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -124,9 +125,12 @@ func Verify(ctx context.Context, db sqlate.Session, vs ...Verifier) error {
 // its parameters; the engine receives the body, less a trailing semicolon
 // so the statement composes as a derived table. The header grammar: tier
 // required (standard | native); native required when the tier is native,
-// the engine feature used and the port as free text; transaction optional
-// (required); key optional,
-// naming a field; field repeated, "<name> <type>", the name an identifier.
+// the engine feature used and the port as free text; port optional and
+// native only, the port as its own declaration; transaction optional
+// (required); key optional, naming one declared field or several separated
+// by commas, each named once; field repeated, "<name> <type>" with an
+// optional trailing "not null", matched case-insensitively, the name an
+// identifier.
 func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, error) {
 	st := Statement{name: name, dialect: d, catalog: c}
 	h, err := header.Parse(text)
@@ -135,7 +139,7 @@ func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, error) 
 	}
 	for _, dir := range h.Declarations() {
 		switch dir.Key {
-		case "tier", "native", "transaction", "key", "field":
+		case "tier", "native", "port", "transaction", "key", "field":
 		default:
 			return st, fmt.Errorf("line %d: unknown declaration %q", dir.Line, dir.Key)
 		}
@@ -157,6 +161,10 @@ func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, error) 
 	if st.tier == TierStandard && st.native != "" {
 		return st, errors.New("a standard statement has no native declaration")
 	}
+	st.port, _ = h.Get("port")
+	if st.tier == TierStandard && st.port != "" {
+		return st, errors.New("a standard statement has no port declaration")
+	}
 	if tx, ok := h.Get("transaction"); ok {
 		if tx != "required" {
 			return st, fmt.Errorf("transaction declaration %q is not required", tx)
@@ -164,22 +172,29 @@ func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, error) 
 		st.txRequired = true
 	}
 	for _, f := range h.All("field") {
-		fname, typ, ok := strings.Cut(f, " ")
+		decl, notNull := cutNotNull(f)
+		fname, typ, ok := strings.Cut(decl, " ")
 		typ = strings.TrimSpace(typ)
 		if !ok || !identifier.MatchString(fname) || !sqlType.MatchString(typ) {
 			return st, fmt.Errorf("field declaration %q is not \"<name> <type>\"", f)
 		}
-		st.fields = append(st.fields, Field{Name: fname, Type: typ})
+		st.fields = append(st.fields, Field{Name: fname, Type: typ, NotNull: notNull})
 	}
 	if key, ok := h.Get("key"); ok {
-		found := false
-		for _, f := range st.fields {
-			found = found || f.Name == key
+		for name := range strings.SplitSeq(key, ",") {
+			name = strings.TrimSpace(name)
+			found := false
+			for _, f := range st.fields {
+				found = found || f.Name == name
+			}
+			if !found {
+				return st, fmt.Errorf("key %q is not a declared field", name)
+			}
+			if slices.Contains(st.key, name) {
+				return st, fmt.Errorf("key %q is repeated", name)
+			}
+			st.key = append(st.key, name)
 		}
-		if !found {
-			return st, fmt.Errorf("key %q is not a declared field", key)
-		}
-		st.key = key
 	}
 	body, err := c.expand(strings.TrimRight(strings.TrimSpace(text[h.End():]), ";"), st.tier)
 	if err != nil {
@@ -190,6 +205,18 @@ func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, error) 
 		st.renderings = &sync.Map{}
 	}
 	return st, err
+}
+
+// notNullSuffix is the optional trailing suffix of a field declaration.
+const notNullSuffix = " not null"
+
+// cutNotNull returns decl without its trailing "not null" suffix, matched
+// case-insensitively as SQL keywords are, and whether the suffix was there.
+func cutNotNull(decl string) (string, bool) {
+	if len(decl) > len(notNullSuffix) && strings.EqualFold(decl[len(decl)-len(notNullSuffix):], notNullSuffix) {
+		return decl[:len(decl)-len(notNullSuffix)], true
+	}
+	return decl, false
 }
 
 // identifier is a contract field name as it appears in the composed SQL:

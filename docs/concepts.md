@@ -172,16 +172,30 @@ query.Patterns().Overlay(mysqlPatterns, ".")
 ```
 
 An overlay can only respell what the source defines: a file naming no pattern of the source, or
-declaring different parameters, is a catalog error. The library's patterns are written in
-standard SQL, and PostgreSQL accepts every one of them as written, so the `postgres` sub-module
-supplies no overlay.
+declaring different parameters, is a catalog error. A pattern may declare an `alternate` set of
+parameters that an overlay may use instead. The library's keyset predicate, which continues a
+read past a cursor, declares one. Its standard body is a chain of disjuncts, and PostgreSQL
+overlays it as one row-value comparison over the alternate set:
+
+```sql
+--| tier: native
+--| native: postgres — row-value comparison
+--| port: the standard tier's expanded chain of disjuncts, query/patterns/keyset.sql
+-- The keyset predicate as one row-value comparison; op is > or <.
+({{columns}}) {{op}} ({{values}})
+```
+
+`postgres.Patterns()` returns the library's source with this overlay applied, and a program
+passes it to `NewCatalog` in place of `query.Patterns()`. PostgreSQL accepts every other library
+pattern as written.
 
 ## The projection base and the collection read
 
 A projection base declares its `key`, the identity column and the sort tie-breaker, and one
 `field` per column a request may filter or sort by, with the SQL type the request's text is cast
-to. The declarations are an allow list: a request naming any other field is rejected before any
-SQL exists.
+to. A key may name several fields, `--| key: org, id`, and a field whose column never holds a
+null declares it, `--| field: id uuid not null`. The declarations are an allow list: a request
+naming any other field is rejected before any SQL exists.
 
 At request time the library composes the collection read from its own patterns, with the base as
 a derived table. A request for page 2 of 10, sorted by code then newest first, filtered by name
@@ -201,6 +215,11 @@ Request values never enter as text: each is bound through its field's declared t
 the engine cannot read as that type is a rejected request, not a server error. The count under
 the same filters is the read's twin, and the single-row read is the base under one equality
 predicate.
+
+A page can also continue from a cursor, the previous page's last row, in place of an offset.
+The read then replaces the offset with the keyset predicate, the rows past that row in the sort
+order. It needs the sort terms through the last key field to run in one direction over fields
+declared `not null`, and the [features](features.md) document states the rules.
 
 ## Migrations
 

@@ -29,14 +29,12 @@ func lint(fsys fs.FS, resolve sqlint.Resolver) []string {
 }
 
 // tree is a module the way the linter sees it: a configuration naming the
-// library and the engine as directories of the tree, their exports, and
-// the files each convention catches.
+// library and the engine, the engine's export, and the files each
+// convention catches. The library's namespace always resolves to the
+// patterns the query package embeds, so the tree holds no copy of them.
 func tree(config string) fstest.MapFS {
 	return fstest.MapFS{
 		"sqlint.toml":                          {Data: []byte(config)},
-		"lib/sqlint.toml":                      {Data: []byte("[export]\npatterns = \"patterns\"\n")},
-		"lib/patterns/guard_where.sql":         {Data: []byte("--| tier: standard\nid = {{id}} AND version = {{version}}")},
-		"lib/patterns/guard_set.sql":           {Data: []byte("--| tier: standard\nupdated_at = CURRENT_TIMESTAMP, version = version + 1")},
 		"engine/sqlint.toml":                   {Data: []byte("[export.native_forms]\nreturning = '(?i)\\bRETURNING\\b'\ncast = '::'\n")},
 		"domain/a/statements/edit.sql":         {Data: []byte("--| tier: standard\nUPDATE t\nSET a = {{a}}, {{> sql.guard_set}}\nWHERE {{> sql.guard_where}}")},
 		"domain/a/statements/forgetful.sql":    {Data: []byte("--| tier: standard\nUPDATE t\nSET a = {{a}}, version = version + 1\nWHERE {{> sql.guard_where}}")},
@@ -60,7 +58,7 @@ const config = `
 engine = "engine"
 
 [sources]
-sql = "lib"
+sql = "lib" # the path of the library's namespace is not read
 
 [statements]
 dirs = ["domain/*/statements", "admin/*/statements"]
@@ -147,7 +145,7 @@ func TestLint_Defaults(t *testing.T) {
 		"forgetful.sql:4: includes guard_where in a SET statement without guard_set",
 		"0001_a.up.sql: a non-transactional migration contains exactly one statement",
 	)
-	reject(t, findings, "in a standard-tier file", "lib/patterns", "sqlint.toml")
+	reject(t, findings, "in a standard-tier file", "sqlint.toml")
 }
 
 // Errors in the file's own syntax are Load's, each line beginning with
@@ -272,8 +270,35 @@ func TestLint_BareDirectoryIsThePatternsThemselves(t *testing.T) {
 	want(t, findings, `orphan.sql: include of unknown namespace "org" (registered: app, sql)`)
 }
 
+// The header forms a statement or pattern may use lint clean through the
+// compile: a port folded across lines, a composite key, a not-null field,
+// and a pattern's alternate slot set with an overlay that declares it. The
+// library's namespace takes an overlay the same way, onto the embedded
+// patterns, whatever path its entry names.
+func TestLint_HeaderFormsLintClean(t *testing.T) {
+	overlay, err := os.ReadFile("../postgres/overlay/keyset.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := strings.Replace(source(`app = { path = "admin/y/patterns", overlay = "admin/y/overlay" }`),
+		`sql = "lib"`, `sql = { path = "nowhere", overlay = "pgoverlay" }`, 1)
+	fsys := tree(cfg)
+	fsys["pgoverlay/keyset.sql"] = &fstest.MapFile{Data: overlay}
+	fsys["admin/y/patterns/window.sql"] = &fstest.MapFile{Data: []byte("--| tier: standard\n--| alternate: x, y\nBETWEEN {{low}} AND {{high}}")}
+	fsys["admin/y/overlay/window.sql"] = &fstest.MapFile{Data: []byte("--| tier: native\n--| native: postgres — range\n<@ int4range({{x}}, {{y}})")}
+	fsys["domain/d/statements/ranged.sql"] = &fstest.MapFile{Data: []byte("--| tier: native\n--| native: postgres — range\nSELECT id FROM t WHERE n {{> app.window}}")}
+	fsys["domain/d/statements/folded.sql"] = &fstest.MapFile{Data: []byte("--| tier: native\n--| native: postgres — RETURNING\n--| port: read the row back\n--|   [port]: with a second statement\nINSERT INTO t (a) VALUES ({{a}}) RETURNING id")}
+	fsys["domain/d/statements/pair.sql"] = &fstest.MapFile{Data: []byte("--| tier: standard\n--| field: a text not null\n--| field: b bigint not null\n--| field: note text\n--| key: a, b\nSELECT a, b, note FROM t")}
+	findings := lint(fsys, nil)
+	reject(t, findings, "domain/d/", "admin/y/", "sqlint.toml")
+	want(t, findings, "insert_thing.sql: named for its SQL verb")
+
+	fsys["admin/y/overlay/window.sql"] = &fstest.MapFile{Data: []byte("--| tier: native\n--| native: postgres — range\n<@ int4range({{z}}, {{y}})")}
+	want(t, lint(fsys, nil), "sqlint.toml: query: overlay admin/y/overlay: window.sql declares slots [z y]")
+}
+
 func source(line string) string {
-	return strings.Replace(config, "sql = \"lib\"", "sql = \"lib\"\n"+line, 1)
+	return strings.Replace(config, "[sources]\n", "[sources]\n"+line+"\n", 1)
 }
 
 // Every native form the PostgreSQL engine declares trips exactly once on

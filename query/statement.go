@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/standards-lab/sqlate"
@@ -23,10 +24,13 @@ const (
 
 // Field is one entry of a projection base's field contract: the name a
 // request may filter or sort by, and the SQL type a request value is cast
-// to when it does, written as the engine reads it.
+// to when it does, written as the engine reads it. NotNull reports the
+// declaration's trailing "not null"; a field declared without it is
+// presumed nullable.
 type Field struct {
-	Name string
-	Type string
+	Name    string
+	Type    string
+	NotNull bool
 }
 
 // Args binds a statement's named parameters. A missing name is an
@@ -44,8 +48,9 @@ type Statement struct {
 	compiled   compiled
 	tier       Tier
 	native     string
+	port       string
 	txRequired bool
-	key        string
+	key        []string
 	fields     []Field
 	dialect    sqlate.Dialect
 	catalog    *Catalog
@@ -73,6 +78,10 @@ func (st Statement) Tier() Tier { return st.tier }
 // for a native statement; empty for a standard one.
 func (st Statement) Native() string { return st.native }
 
+// Port is the port declaration: how the statement is ported to another
+// engine, for a native statement; empty when none is declared.
+func (st Statement) Port() string { return st.port }
+
 // TransactionRequired reports the "-- transaction: required" header.
 func (st Statement) TransactionRequired() bool { return st.txRequired }
 
@@ -93,8 +102,9 @@ func (st Statement) Scan[T any](scan ScanFunc[T]) Rows[T] {
 
 // Project binds the statement, a projection base, to scan: the typed
 // handle for the collection read. A base without a key or field contract,
-// or one that binds parameters of its own, is a defect in the caller's
-// constructor and panics.
+// or one that takes an expanded parameter, is a defect in the caller's
+// constructor and panics. A base's own non-expanded parameters bind from
+// the base arguments List, Continue, and One take.
 func (st Statement) Project[T any](scan ScanFunc[T]) Projection[T] {
 	return newProjection(st, scan)
 }
@@ -105,8 +115,28 @@ func (st Statement) Guarded(check Statement, version string) Guard {
 	return Guard{command: st, check: check, version: version}
 }
 
-// Key is the declared key of a projection base; empty otherwise.
-func (st Statement) Key() string { return st.key }
+// GuardedRow binds the statement, a guarded command whose own predicate
+// may refuse a row the key and version alone would have matched, to a
+// row-returning check: version names the parameter both bind the expected
+// version to, and current reads a checked row's own version.
+func (st Statement) GuardedRow[T any](check Rows[T], version string, current func(T) int64) RowGuard[T] {
+	return RowGuard[T]{command: st, check: check, version: version, current: current}
+}
+
+// Key is the declared key of a projection base, as the header declares it:
+// a composite key's parts in header order, joined by ", ". It is empty when
+// none is declared.
+func (st Statement) Key() string {
+	return strings.Join(st.key, ", ")
+}
+
+// Keys is the declared key of a projection base, its parts in header order;
+// empty when none is declared.
+func (st Statement) Keys() []string {
+	out := make([]string, len(st.key))
+	copy(out, st.key)
+	return out
+}
 
 // Fields returns the declared field contract, in header order.
 func (st Statement) Fields() []Field {

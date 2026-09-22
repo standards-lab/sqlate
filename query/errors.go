@@ -85,3 +85,36 @@ func (e *InvalidValueError) Error() string {
 }
 
 func (e *InvalidValueError) Unwrap() []error { return []error{ErrDirectives, e.Err} }
+
+// CursorReason classifies a rejected cursor.
+type CursorReason string
+
+const (
+	// CursorMalformed is a cursor List did not issue: it does not decode, or
+	// does not verify against the projection's keyed fields and their types.
+	CursorMalformed CursorReason = "malformed"
+	// CursorMismatch is a cursor issued for another base, another ordering,
+	// or under other filters.
+	CursorMismatch CursorReason = "mismatch"
+	// CursorUnsupported is a request whose sort cannot continue from a
+	// cursor: the keyed prefix mixes directions or includes a nullable field.
+	CursorUnsupported CursorReason = "unsupported"
+)
+
+// CursorError reports a cursor Continue cannot continue from.
+type CursorError struct {
+	Reason CursorReason
+}
+
+func (e *CursorError) Error() string {
+	switch e.Reason {
+	case CursorMismatch:
+		return "query: cursor was issued for another base, ordering, or filters"
+	case CursorUnsupported:
+		return "query: the sort cannot continue from a cursor"
+	default:
+		return "query: cursor is malformed"
+	}
+}
+
+func (e *CursorError) Unwrap() error { return ErrDirectives }

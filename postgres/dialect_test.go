@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/standards-lab/sqlate"
+	"github.com/standards-lab/sqlate/migrate"
 	"github.com/standards-lab/sqlate/postgres"
 	"github.com/standards-lab/sqlate/sqltest"
 )
@@ -28,6 +29,20 @@ func TestDialect_ServerVersion(t *testing.T) {
 	}
 }
 
+func TestDialect_CreateHistoryDelegatesToStandardCatalog(t *testing.T) {
+	want := migrate.StandardCatalog{}.CreateHistory("schema_version")
+	if got := (postgres.Dialect{}).CreateHistory("schema_version"); got != want {
+		t.Errorf("CreateHistory() = %q, want %q", got, want)
+	}
+}
+
+func TestDialect_HistoryExistsQualifiesByCurrentSchema(t *testing.T) {
+	want := "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1"
+	if got := (postgres.Dialect{}).HistoryExists("$1"); got != want {
+		t.Errorf("HistoryExists() = %q, want %q", got, want)
+	}
+}
+
 func TestMapError_ClassifiesConstraints(t *testing.T) {
 	d := postgres.Dialect{}
 	cases := map[string]struct {
@@ -40,7 +55,12 @@ func TestMapError_ClassifiesConstraints(t *testing.T) {
 		"not null":    {"23502", sqlate.ErrNotNullViolation},
 	}
 	for name, c := range cases {
-		pgErr := &pgconn.PgError{Code: c.code, ConstraintName: "uq_organization_parent_code"}
+		pgErr := &pgconn.PgError{
+			Code:           c.code,
+			ConstraintName: "uq_organization_parent_code",
+			TableName:      "organization",
+			ColumnName:     "parent_code",
+		}
 		err := d.MapError(fmt.Errorf("exec: %w", pgErr))
 		if !errors.Is(err, c.class) {
 			t.Errorf("%s: errors.Is(err, class) = false; err = %v", name, err)
@@ -49,6 +69,48 @@ func TestMapError_ClassifiesConstraints(t *testing.T) {
 		if !ok || ce.Constraint != "uq_organization_parent_code" {
 			t.Errorf("%s: error = %v, want a ConstraintError with the constraint name", name, err)
 			continue
+		}
+		if ce.Table != "organization" || ce.Column != "parent_code" {
+			t.Errorf("%s: table, column = %q, %q, want organization, parent_code", name, ce.Table, ce.Column)
+		}
+		if found, ok := errors.AsType[*pgconn.PgError](err); !ok || found != pgErr {
+			t.Errorf("%s: errors.As no longer finds the driver error through the wrap", name)
+		}
+	}
+}
+
+func TestMapError_NotNullWithoutConstraintNameCarriesColumn(t *testing.T) {
+	pgErr := &pgconn.PgError{Code: "23502", TableName: "organization", ColumnName: "name"}
+	err := (postgres.Dialect{}).MapError(pgErr)
+	if !errors.Is(err, sqlate.ErrNotNullViolation) {
+		t.Errorf("23502 = %v, want ErrNotNullViolation", err)
+	}
+	ce, ok := errors.AsType[*sqlate.ConstraintError](err)
+	if !ok {
+		t.Fatalf("23502 = %v, want a ConstraintError", err)
+	}
+	if ce.Constraint != "" || ce.Table != "organization" || ce.Column != "name" {
+		t.Errorf("constraint, table, column = %q, %q, %q, want \"\", organization, name", ce.Constraint, ce.Table, ce.Column)
+	}
+}
+
+func TestMapError_DependentObjectsAndSerializationFailure(t *testing.T) {
+	d := postgres.Dialect{}
+	cases := map[string]struct {
+		code  string
+		class error
+	}{
+		"dependent objects":     {"2BP01", sqlate.ErrDependentObjects},
+		"serialization failure": {"40001", sqlate.ErrSerializationFailure},
+	}
+	for name, c := range cases {
+		pgErr := &pgconn.PgError{Code: c.code, Message: "engine message"}
+		err := d.MapError(fmt.Errorf("exec: %w", pgErr))
+		if !errors.Is(err, c.class) || !strings.Contains(err.Error(), "engine message") {
+			t.Errorf("%s: %v, want the class sentinel wrapping the engine error", name, err)
+		}
+		if _, ok := errors.AsType[*sqlate.ConstraintError](err); ok {
+			t.Errorf("%s: mapped to a ConstraintError, want the plain dual wrap", name)
 		}
 		if found, ok := errors.AsType[*pgconn.PgError](err); !ok || found != pgErr {
 			t.Errorf("%s: errors.As no longer finds the driver error through the wrap", name)
@@ -70,9 +132,9 @@ func TestMapError_DataExceptionIsErrInvalidValue(t *testing.T) {
 
 func TestMapError_PassesUnclassifiedThrough(t *testing.T) {
 	d := postgres.Dialect{}
-	serialization := &pgconn.PgError{Code: "40001"}
-	if got := d.MapError(serialization); got != error(serialization) {
-		t.Errorf("MapError(40001) = %v, want the error unchanged", got)
+	deadlock := &pgconn.PgError{Code: "40P01"}
+	if got := d.MapError(deadlock); got != error(deadlock) {
+		t.Errorf("MapError(40P01) = %v, want the error unchanged", got)
 	}
 	if got := d.MapError(sql.ErrNoRows); got != sql.ErrNoRows {
 		t.Errorf("MapError(sql.ErrNoRows) = %v, want it untouched", got)

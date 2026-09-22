@@ -7,6 +7,18 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Fixed
+
+- The library's own namespace, `sql`, resolves to the patterns the library embeds, whatever
+  path a `[sources] sql = ...` entry names. Before, the linter published that path under `sql`,
+  the catalog refused it as a namespace only the library may register, and every statement
+  directory went unchecked behind that one finding. The entry's path is now not read, so an
+  existing entry can stay as it is; its `overlay`, when declared, still applies to the
+  library's patterns.
+
+Requires `github.com/standards-lab/sqlate v0.2.0`, whose reservation of the `sql` namespace this
+fix accounts for; the defect does not arise against an earlier base version.
+
 ## [v0.1.1] - 2026-09-10
 
 ### Added
