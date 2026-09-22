@@ -7,6 +7,20 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Added
+
+- `Dialect.CreateHistory` and `HistoryExists`, implementing `migrate.Catalog`. `HistoryExists`
+  is qualified by the session's current schema, closing a defect in `migrate.StandardCatalog`'s
+  own form: a same-named history table in an unrelated schema satisfied the check even though
+  the current schema's own table did not exist.
+- `Patterns()`, the library's own patterns with the keyset predicate overlaid as the engine's
+  row-value comparison in place of the standard tier's expanded chain of disjuncts.
+- `MapError` fills `ConstraintError.Table` and `.Column` from the driver, and maps SQLSTATE
+  `2BP01` (dependent objects still exist) and `40001` (serialization failure) to
+  `sqlate.ErrDependentObjects` and `sqlate.ErrSerializationFailure`.
+
+Requires `github.com/standards-lab/sqlate v0.2.0`.
+
 ## [v0.1.1] - 2026-09-04
 
 ### Added

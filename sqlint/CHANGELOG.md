@@ -16,6 +16,9 @@ changelog covers this sub-module only; the base module keeps its own.
   existing entry can stay as it is; its `overlay`, when declared, still applies to the
   library's patterns.
 
+Requires `github.com/standards-lab/sqlate v0.2.0`, whose reservation of the `sql` namespace this
+fix accounts for; the defect does not arise against an earlier base version.
+
 ## [v0.1.1] - 2026-09-10
 
 ### Added
