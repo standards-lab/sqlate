@@ -78,7 +78,7 @@ type Projection[T any] struct {
 
 // newProjection is Statement.Project.
 func newProjection[T any](base Statement, scan ScanFunc[T]) Projection[T] {
-	if base.key == "" || len(base.fields) == 0 {
+	if len(base.key) == 0 || len(base.fields) == 0 {
 		panic(fmt.Sprintf("query: %s: a projection base declares a key and its fields", base.name))
 	}
 	if len(base.compiled.params) != 0 {
@@ -249,10 +249,11 @@ func (p Projection[T]) order(sorts []Sort) (string, error) {
 			name = "order_term_desc"
 		}
 		terms = append(terms, p.base.catalog.render(name, map[string]string{"field": field.Name}))
-		keySorted = keySorted || s.Field == p.base.key
+		keySorted = keySorted || s.Field == p.base.key[0]
 	}
 	if !keySorted {
-		terms = append(terms, p.base.catalog.render("order_term", map[string]string{"field": p.base.key}))
+		// Only the key's first part breaks ties; the collection-read overhaul takes on a composite key's ordering.
+		terms = append(terms, p.base.catalog.render("order_term", map[string]string{"field": p.base.key[0]}))
 	}
 	return p.base.catalog.render("order", map[string]string{"terms": strings.Join(terms, ", ")}), nil
 }

@@ -3,6 +3,7 @@ package query_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -33,15 +34,15 @@ func TestLoad_ParsesTheHeaderIntoTheStatement(t *testing.T) {
 	}
 
 	view := stmts.Statement("organization_view")
-	if view.Tier() != query.TierStandard || view.Key() != "id" || len(view.Fields()) != 3 ||
+	if view.Tier() != query.TierStandard || !slices.Equal(view.Key(), []string{"id"}) || len(view.Fields()) != 3 ||
 		view.Fields()[2] != (query.Field{Name: "version", Type: "integer"}) {
-		t.Errorf("view = tier %s key %s fields %v", view.Tier(), view.Key(), view.Fields())
+		t.Errorf("view = tier %s key %v fields %v", view.Tier(), view.Key(), view.Fields())
 	}
 	lock := stmts.Statement("lock_tree")
 	if lock.Tier() != query.TierNative || !strings.HasPrefix(lock.Native(), "postgres") || !lock.TransactionRequired() {
 		t.Errorf("lock = %+v", lock)
 	}
-	if edit := stmts.Statement("edit"); edit.TransactionRequired() || edit.Key() != "" || len(edit.Params()) != 3 {
+	if edit := stmts.Statement("edit"); edit.TransactionRequired() || len(edit.Key()) != 0 || len(edit.Params()) != 3 {
 		t.Errorf("edit = %+v", edit)
 	}
 	defer func() {
@@ -52,20 +53,54 @@ func TestLoad_ParsesTheHeaderIntoTheStatement(t *testing.T) {
 	stmts.Statement("missing")
 }
 
+func TestLoad_ParsesACompositeKeyNotNullFieldsAndAPort(t *testing.T) {
+	fsys := fstest.MapFS{"sql/event_view.sql": {Data: []byte(
+		"--| tier: native\n" +
+			"--| native: postgres — tstzrange containment.\n" +
+			"--| port: sqlserver — two datetime2 columns and a check constraint.\n" +
+			"--| key: occurred_at, id\n" +
+			"--| field: id uuid not null\n" +
+			"--| field: occurred_at timestamp with time zone not null\n" +
+			"--| field: note text\n" +
+			"SELECT id, occurred_at, note FROM event")}}
+	stmts, err := catalog().Compile(fsys, "sql", sqltest.Dialect{})
+	if err != nil {
+		t.Fatalf("Compile: %v", err)
+	}
+	view := stmts.Statement("event_view")
+	if !slices.Equal(view.Key(), []string{"occurred_at", "id"}) {
+		t.Errorf("Key() = %v, want the two parts in header order", view.Key())
+	}
+	want := []query.Field{
+		{Name: "id", Type: "uuid", NotNull: true},
+		{Name: "occurred_at", Type: "timestamp with time zone", NotNull: true},
+		{Name: "note", Type: "text"},
+	}
+	if !slices.Equal(view.Fields(), want) {
+		t.Errorf("Fields() = %+v, want %+v", view.Fields(), want)
+	}
+	if !strings.HasPrefix(view.Port(), "sqlserver") {
+		t.Errorf("Port() = %q", view.Port())
+	}
+}
+
 func TestLoad_RejectsBrokenHeaders(t *testing.T) {
 	cases := map[string]string{
-		"no tier":                    "SELECT 1",
-		"tier as prose":              "-- tier: standard\nSELECT 1",
-		"bad tier":                   "--| tier: portable\nSELECT 1",
-		"native without note":        "--| tier: native\nSELECT 1",
-		"standard with note":         "--| tier: standard\n--| native: x\nSELECT 1",
-		"unknown declaration":        "--| tier: standard\n--| teir: standard\nSELECT 1",
-		"malformed declaration":      "--| tier: standard\n--| no colon here\nSELECT 1",
-		"declaration after the body": "--| tier: standard\nSELECT 1\n--| key: id",
-		"transaction none":           "--| tier: standard\n--| transaction: none\nSELECT 1",
-		"field without kind":         "--| tier: standard\n--| field: id\nSELECT 1",
-		"field with a bad type":      "--| tier: standard\n--| field: id uuid; drop\nSELECT 1",
-		"key not a declared field":   "--| tier: standard\n--| key: id\n--| field: name text\nSELECT 1",
+		"no tier":                       "SELECT 1",
+		"tier as prose":                 "-- tier: standard\nSELECT 1",
+		"bad tier":                      "--| tier: portable\nSELECT 1",
+		"native without note":           "--| tier: native\nSELECT 1",
+		"standard with note":            "--| tier: standard\n--| native: x\nSELECT 1",
+		"unknown declaration":           "--| tier: standard\n--| teir: standard\nSELECT 1",
+		"malformed declaration":         "--| tier: standard\n--| no colon here\nSELECT 1",
+		"declaration after the body":    "--| tier: standard\nSELECT 1\n--| key: id",
+		"transaction none":              "--| tier: standard\n--| transaction: none\nSELECT 1",
+		"field without kind":            "--| tier: standard\n--| field: id\nSELECT 1",
+		"field with a bad type":         "--| tier: standard\n--| field: id uuid; drop\nSELECT 1",
+		"key not a declared field":      "--| tier: standard\n--| key: id\n--| field: name text\nSELECT 1",
+		"key part not a declared field": "--| tier: standard\n--| key: id, ghost\n--| field: id uuid\nSELECT 1",
+		"key part repeated":             "--| tier: standard\n--| key: id, id\n--| field: id uuid\nSELECT 1",
+		"standard with a port":          "--| tier: standard\n--| port: sqlserver — none\nSELECT 1",
 	}
 	for name, text := range cases {
 		_, err := catalog().Compile(fstest.MapFS{"sql/s.sql": {Data: []byte(text)}}, "sql", sqltest.Dialect{})

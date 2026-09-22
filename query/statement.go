@@ -23,10 +23,13 @@ const (
 
 // Field is one entry of a projection base's field contract: the name a
 // request may filter or sort by, and the SQL type a request value is cast
-// to when it does, written as the engine reads it.
+// to when it does, written as the engine reads it. NotNull reports the
+// declaration's trailing "not null"; a field declared without it is
+// presumed nullable.
 type Field struct {
-	Name string
-	Type string
+	Name    string
+	Type    string
+	NotNull bool
 }
 
 // Args binds a statement's named parameters. A missing name is an
@@ -44,8 +47,9 @@ type Statement struct {
 	compiled   compiled
 	tier       Tier
 	native     string
+	port       string
 	txRequired bool
-	key        string
+	key        []string
 	fields     []Field
 	dialect    sqlate.Dialect
 	catalog    *Catalog
@@ -72,6 +76,10 @@ func (st Statement) Tier() Tier { return st.tier }
 // Native is the native declaration: the engine feature used and the port,
 // for a native statement; empty for a standard one.
 func (st Statement) Native() string { return st.native }
+
+// Port is the port declaration: how the statement is ported to another
+// engine, for a native statement; empty when none is declared.
+func (st Statement) Port() string { return st.port }
 
 // TransactionRequired reports the "-- transaction: required" header.
 func (st Statement) TransactionRequired() bool { return st.txRequired }
@@ -105,8 +113,13 @@ func (st Statement) Guarded(check Statement, version string) Guard {
 	return Guard{command: st, check: check, version: version}
 }
 
-// Key is the declared key of a projection base; empty otherwise.
-func (st Statement) Key() string { return st.key }
+// Key is the declared key of a projection base, in header order; empty
+// when none is declared.
+func (st Statement) Key() []string {
+	out := make([]string, len(st.key))
+	copy(out, st.key)
+	return out
+}
 
 // Fields returns the declared field contract, in header order.
 func (st Statement) Fields() []Field {
