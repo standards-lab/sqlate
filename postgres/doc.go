@@ -4,6 +4,7 @@
 //   - how its driver's errors classify
 //   - the session-level advisory lock the migrate protocol takes
 //   - the statement that reads the server's version
+//   - its spelling of the keyset predicate a cursor continues by
 //
 // It is a sub-module so the driver it names, pgx, enters a consumer's build only
 // through this import, made once where it opens its pool; a consumer opens
@@ -46,7 +47,17 @@
 //
 // The sqlint.toml beside this file exports the engine's native forms: the
 // spellings a standard-tier SQL file must not use, each a regular
-// expression under the name a finding reports. PostgreSQL accepts every
-// library pattern as written in standard SQL, so the module supplies no
-// overlay.
+// expression under the name a finding reports. The same file exports the
+// module's overlay directory to the lint.
+//
+// # Patterns
+//
+// [Patterns] returns the library's patterns with one overlaid: the keyset
+// predicate a cursor continues by. The library composes it in standard SQL
+// as an expanded chain of disjuncts, (a > x) OR (a = x AND b > y); the
+// overlay spells it as the row-value comparison (a, b) > (x, y), which the
+// engine evaluates as one condition over the keyed columns. Every other
+// pattern is accepted as written, so a program that composes [Patterns] in
+// place of query.Patterns changes only the text of a continued page's
+// predicate.
 package postgres
