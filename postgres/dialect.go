@@ -29,9 +29,11 @@ func (Dialect) Name() string { return "postgres" }
 func (Dialect) Placeholder(n int) string { return "$" + strconv.Itoa(n) }
 
 // MapError classifies a driver error by its SQLSTATE: class 22 as
-// sqlate.ErrInvalidValue with the engine's message reachable, the four
-// class-23 constraint violations as a sqlate.ConstraintError with the
-// constraint name, and everything else unchanged. nil stays nil.
+// sqlate.ErrInvalidValue with the engine's message reachable, 2BP01 as
+// sqlate.ErrDependentObjects, 40001 as sqlate.ErrSerializationFailure, the
+// four class-23 constraint violations as a sqlate.ConstraintError with the
+// constraint, table, and column names the server reports, and everything
+// else unchanged. nil stays nil.
 func (Dialect) MapError(err error) error {
 	if err == nil {
 		return nil
@@ -42,6 +44,12 @@ func (Dialect) MapError(err error) error {
 	}
 	if strings.HasPrefix(pgErr.Code, "22") {
 		return fmt.Errorf("%w: %w", sqlate.ErrInvalidValue, err)
+	}
+	switch pgErr.Code {
+	case "2BP01":
+		return fmt.Errorf("%w: %w", sqlate.ErrDependentObjects, err)
+	case "40001":
+		return fmt.Errorf("%w: %w", sqlate.ErrSerializationFailure, err)
 	}
 	var class error
 	switch pgErr.Code {
@@ -56,7 +64,13 @@ func (Dialect) MapError(err error) error {
 	default:
 		return err
 	}
-	return &sqlate.ConstraintError{Constraint: pgErr.ConstraintName, Class: class, Err: err}
+	return &sqlate.ConstraintError{
+		Constraint: pgErr.ConstraintName,
+		Table:      pgErr.TableName,
+		Column:     pgErr.ColumnName,
+		Class:      class,
+		Err:        err,
+	}
 }
 
 // ServerVersion returns the statement an administrative read runs to learn
