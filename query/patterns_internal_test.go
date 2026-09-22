@@ -8,9 +8,6 @@ import (
 
 func TestPatterns_EveryPatternDeclaresItsTierAndSlots(t *testing.T) {
 	c := MustCatalog(Patterns())
-	if c.builtin != Namespace {
-		t.Errorf("builtin namespace = %q", c.builtin)
-	}
 	p, ok := c.lookup(Namespace, "collection")
 	if !ok || len(p.slots) != 4 || p.slots[0] != "base" {
 		t.Errorf("collection slots = %v", p.slots)

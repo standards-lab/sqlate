@@ -44,18 +44,22 @@ var (
 
 // Namespace is the library's own namespace: every include is qualified, as
 // {{> sql.guard_where}}, so a pattern's origin is visible in the statement
-// and two sources cannot collide. A registrant aliases it with As, the way
-// an import is aliased, as the last resort against a collision.
+// and two sources cannot collide. It is reserved: the library always
+// registers under it, and no other source may claim it. Another registrant
+// aliases its own namespace with As, the way an import is aliased, as the
+// last resort against a collision.
 const Namespace = "sql"
 
 // Pattern is one catalog entry as the inventory reports it: its namespace,
-// name, tier, native note, slots in body order, and body.
+// name, tier, native note, slots in body order, the alternate slots an
+// overlay may declare instead, and body.
 type Pattern struct {
 	Namespace string
 	Name      string
 	Tier      Tier
 	Native    string
 	Slots     []string
+	Alternate []string
 	Text      string
 }
 
@@ -83,8 +87,8 @@ func Publish(namespace string, fsys fs.FS, dir string) Source {
 
 // Patterns is the library's own patterns under Namespace: the collection
 // read's request-time patterns and the protocol patterns a statement
-// includes. A catalog that serves a Projection includes it, under Namespace or
-// an alias.
+// includes. A catalog that serves a Projection includes it, and it always
+// registers under Namespace.
 func Patterns() Source {
 	s := Publish(Namespace, patternFiles, "patterns")
 	s.builtin = true
@@ -95,7 +99,9 @@ func Patterns() Source {
 func (s Source) Namespace() string { return s.namespace }
 
 // As registers the source under another namespace, so an include reads
-// {{> ns.name}} for it; the last resort when two sources would collide.
+// {{> ns.name}} for it; the last resort when two sources would collide. The
+// library's own source is the exception: NewCatalog refuses it under any
+// namespace but Namespace.
 func (s Source) As(namespace string) Source {
 	s.namespace = namespace
 	return s
@@ -103,9 +109,10 @@ func (s Source) As(namespace string) Source {
 
 // Overlay replaces patterns of the source by name with the files under dir
 // in fsys: an engine supplies its own paging. The replacement is explicit (a
-// file that names no pattern of the source, or declares different slots,
-// is a catalog error), so an overlay can only respell what the source
-// already defines. A later overlay wins over an earlier one.
+// file that names no pattern of the source, or declares neither the pattern's
+// own slots nor its alternate set, is a catalog error), so an overlay can
+// only respell what the source already defines. A later overlay wins over an
+// earlier one.
 func (s Source) Overlay(fsys fs.FS, dir string) Source {
 	overlays := make([]layer, 0, len(s.overlays)+1)
 	overlays = append(overlays, s.overlays...)
@@ -113,13 +120,15 @@ func (s Source) Overlay(fsys fs.FS, dir string) Source {
 	return s
 }
 
-// pattern is one catalog entry: its body, tier, and the slots it declares.
+// pattern is one catalog entry: its body, tier, the slots it declares, and
+// the alternate slots an overlay may declare in their place.
 type pattern struct {
-	name   string
-	tier   Tier
-	native string
-	text   string
-	slots  []string
+	name      string
+	tier      Tier
+	native    string
+	text      string
+	slots     []string
+	alternate []string
 }
 
 // Catalog is the registered pattern sources, read and validated once, and
@@ -127,7 +136,6 @@ type pattern struct {
 // NewCatalog and safe for concurrent use.
 type Catalog struct {
 	namespaces map[string]map[string]pattern
-	builtin    string
 }
 
 // NewCatalog reads every source and validates it:
@@ -135,8 +143,11 @@ type Catalog struct {
 //   - each file declares a tier
 //   - a native file names its port
 //   - a pattern includes no other pattern
-//   - an overlay respells only what its source defines with the same slots
+//   - an overlay respells only what its source defines, with the same slots
+//     or the pattern's alternate set
 //   - no two sources share a namespace
+//   - only the library's source registers under Namespace, and it registers
+//     under no other
 //
 // Every failure is reported, joined, each naming the namespace and file.
 func NewCatalog(sources ...Source) (*Catalog, error) {
@@ -149,6 +160,14 @@ func NewCatalog(sources ...Source) (*Catalog, error) {
 		}
 		if _, dup := c.namespaces[s.namespace]; dup {
 			errs = append(errs, fmt.Errorf("query: namespace %q is registered twice; alias one source with As", s.namespace))
+			continue
+		}
+		if s.builtin && s.namespace != Namespace {
+			errs = append(errs, fmt.Errorf("query: the library's namespace %q cannot be aliased", Namespace))
+			continue
+		}
+		if !s.builtin && s.namespace == Namespace {
+			errs = append(errs, fmt.Errorf("query: namespace %q is the library's; publish under another name", Namespace))
 			continue
 		}
 		set, err := readLayer(s.namespace, s.base)
@@ -168,17 +187,19 @@ func NewCatalog(sources ...Source) (*Catalog, error) {
 					errs = append(errs, fmt.Errorf("query: overlay %s: %s.sql replaces no pattern of %q", o.dir, name, s.namespace))
 					continue
 				}
-				if !sameSet(b.slots, p.slots) {
-					errs = append(errs, fmt.Errorf("query: overlay %s: %s.sql declares slots %v; %s.%s has %v", o.dir, name, p.slots, s.namespace, name, b.slots))
+				respells := sameSet(b.slots, p.slots) || (len(b.alternate) > 0 && sameSet(b.alternate, p.slots))
+				if !respells {
+					alternate := ""
+					if len(b.alternate) > 0 {
+						alternate = fmt.Sprintf(" (or alternate %v)", b.alternate)
+					}
+					errs = append(errs, fmt.Errorf("query: overlay %s: %s.sql declares slots %v; %s.%s has %v%s", o.dir, name, p.slots, s.namespace, name, b.slots, alternate))
 					continue
 				}
 				set[name] = p
 			}
 		}
 		c.namespaces[s.namespace] = set
-		if s.builtin {
-			c.builtin = s.namespace
-		}
 	}
 	if len(errs) > 0 {
 		return nil, errors.Join(errs...)
@@ -211,7 +232,7 @@ func (c *Catalog) Patterns() []Pattern {
 	var out []Pattern
 	for ns, set := range c.namespaces {
 		for _, p := range set {
-			out = append(out, Pattern{Namespace: ns, Name: p.name, Tier: p.tier, Native: p.native, Slots: append([]string(nil), p.slots...), Text: p.text})
+			out = append(out, Pattern{Namespace: ns, Name: p.name, Tier: p.tier, Native: p.native, Slots: append([]string(nil), p.slots...), Alternate: append([]string(nil), p.alternate...), Text: p.text})
 		}
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -225,7 +246,9 @@ func (c *Catalog) Patterns() []Pattern {
 
 // readLayer reads every pattern file of one directory: the header must
 // declare a tier, a native tier its port, and the body's {{ }} occurrences
-// are its slots; an include inside a pattern is an error.
+// are its slots; an include inside a pattern is an error. An optional
+// alternate declaration names the slots an overlay may declare in place of
+// the body's own, as a comma-separated list.
 func readLayer(ns string, l layer) (map[string]pattern, error) {
 	entries, err := fs.ReadDir(l.fsys, l.dir)
 	if err != nil {
@@ -270,6 +293,13 @@ func readLayer(ns string, l layer) (map[string]pattern, error) {
 		if p.tier == TierStandard && p.native != "" {
 			fail(e.Name(), errors.New("a standard pattern has no native declaration"))
 			continue
+		}
+		if alternate, ok := h.Get("alternate"); ok {
+			for _, name := range strings.Split(alternate, ",") {
+				if name = strings.TrimSpace(name); name != "" {
+					p.alternate = append(p.alternate, name)
+				}
+			}
 		}
 		p.text = strings.TrimRight(string(text)[h.End():], "\n")
 		if bare.MatchString(p.text) {
@@ -317,20 +347,21 @@ func (c *Catalog) lookup(ns, name string) (pattern, bool) {
 }
 
 // render fills one of the library's request-time patterns, resolved under
-// the namespace Patterns() registered as. Every slot must be filled and every
-// fill must name a slot; a mismatch is a defect in the library or an
-// overlay, not a request error, and panics.
+// Namespace, which only the library's source registers under. Every slot must
+// be filled and every fill must name a slot; a mismatch is a defect in the
+// library or an overlay, not a request error, and panics.
 func (c *Catalog) render(name string, fill map[string]string) string {
-	if c.builtin == "" {
+	set, ok := c.namespaces[Namespace]
+	if !ok {
 		panic("query: the catalog contains no library source; a projection needs the library's patterns")
 	}
-	p, ok := c.lookup(c.builtin, name)
+	p, ok := set[name]
 	if !ok {
-		panic(fmt.Sprintf("query: no pattern %s.%s", c.builtin, name))
+		panic(fmt.Sprintf("query: no pattern %s.%s", Namespace, name))
 	}
 	for _, s := range p.slots {
 		if _, ok := fill[s]; !ok {
-			panic(fmt.Sprintf("query: pattern %s.%s: slot %q not filled", c.builtin, name, s))
+			panic(fmt.Sprintf("query: pattern %s.%s: slot %q not filled", Namespace, name, s))
 		}
 	}
 	return slot.ReplaceAllStringFunc(p.text, func(m string) string {

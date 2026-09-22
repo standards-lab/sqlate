@@ -77,15 +77,41 @@ func TestOverlay_RespellsPagingForAPort(t *testing.T) {
 	}
 }
 
+// A pattern declares an alternate slot set, and an overlay respells it with
+// either that set or the pattern's own; any other set is still refused.
+func TestOverlay_AcceptsAPatternsAlternateSlots(t *testing.T) {
+	base := query.Publish("app", fstest.MapFS{
+		"p/paging.sql": {Data: []byte("--| tier: standard\n--| alternate: x, y\nLIMIT {{a}}")},
+	}, "p")
+	if got := query.MustCatalog(base).Patterns()[0].Alternate; !slices.Equal(got, []string{"x", "y"}) {
+		t.Errorf("alternate = %v", got)
+	}
+	alternate := fstest.MapFS{"o/paging.sql": {Data: []byte("--| tier: standard\nROWS {{x}} TO {{y}}")}}
+	c, err := query.NewCatalog(base.Overlay(alternate, "o"))
+	if err != nil {
+		t.Fatalf("an overlay declaring the alternate slots: %v", err)
+	}
+	if got := c.Patterns()[0].Slots; !slices.Equal(got, []string{"x", "y"}) {
+		t.Errorf("overlaid slots = %v", got)
+	}
+	unrelated := fstest.MapFS{"o/paging.sql": {Data: []byte("--| tier: standard\nLIMIT {{z}}")}}
+	if _, err := query.NewCatalog(base.Overlay(unrelated, "o")); err == nil ||
+		!strings.Contains(err.Error(), "declares slots [z]; app.paging has [a] (or alternate [x y])") {
+		t.Errorf("an overlay declaring neither set = %v", err)
+	}
+}
+
 func TestNewCatalog_RejectsWhatItCannotCompose(t *testing.T) {
 	app := fstest.MapFS{"p/identity.sql": {Data: []byte("--| tier: standard\nRETURNING id, version")}}
 	cases := map[string][]query.Source{
-		"registered twice":       {query.Patterns(), query.Publish("sql", app, "p")},
-		"replaces no pattern":    {query.Patterns().Overlay(app, "p")},
-		"declares slots [n]":     {query.Patterns().Overlay(fstest.MapFS{"o/paging.sql": {Data: []byte("--| tier: standard\nLIMIT {{n}}")}}, "o")},
-		"not an identifier":      {query.Publish("my-app", app, "p")},
-		"pattern nope.sql (app)": {query.Publish("app", fstest.MapFS{"p/nope.sql": {Data: []byte("SELECT 1")}}, "p")},
-		"patterns app: open":     {query.Publish("app", app, "missing")},
+		"registered twice":                             {query.Patterns(), query.Publish("sql", app, "p")},
+		`"sql" cannot be aliased`:                      {query.Patterns().As("lib")},
+		"is the library's; publish under another name": {query.Publish("sql", app, "p")},
+		"replaces no pattern":                          {query.Patterns().Overlay(app, "p")},
+		"declares slots [n]":                           {query.Patterns().Overlay(fstest.MapFS{"o/paging.sql": {Data: []byte("--| tier: standard\nLIMIT {{n}}")}}, "o")},
+		"not an identifier":                            {query.Publish("my-app", app, "p")},
+		"pattern nope.sql (app)":                       {query.Publish("app", fstest.MapFS{"p/nope.sql": {Data: []byte("SELECT 1")}}, "p")},
+		"patterns app: open":                           {query.Publish("app", app, "missing")},
 	}
 	for want, sources := range cases {
 		_, err := query.NewCatalog(sources...)
@@ -99,16 +125,16 @@ func TestNewCatalog_RejectsWhatItCannotCompose(t *testing.T) {
 }
 
 // An application publishes its namespace beside the library's, and a
-// statement includes from both; an alias renames the library's.
+// statement includes from both; an alias renames the application's.
 func TestCompile_IncludesAcrossNamespacesAndAliases(t *testing.T) {
 	app := query.Publish("app", fstest.MapFS{
 		"p/identity.sql": {Data: []byte("--| tier: native\n--| native: postgres — RETURNING\nRETURNING id, version")},
 	}, "p")
 	files := fstest.MapFS{
-		"sql/create.sql": {Data: []byte("--| tier: native\n--| native: postgres — RETURNING\nINSERT INTO t (a) VALUES ({{a}}) {{> app.identity}}")},
-		"sql/edit.sql":   {Data: []byte("--| tier: standard\nUPDATE t SET a = {{a}}, {{> lib.guard_set}} WHERE {{> lib.guard_where}}")},
+		"sql/create.sql": {Data: []byte("--| tier: native\n--| native: postgres — RETURNING\nINSERT INTO t (a) VALUES ({{a}}) {{> lib.identity}}")},
+		"sql/edit.sql":   {Data: []byte("--| tier: standard\nUPDATE t SET a = {{a}}, {{> sql.guard_set}} WHERE {{> sql.guard_where}}")},
 	}
-	stmts := query.MustCatalog(query.Patterns().As("lib"), app).MustCompile(files, "sql", sqltest.Dialect{})
+	stmts := query.MustCatalog(query.Patterns(), app.As("lib")).MustCompile(files, "sql", sqltest.Dialect{})
 	if got := stmts.Statement("create").Text(); got != "INSERT INTO t (a) VALUES ($1) RETURNING id, version" {
 		t.Errorf("create = %q", got)
 	}
@@ -117,11 +143,6 @@ func TestCompile_IncludesAcrossNamespacesAndAliases(t *testing.T) {
 	}
 	if stmts.Statement("edit").Catalog() == nil {
 		t.Error("Catalog() returned nil")
-	}
-	if _, err := query.MustCatalog(query.Patterns().As("lib"), app).Compile(fstest.MapFS{
-		"sql/s.sql": {Data: []byte("--| tier: standard\nUPDATE t SET a = 1 WHERE {{> sql.guard_where}}")},
-	}, "sql", sqltest.Dialect{}); err == nil || !strings.Contains(err.Error(), `unknown namespace "sql" (registered: app, lib)`) {
-		t.Errorf("aliased include = %v", err)
 	}
 }
 
