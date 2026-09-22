@@ -64,7 +64,7 @@ func TestOverlay_RespellsPagingForAPort(t *testing.T) {
 		"sql/v.sql": {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\nSELECT id FROM t")},
 	}, "sql", sqltest.Dialect{}).Statement("v").Project(query.Scalar[string])
 	db, rec := session(t, sqltest.Response{Columns: []string{"count"}, Rows: [][]driver.Value{{int64(0)}}}, sqltest.Response{Columns: []string{"id"}})
-	if _, err := view.List(context.Background(), db, query.Directives{Page: query.Page{Number: 3, Size: 4}}); err != nil {
+	if _, err := view.List(context.Background(), db, query.Directives{}, query.Page{Number: 3, Size: 4}); err != nil {
 		t.Fatal(err)
 	}
 	// The library binds offset then fetch, whatever order the port's text

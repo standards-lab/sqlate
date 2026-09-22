@@ -100,7 +100,7 @@ const (
 	CursorUnsupported CursorReason = "unsupported"
 )
 
-// CursorError reports a Directives.After the read cannot continue from.
+// CursorError reports a cursor Continue cannot continue from.
 type CursorError struct {
 	Reason CursorReason
 }

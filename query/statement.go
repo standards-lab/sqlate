@@ -104,7 +104,7 @@ func (st Statement) Scan[T any](scan ScanFunc[T]) Rows[T] {
 // handle for the collection read. A base without a key or field contract,
 // or one that takes an expanded parameter, is a defect in the caller's
 // constructor and panics. A base's own non-expanded parameters bind from
-// the base arguments List and One take.
+// the base arguments List, Continue, and One take.
 func (st Statement) Project[T any](scan ScanFunc[T]) Projection[T] {
 	return newProjection(st, scan)
 }

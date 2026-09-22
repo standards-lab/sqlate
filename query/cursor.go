@@ -9,9 +9,9 @@ import (
 )
 
 // Cursor is an opaque position in a collection read's ordering: the keyed
-// values of the last item of a page, issued by List as Collection.Next and
-// accepted back as Directives.After. It is URL-safe text a consumer relays
-// verbatim; its content is not a contract and a consumer never builds one.
+// values of the last item of a page, issued as Collection.Next and accepted
+// back by Continue. It is URL-safe text a consumer relays verbatim; its
+// content is not a contract and a consumer never builds one.
 type Cursor string
 
 // cursorVersion is the body format; a cursor of another version is malformed.

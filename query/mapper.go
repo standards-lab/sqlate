@@ -71,7 +71,8 @@ func ArgsOf(v any) Args {
 }
 
 // With binds one name: the first Args of a chain that continues with the
-// With method, for a base's own parameters passed to List and One.
+// With method, for a base's own parameters passed to List, Continue, and
+// One.
 func With(name string, v any) Args { return Args{name: v} }
 
 // With returns a copy of a with name bound to v, for the inputs that arrive

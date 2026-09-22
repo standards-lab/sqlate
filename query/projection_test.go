@@ -62,10 +62,9 @@ func people(n int) sqltest.Response {
 func TestList_ComposesCountAndPageOverTheBase(t *testing.T) {
 	db, rec := session(t, count(12), people(2))
 	got, err := projection(t).List(context.Background(), db, query.Directives{
-		Page:    query.Page{Number: 2, Size: 10},
 		Sort:    []query.Sort{{Field: "name", Descending: true}},
 		Filters: []query.Filter{{Field: "age", Op: query.OpGe, Value: "21"}},
-	})
+	}, query.Page{Number: 2, Size: 10})
 	if err != nil || got.Total != 12 || len(got.Items) != 2 || got.Items[1].ID != "b" {
 		t.Fatalf("List = %+v, %v", got, err)
 	}
@@ -108,9 +107,8 @@ func TestList_OperatorLowering(t *testing.T) {
 		t.Run(string(op), func(t *testing.T) {
 			db, rec := session(t, count(0), people(0))
 			_, err := projection(t).List(context.Background(), db, query.Directives{
-				Page:    query.Page{Number: 1, Size: 5},
 				Filters: []query.Filter{{Field: "name", Op: op, Value: c.value}},
-			})
+			}, query.Page{Number: 1, Size: 5})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -129,10 +127,10 @@ func TestList_KeyIsTheTieBreakerUnlessSortedBy(t *testing.T) {
 	db, rec := session(t, count(0), people(0), count(0), people(0), count(0), people(0), count(0), people(0))
 	p := projection(t)
 	ctx := context.Background()
-	_, _ = p.List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 5}})
-	_, _ = p.List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 5}, Sort: []query.Sort{{Field: "id", Descending: true}}})
-	_, _ = p.List(ctx, db, query.Directives{Page: query.Page{Number: 3, Size: 5}, Sort: []query.Sort{{Field: "age"}, {Field: "name", Descending: true}}})
-	_, _ = p.List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 5}, Sort: []query.Sort{{Field: "name", Descending: true}}})
+	_, _ = p.List(ctx, db, query.Directives{}, query.Page{Number: 1, Size: 5})
+	_, _ = p.List(ctx, db, query.Directives{Sort: []query.Sort{{Field: "id", Descending: true}}}, query.Page{Number: 1, Size: 5})
+	_, _ = p.List(ctx, db, query.Directives{Sort: []query.Sort{{Field: "age"}, {Field: "name", Descending: true}}}, query.Page{Number: 3, Size: 5})
+	_, _ = p.List(ctx, db, query.Directives{Sort: []query.Sort{{Field: "name", Descending: true}}}, query.Page{Number: 1, Size: 5})
 	pages := rec.SQL(sqltest.OpQuery)
 	for i, want := range []string{
 		" ORDER BY q.id OFFSET $1 ROWS FETCH NEXT $2 ROWS ONLY",
@@ -156,27 +154,43 @@ func TestList_DirectiveErrorsUnwrapToErrDirectivesBeforeAnyIO(t *testing.T) {
 	db, rec := session(t)
 	p := projection(t)
 	ok := query.Page{Number: 1, Size: 5}
-	cases := map[string]query.Directives{
-		"page 0":         {Page: query.Page{Number: 0, Size: 5}},
-		"size 0":         {Page: query.Page{Number: 1, Size: 0}},
-		"unknown filter": {Page: ok, Filters: []query.Filter{{Field: "email", Op: query.OpEq, Value: "x"}}},
-		"unknown sort":   {Page: ok, Sort: []query.Sort{{Field: "email"}}},
-		"unknown op":     {Page: ok, Filters: []query.Filter{{Field: "name", Op: "matches", Value: "x"}}},
-		"in not a slice": {Page: ok, Filters: []query.Filter{{Field: "name", Op: query.OpIn, Value: "x"}}},
-		"in empty":       {Page: ok, Filters: []query.Filter{{Field: "name", Op: query.OpIn, Value: []any{}}}},
-		"total mode":     {Page: ok, Total: 7},
-		// person_view declares no field not null, so no ordering over it can
-		// be continued by a cursor.
-		"cursor unsupported": {Page: query.Page{Size: 5}, After: "whatever"},
+	cases := map[string]struct {
+		d    query.Directives
+		page query.Page
+	}{
+		"page 0":         {query.Directives{}, query.Page{Number: 0, Size: 5}},
+		"size 0":         {query.Directives{}, query.Page{Number: 1, Size: 0}},
+		"unknown filter": {query.Directives{Filters: []query.Filter{{Field: "email", Op: query.OpEq, Value: "x"}}}, ok},
+		"unknown sort":   {query.Directives{Sort: []query.Sort{{Field: "email"}}}, ok},
+		"unknown op":     {query.Directives{Filters: []query.Filter{{Field: "name", Op: "matches", Value: "x"}}}, ok},
+		"in not a slice": {query.Directives{Filters: []query.Filter{{Field: "name", Op: query.OpIn, Value: "x"}}}, ok},
+		"in empty":       {query.Directives{Filters: []query.Filter{{Field: "name", Op: query.OpIn, Value: []any{}}}}, ok},
+		"total mode":     {query.Directives{Total: 7}, ok},
 	}
-	for name, d := range cases {
-		_, err := p.List(context.Background(), db, d)
+	for name, c := range cases {
+		_, err := p.List(context.Background(), db, c.d, c.page)
 		if !errors.Is(err, query.ErrDirectives) {
 			t.Errorf("%s: err = %v, want ErrDirectives", name, err)
 		}
 	}
+	continued := map[string]struct {
+		after query.Cursor
+		size  int
+	}{
+		"no cursor": {"", 5},
+		"size 0":    {"whatever", 0},
+		// person_view declares no field not null, so no ordering over it can
+		// be continued by a cursor.
+		"cursor unsupported": {"whatever", 5},
+	}
+	for name, c := range continued {
+		_, err := p.Continue(context.Background(), db, query.Directives{}, c.after, c.size)
+		if !errors.Is(err, query.ErrDirectives) {
+			t.Errorf("Continue %s: err = %v, want ErrDirectives", name, err)
+		}
+	}
 	var unknown *query.UnknownFieldError
-	_, err := p.List(context.Background(), db, cases["unknown sort"])
+	_, err := p.List(context.Background(), db, cases["unknown sort"].d, ok)
 	if !errors.As(err, &unknown) || unknown.Use != query.FieldUseSort {
 		t.Errorf("unknown sort = %v", err)
 	}
@@ -207,9 +221,8 @@ func TestList_EngineDataExceptionIsAnInvalidValue(t *testing.T) {
 	pool, _ := sqltest.Open(t, sqltest.Response{Err: dataException{"22P02", `invalid input syntax for type uuid: "nope"`}})
 	db := sqlate.Wrap(pool, invalidValueDialect{})
 	_, err := projection(t).List(context.Background(), db, query.Directives{
-		Page:    query.Page{Number: 1, Size: 5},
 		Filters: []query.Filter{{Field: "id", Op: query.OpEq, Value: "nope"}},
-	})
+	}, query.Page{Number: 1, Size: 5})
 	var invalid *query.InvalidValueError
 	if !errors.As(err, &invalid) || !errors.Is(err, query.ErrDirectives) || !errors.Is(err, sqlate.ErrInvalidValue) {
 		t.Fatalf("err = %v, want an InvalidValueError from the engine", err)
@@ -280,7 +293,7 @@ func TestProject_RequiresAContractAndNoExpandedParameter(t *testing.T) {
 		}()
 	}
 	// A base that binds parameters of its own, none of them expanded, is
-	// projectable: List and One bind them from their base arguments.
+	// projectable: List, Continue, and One bind them from their base arguments.
 	stmts.Statement("with_param").Project(scanPerson)
 }
 
@@ -302,9 +315,8 @@ func ids(values ...string) sqltest.Response {
 func TestList_BindsTheBasesOwnParametersBeforeTheRequests(t *testing.T) {
 	db, rec := session(t, count(1), ids("a"))
 	got, err := tenantView(t, "with_param").List(context.Background(), db, query.Directives{
-		Page:    query.Page{Number: 1, Size: 5},
 		Filters: []query.Filter{{Field: "id", Op: query.OpEq, Value: "a"}},
-	}, query.With("tenant", "t1"))
+	}, query.Page{Number: 1, Size: 5}, query.With("tenant", "t1"))
 	if err != nil || got.Total != 1 || len(got.Items) != 1 {
 		t.Fatalf("List = %+v, %v", got, err)
 	}
@@ -342,8 +354,8 @@ func TestOne_BindsTheBasesOwnParameters(t *testing.T) {
 func TestList_BaseArgumentsMergeLeftToRight(t *testing.T) {
 	db, rec := session(t, count(0), sqltest.Response{Columns: []string{"id", "name"}})
 	p := catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement("two_params").Project(query.Scalar[string])
-	d := query.Directives{Page: query.Page{Number: 1, Size: 5}}
-	if _, err := p.List(context.Background(), db, d, query.With("tenant", "first").With("region", "eu"), query.With("tenant", "second")); err != nil {
+	d, page := query.Directives{}, query.Page{Number: 1, Size: 5}
+	if _, err := p.List(context.Background(), db, d, page, query.With("tenant", "first").With("region", "eu"), query.With("tenant", "second")); err != nil {
 		t.Fatal(err)
 	}
 	if a := rec.Calls()[0].Args; a[0] != "second" || a[1] != "eu" {
@@ -354,9 +366,9 @@ func TestList_BaseArgumentsMergeLeftToRight(t *testing.T) {
 func TestList_MissingBaseArgumentIsAnArgumentErrorBeforeAnyIO(t *testing.T) {
 	db, rec := session(t)
 	p := tenantView(t, "with_param")
-	d := query.Directives{Page: query.Page{Number: 1, Size: 5}}
+	d, page := query.Directives{}, query.Page{Number: 1, Size: 5}
 	var missing *query.ArgumentError
-	_, err := p.List(context.Background(), db, d)
+	_, err := p.List(context.Background(), db, d, page)
 	if !errors.As(err, &missing) || missing.Statement != "with_param" || missing.Name != "tenant" {
 		t.Errorf("List = %v, want an ArgumentError naming the base and the parameter", err)
 	}
@@ -374,9 +386,8 @@ func TestList_MissingBaseArgumentIsAnArgumentErrorBeforeAnyIO(t *testing.T) {
 func TestList_TotalNoneSkipsTheCount(t *testing.T) {
 	db, rec := session(t, people(2))
 	got, err := projection(t).List(context.Background(), db, query.Directives{
-		Page:  query.Page{Number: 1, Size: 5},
 		Total: query.TotalNone,
-	})
+	}, query.Page{Number: 1, Size: 5})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -392,7 +403,7 @@ func TestList_MoreReportsTheRowPastThePage(t *testing.T) {
 	// The page reads one row past its size: three rows for a page of two
 	// means a further page, and the extra row is not scanned.
 	db, rec := session(t, count(9), people(3))
-	got, err := projection(t).List(context.Background(), db, query.Directives{Page: query.Page{Number: 1, Size: 2}})
+	got, err := projection(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err != nil {
 		t.Fatal(err)
 	}

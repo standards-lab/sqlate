@@ -49,7 +49,7 @@ func memberView(t *testing.T) query.Projection[member] {
 func issue(t *testing.T, sorts []query.Sort) query.Cursor {
 	t.Helper()
 	db, _ := session(t, count(9), members("a", "b", "c"))
-	got, err := memberView(t).List(context.Background(), db, query.Directives{Page: query.Page{Number: 1, Size: 2}, Sort: sorts})
+	got, err := memberView(t).List(context.Background(), db, query.Directives{Sort: sorts}, query.Page{Number: 1, Size: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,14 +59,14 @@ func issue(t *testing.T, sorts []query.Sort) query.Cursor {
 	return got.Next
 }
 
-func TestList_CursorContinuesFromThePagesLastItem(t *testing.T) {
+func TestContinue_ContinuesFromThePagesLastItem(t *testing.T) {
 	c := issue(t, nil)
 	// The cursor's page takes no page number: the keyset predicate stands in
 	// for the offset, which stays 0.
 	db, rec := session(t, count(9), members("c"))
-	got, err := memberView(t).List(context.Background(), db, query.Directives{Page: query.Page{Size: 2}, After: c})
+	got, err := memberView(t).Continue(context.Background(), db, query.Directives{}, c, 2)
 	if err != nil {
-		t.Fatalf("List = %+v, %v", got, err)
+		t.Fatalf("Continue = %+v, %v", got, err)
 	}
 	if len(got.Items) != 1 || got.Items[0].ID != "c" || got.More || got.Next != "" {
 		t.Errorf("continued page = %+v", got)
@@ -88,11 +88,11 @@ func TestList_CursorContinuesFromThePagesLastItem(t *testing.T) {
 	}
 }
 
-func TestList_CursorOverADescendingOrderingComparesTheOtherWay(t *testing.T) {
+func TestContinue_ADescendingOrderingComparesTheOtherWay(t *testing.T) {
 	sorts := []query.Sort{{Field: "org", Descending: true}, {Field: "id", Descending: true}}
 	c := issue(t, sorts)
 	db, rec := session(t, count(9), members("c"))
-	if _, err := memberView(t).List(context.Background(), db, query.Directives{Page: query.Page{Size: 2}, Sort: sorts, After: c}); err != nil {
+	if _, err := memberView(t).Continue(context.Background(), db, query.Directives{Sort: sorts}, c, 2); err != nil {
 		t.Fatal(err)
 	}
 	keyset := "(q.org < CAST($1 AS uuid) OR (q.org = CAST($1 AS uuid) AND q.id < CAST($2 AS uuid)))"
@@ -102,14 +102,12 @@ func TestList_CursorOverADescendingOrderingComparesTheOtherWay(t *testing.T) {
 	}
 }
 
-func TestList_CursorIsBoundAfterTheRequestsFilters(t *testing.T) {
+func TestContinue_CursorIsBoundAfterTheRequestsFilters(t *testing.T) {
 	c := issue(t, nil)
 	db, rec := session(t, count(9), members("c"))
-	_, err := memberView(t).List(context.Background(), db, query.Directives{
-		Page:    query.Page{Size: 2},
+	_, err := memberView(t).Continue(context.Background(), db, query.Directives{
 		Filters: []query.Filter{{Field: "name", Op: query.OpEq, Value: "M"}},
-		After:   c,
-	})
+	}, c, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +124,7 @@ func TestList_CursorIsBoundAfterTheRequestsFilters(t *testing.T) {
 	}
 }
 
-func TestList_CursorRefusesAnotherOrderingOrAnotherBase(t *testing.T) {
+func TestContinue_RefusesAnotherOrderingOrAnotherBase(t *testing.T) {
 	ascending := issue(t, nil)
 	descending := []query.Sort{{Field: "org", Descending: true}, {Field: "id", Descending: true}}
 	cases := map[string]struct {
@@ -140,7 +138,7 @@ func TestList_CursorRefusesAnotherOrderingOrAnotherBase(t *testing.T) {
 	}
 	for name, c := range cases {
 		db, _ := session(t)
-		_, err := memberView(t).List(context.Background(), db, query.Directives{Page: query.Page{Size: 2}, Sort: c.sorts, After: c.after})
+		_, err := memberView(t).Continue(context.Background(), db, query.Directives{Sort: c.sorts}, c.after, 2)
 		var cursor *query.CursorError
 		if !errors.As(err, &cursor) || cursor.Reason != query.CursorMismatch {
 			t.Errorf("%s: err = %v, want a mismatch", name, err)
@@ -156,14 +154,14 @@ func TestList_CursorRefusesAnotherOrderingOrAnotherBase(t *testing.T) {
 		"sql/archive.sql": {Data: []byte("--| tier: standard\n--| key: org, id\n--| field: org uuid not null\n--| field: id uuid not null\nSELECT org, id FROM archive")},
 	}, "sql", sqltest.Dialect{}).Statement("archive").Project(query.Scalar[string])
 	db, _ := session(t)
-	_, err := other.List(context.Background(), db, query.Directives{Page: query.Page{Size: 2}, After: ascending})
+	_, err := other.Continue(context.Background(), db, query.Directives{}, ascending, 2)
 	var cursor *query.CursorError
 	if !errors.As(err, &cursor) || cursor.Reason != query.CursorMismatch {
 		t.Errorf("another base = %v, want a mismatch", err)
 	}
 }
 
-func TestList_CursorRefusesAnOrderingItCannotContinue(t *testing.T) {
+func TestContinue_RefusesAnOrderingItCannotContinue(t *testing.T) {
 	c := issue(t, nil)
 	// A nullable field in the keyed prefix: the keyset predicate cannot
 	// compare it, so the sort cannot be continued.
@@ -173,7 +171,7 @@ func TestList_CursorRefusesAnOrderingItCannotContinue(t *testing.T) {
 	mixed := []query.Sort{{Field: "org"}, {Field: "id", Descending: true}}
 	for name, sorts := range map[string][]query.Sort{"nullable field": nullable, "mixed directions": mixed} {
 		db, rec := session(t)
-		_, err := memberView(t).List(context.Background(), db, query.Directives{Page: query.Page{Size: 2}, Sort: sorts, After: c})
+		_, err := memberView(t).Continue(context.Background(), db, query.Directives{Sort: sorts}, c, 2)
 		var cursor *query.CursorError
 		if !errors.As(err, &cursor) || cursor.Reason != query.CursorUnsupported {
 			t.Errorf("%s: err = %v, want unsupported", name, err)
@@ -184,7 +182,7 @@ func TestList_CursorRefusesAnOrderingItCannotContinue(t *testing.T) {
 	}
 }
 
-func TestList_CursorRefusesTextItDidNotIssue(t *testing.T) {
+func TestContinue_RefusesTextItDidNotIssue(t *testing.T) {
 	issued := issue(t, nil)
 	raw, err := base64.RawURLEncoding.DecodeString(string(issued))
 	if err != nil {
@@ -216,7 +214,7 @@ func TestList_CursorRefusesTextItDidNotIssue(t *testing.T) {
 	}
 	for name, c := range cases {
 		db, rec := session(t)
-		_, err := c.p.List(context.Background(), db, query.Directives{Page: query.Page{Size: 2}, After: c.after})
+		_, err := c.p.Continue(context.Background(), db, query.Directives{}, c.after, 2)
 		var cursor *query.CursorError
 		if !errors.As(err, &cursor) || cursor.Reason != query.CursorMalformed {
 			t.Errorf("%s: err = %v, want malformed", name, err)
@@ -234,7 +232,7 @@ func TestList_KeyedColumnsAreMatchedInThePagesOwnCase(t *testing.T) {
 		{"o", "a", "M"}, {"o", "b", "M"}, {"o", "c", "M"},
 	}}
 	db, _ := session(t, count(9), folded)
-	got, err := memberView(t).List(context.Background(), db, query.Directives{Page: query.Page{Number: 1, Size: 2}})
+	got, err := memberView(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err != nil || got.Next == "" {
 		t.Fatalf("List = %+v, %v, want a cursor over the folded columns", got, err)
 	}
@@ -242,7 +240,7 @@ func TestList_KeyedColumnsAreMatchedInThePagesOwnCase(t *testing.T) {
 
 func TestList_AKeyedFieldThePageDoesNotOutputIsTheContractsDefect(t *testing.T) {
 	db, _ := session(t, count(9), sqltest.Response{Columns: []string{"id", "name"}, Rows: [][]driver.Value{{"a", "M"}}})
-	_, err := memberView(t).List(context.Background(), db, query.Directives{Page: query.Page{Number: 1, Size: 2}})
+	_, err := memberView(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err == nil || !strings.Contains(err.Error(), `keyed field "org" is not an output column`) {
 		t.Errorf("err = %v, want the missing column named", err)
 	}
@@ -252,7 +250,7 @@ func TestList_NullInAKeyedColumnIsTheBasesDefect(t *testing.T) {
 	// The page's last row carries a null where the contract declared the
 	// field not null, so no cursor can be issued from it.
 	db, _ := session(t, count(9), members("a", nil, "c"))
-	_, err := memberView(t).List(context.Background(), db, query.Directives{Page: query.Page{Number: 1, Size: 2}})
+	_, err := memberView(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err == nil {
 		t.Fatal("List did not fail")
 	}

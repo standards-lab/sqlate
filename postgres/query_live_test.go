@@ -73,17 +73,15 @@ func TestLive_ProjectionAndGuard(t *testing.T) {
 	// Request values arrive as text and the engine parses them by the
 	// contract's types: "2" as integer, an RFC 3339 date as timestamp.
 	c, err := view.List(ctx, db, query.Directives{
-		Page:    query.Page{Number: 1, Size: 10},
 		Sort:    []query.Sort{{Field: "n", Descending: true}},
 		Filters: []query.Filter{{Field: "n", Op: query.OpGe, Value: "2"}, {Field: "at", Op: query.OpIsNotNull}},
-	})
+	}, query.Page{Number: 1, Size: 10})
 	if err != nil || c.Total != 1 || len(c.Items) != 1 || c.Items[0].Name != "c" || c.More {
 		t.Fatalf("List = %+v, %v", c, err)
 	}
 	c, err = view.List(ctx, db, query.Directives{
-		Page:    query.Page{Number: 2, Size: 2},
 		Filters: []query.Filter{{Field: "at", Op: query.OpLt, Value: "2026-02-01T00:00:00Z"}, {Field: "name", Op: query.OpIn, Value: []any{"a", "b", "c"}}},
-	})
+	}, query.Page{Number: 2, Size: 2})
 	if err != nil || c.Total != 1 || len(c.Items) != 0 {
 		t.Fatalf("page past the end: List = %+v, %v", c, err)
 	}
@@ -95,7 +93,7 @@ func TestLive_ProjectionAndGuard(t *testing.T) {
 		{Field: "n", Op: query.OpGt, Value: "many"},
 		{Field: "at", Op: query.OpGe, Value: "not-a-date"},
 	} {
-		_, err := view.List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 1}, Filters: []query.Filter{f}})
+		_, err := view.List(ctx, db, query.Directives{Filters: []query.Filter{f}}, query.Page{Number: 1, Size: 1})
 		var invalid *query.InvalidValueError
 		if !errors.As(err, &invalid) || !errors.Is(err, query.ErrDirectives) {
 			t.Errorf("%s %v: err = %v, want InvalidValueError", f.Field, f.Value, err)
@@ -175,16 +173,16 @@ func TestLive_CursorPagingThroughTheOverlay(t *testing.T) {
 	}
 
 	byGrp := []query.Sort{{Field: "grp"}}
-	whole, err := pages.List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 10}, Sort: byGrp})
+	whole, err := pages.List(ctx, db, query.Directives{Sort: byGrp}, query.Page{Number: 1, Size: 10})
 	if err != nil || len(whole.Items) != 7 || whole.Total != 7 || whole.More || whole.Next != "" {
 		t.Fatalf("offset read = %+v, %v; want all 7 rows, no further page, no cursor", whole, err)
 	}
 
 	rec := &recorder{DB: db}
 	var walked []pageRow
-	d := query.Directives{Page: query.Page{Number: 1, Size: 3}, Sort: byGrp}
+	d, size := query.Directives{Sort: byGrp}, 3
+	c, err := pages.List(ctx, rec, d, query.Page{Number: 1, Size: size})
 	for page := 1; ; page++ {
-		c, err := pages.List(ctx, rec, d)
 		if err != nil {
 			t.Fatalf("page %d: %v", page, err)
 		}
@@ -204,7 +202,7 @@ func TestLive_CursorPagingThroughTheOverlay(t *testing.T) {
 		if page == 3 {
 			t.Fatal("the walk did not end after three pages")
 		}
-		d = query.Directives{Page: query.Page{Size: 3}, Sort: byGrp, After: c.Next}
+		c, err = pages.Continue(ctx, rec, d, c.Next, size)
 	}
 	if !slices.Equal(walked, whole.Items) {
 		t.Errorf("cursor walk = %v\nwant the offset read %v", walked, whole.Items)
@@ -223,16 +221,16 @@ func TestLive_CursorPagingThroughTheOverlay(t *testing.T) {
 	// Descending: the keyed prefix takes the sort's direction and the
 	// comparison flips.
 	desc := []query.Sort{{Field: "grp", Descending: true}}
-	wholeDesc, err := pages.List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 10}, Sort: desc})
+	wholeDesc, err := pages.List(ctx, db, query.Directives{Sort: desc}, query.Page{Number: 1, Size: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	rec.queries = nil
-	first, err := pages.List(ctx, rec, query.Directives{Page: query.Page{Number: 1, Size: 3}, Sort: desc})
+	first, err := pages.List(ctx, rec, query.Directives{Sort: desc}, query.Page{Number: 1, Size: 3})
 	if err != nil || first.Next == "" {
 		t.Fatalf("first descending page = %+v, %v", first, err)
 	}
-	second, err := pages.List(ctx, rec, query.Directives{Page: query.Page{Size: 3}, Sort: desc, After: first.Next})
+	second, err := pages.Continue(ctx, rec, query.Directives{Sort: desc}, first.Next, 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -243,7 +241,7 @@ func TestLive_CursorPagingThroughTheOverlay(t *testing.T) {
 		t.Errorf("descending continuation ran %q, want the row-value < comparison", last)
 	}
 
-	_, err = pages.List(ctx, db, query.Directives{Page: query.Page{Size: 3}, Sort: byGrp, After: first.Next})
+	_, err = pages.Continue(ctx, db, query.Directives{Sort: byGrp}, first.Next, 3)
 	var ce *query.CursorError
 	if !errors.As(err, &ce) || ce.Reason != query.CursorMismatch || !errors.Is(err, query.ErrDirectives) {
 		t.Errorf("cursor under another ordering = %v, want CursorMismatch", err)
@@ -376,7 +374,7 @@ func TestLive_EmbeddedStructScan(t *testing.T) {
 	if b := byName["b"]; b.ID == "" || b.N != 2 || b.CreatedAt.Valid {
 		t.Errorf("b = %+v, want an id, n 2, and a null timestamp", b)
 	}
-	c, err := stmts.Statement("view").Project(query.Scanner[entity]()).List(ctx, db, query.Directives{Page: query.Page{Number: 1, Size: 10}, Sort: []query.Sort{{Field: "n"}}})
+	c, err := stmts.Statement("view").Project(query.Scanner[entity]()).List(ctx, db, query.Directives{Sort: []query.Sort{{Field: "n"}}}, query.Page{Number: 1, Size: 10})
 	if err != nil || len(c.Items) != 3 || c.Items[0].Name != "a" || c.Items[2].ID == "" {
 		t.Errorf("projection over the scanner = %+v, %v", c, err)
 	}

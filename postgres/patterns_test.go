@@ -51,13 +51,13 @@ func TestPatterns_CursorContinuesWithARowValueComparison(t *testing.T) {
 	}
 
 	pool, _ := sqltest.Open(t, count, rows("a", "b", "c"))
-	first, err := view.List(context.Background(), sqlate.Wrap(pool, postgres.Dialect{}), query.Directives{Page: query.Page{Number: 1, Size: 2}})
+	first, err := view.List(context.Background(), sqlate.Wrap(pool, postgres.Dialect{}), query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err != nil || first.Next == "" {
 		t.Fatalf("first page = %+v, %v; want a cursor", first, err)
 	}
 
 	pool, rec := sqltest.Open(t, count, rows("c"))
-	if _, err := view.List(context.Background(), sqlate.Wrap(pool, postgres.Dialect{}), query.Directives{Page: query.Page{Size: 2}, After: first.Next}); err != nil {
+	if _, err := view.Continue(context.Background(), sqlate.Wrap(pool, postgres.Dialect{}), query.Directives{}, first.Next, 2); err != nil {
 		t.Fatal(err)
 	}
 	want := "SELECT * FROM (SELECT org, id FROM member) q WHERE (q.org, q.id) > (CAST($1 AS uuid), CAST($2 AS uuid)) ORDER BY q.org, q.id OFFSET $3 ROWS FETCH NEXT $4 ROWS ONLY"

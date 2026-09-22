@@ -15,8 +15,7 @@ import (
 )
 
 // Page is the 1-based page declaration of a read: which page, and how many
-// rows per page. Both must be at least 1. Number is ignored under a cursor,
-// which continues from a position rather than an offset.
+// rows per page. Both must be at least 1.
 type Page struct {
 	Number int
 	Size   int
@@ -86,12 +85,8 @@ type Collection[T any] struct {
 // reference contract field names; an unknown name is an UnknownFieldError,
 // never SQL.
 type Directives struct {
-	Page    Page
 	Sort    []Sort
 	Filters []Filter
-	// After continues from a cursor a previous page returned. Page.Number is
-	// ignored under it; Page.Size is still required.
-	After Cursor
 	// Total says whether the read counts; the zero value does.
 	Total TotalMode
 }
@@ -101,8 +96,8 @@ type Directives struct {
 // pattern wraps the base as a derived table, so the base may be any query,
 // a recursive CTE or a join tree, and the only names a declaration can
 // reference are the base's output columns the header declared. The base's
-// own parameters bind from the base arguments List and One take, merged
-// left to right with a later value winning.
+// own parameters bind from the base arguments List, Continue, and One take,
+// merged left to right with a later value winning.
 //
 // Every part of the composed text is a pattern of the library's namespace
 // in the base's catalog, as the library published it or an engine overlaid it;
@@ -134,19 +129,41 @@ func newProjection[T any](base Statement, scan ScanFunc[T]) Projection[T] {
 // Statement returns the base.
 func (p Projection[T]) Statement() Statement { return p.base }
 
-// List runs the collection read: the page under the declarations, the total
-// under the same filters unless the request declined it, and the cursor that
-// continues past the page. Sorts gain the key fields they do not already
-// name, so the ordering is total and paging is stable; a page reads one row
-// past its size to report whether a further page exists.
-func (p Projection[T]) List(ctx context.Context, s sqlate.Session, d Directives, base ...Args) (Collection[T], error) {
+// List runs the collection read by offset: the page under the declarations,
+// the total under the same filters unless the request declined it, and the
+// cursor that continues past the page. Sorts gain the key fields they do not
+// already name, so the ordering is total and paging is stable; a page reads
+// one row past its size to report whether a further page exists.
+func (p Projection[T]) List(ctx context.Context, s sqlate.Session, d Directives, page Page, base ...Args) (Collection[T], error) {
+	if page.Number < 1 {
+		return Collection[T]{}, fmt.Errorf("%w: page number must be at least 1", ErrDirectives)
+	}
+	if page.Size < 1 {
+		return Collection[T]{}, fmt.Errorf("%w: page size must be at least 1", ErrDirectives)
+	}
+	return p.list(ctx, s, d, page.Size, (page.Number-1)*page.Size, "", base)
+}
+
+// Continue runs the collection read from where a previous List or Continue
+// left off: the size rows past after's position, under the same sort that
+// issued it. after must be a Collection.Next a previous read returned; List
+// reads a request's first page. The total and the next cursor are as List
+// reports them.
+func (p Projection[T]) Continue(ctx context.Context, s sqlate.Session, d Directives, after Cursor, size int, base ...Args) (Collection[T], error) {
+	if after == "" {
+		return Collection[T]{}, fmt.Errorf("%w: Continue requires a cursor from a previous page; use List for the first page", ErrDirectives)
+	}
+	if size < 1 {
+		return Collection[T]{}, fmt.Errorf("%w: page size must be at least 1", ErrDirectives)
+	}
+	return p.list(ctx, s, d, size, 0, after, base)
+}
+
+// list is the shared body of List and Continue: bind, filter, resolve the
+// order, optionally count, then read one page, by offset when after is empty
+// and past the cursor's position otherwise.
+func (p Projection[T]) list(ctx context.Context, s sqlate.Session, d Directives, size, offset int, after Cursor, base []Args) (Collection[T], error) {
 	var none Collection[T]
-	if d.After == "" && d.Page.Number < 1 {
-		return none, fmt.Errorf("%w: page number must be at least 1", ErrDirectives)
-	}
-	if d.Page.Size < 1 {
-		return none, fmt.Errorf("%w: page size must be at least 1", ErrDirectives)
-	}
 	if d.Total != TotalExact && d.Total != TotalNone {
 		return none, fmt.Errorf("%w: unknown total mode %d", ErrDirectives, d.Total)
 	}
@@ -162,9 +179,9 @@ func (p Projection[T]) List(ctx context.Context, s sqlate.Session, d Directives,
 	if err != nil {
 		return none, err
 	}
-	var after []string
-	if d.After != "" {
-		if after, err = p.decodeCursor(d.After, o); err != nil {
+	var afterValues []string
+	if after != "" {
+		if afterValues, err = p.decodeCursor(after, o); err != nil {
 			return none, err
 		}
 	}
@@ -186,13 +203,10 @@ func (p Projection[T]) List(ctx context.Context, s sqlate.Session, d Directives,
 		_ = rows.Close()
 	}
 
-	offset := 0
-	if d.After == "" {
-		offset = (d.Page.Number - 1) * d.Page.Size
-	} else {
-		predicates = append(predicates, p.keyset(b, o, after))
+	if after != "" {
+		predicates = append(predicates, p.keyset(b, o, afterValues))
 	}
-	rows, err := s.QueryContext(ctx, p.page(b, predicates, o, offset, d.Page.Size+1), b.values...)
+	rows, err := s.QueryContext(ctx, p.page(b, predicates, o, offset, size+1), b.values...)
 	if err != nil {
 		return none, p.engine(err)
 	}
@@ -216,13 +230,13 @@ func (p Projection[T]) List(ctx context.Context, s sqlate.Session, d Directives,
 	var last []string
 	more := false
 	for rows.Next() {
-		if len(out) == d.Page.Size {
+		if len(out) == size {
 			// The row past the page: it is never scanned, and its only
 			// report is that a further page exists.
 			more = true
 			break
 		}
-		if index != nil && len(out) == d.Page.Size-1 {
+		if index != nil && len(out) == size-1 {
 			if last, err = p.readKeyed(rows, width, index, o); err != nil {
 				return none, mapErr(s, err)
 			}
