@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 
 	"github.com/standards-lab/sqlate"
 )
@@ -216,8 +217,7 @@ func (m *Migrator) Reset(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		for i := len(m.layers) - 1; i >= 0; i-- {
-			l := m.layers[i]
+		for i, l := range slices.Backward(m.layers) {
 			if err := m.revertApplied(ctx, conn, l, applied[i], len(applied[i])); err != nil {
 				return err
 			}
@@ -356,7 +356,7 @@ func (m *Migrator) aboveApplied(applied [][]row, i int) error {
 // belowPending refuses an apply on layer i while a layer below it still has
 // pending migrations.
 func (m *Migrator) belowPending(applied [][]row, i int) error {
-	for j := 0; j < i; j++ {
+	for j := range i {
 		if len(applied[j]) < len(m.layers[j].migrations) {
 			return fmt.Errorf("%w: %q below %q", ErrBelowPending, m.layers[j].name, m.layers[i].name)
 		}

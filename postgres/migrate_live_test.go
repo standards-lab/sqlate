@@ -791,9 +791,9 @@ func TestLive_MultisetStartersSerialize(t *testing.T) {
 	// Revert every set with the history tables left in place, so the
 	// control's two preflights find them and do not race on creating them.
 	layers := a.Layers()
-	for i := len(layers) - 1; i >= 0; i-- {
-		if err := layers[i].Down(ctx, len(layers[i].Migrations())); err != nil {
-			t.Fatalf("Down of %s: %v", layers[i].Name(), err)
+	for _, layer := range slices.Backward(layers) {
+		if err := layer.Down(ctx, len(layer.Migrations())); err != nil {
+			t.Fatalf("Down of %s: %v", layer.Name(), err)
 		}
 	}
 	assertReverted(t, a, 1, 2, 2)

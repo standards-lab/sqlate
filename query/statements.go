@@ -181,7 +181,7 @@ func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, error) 
 		st.fields = append(st.fields, Field{Name: fname, Type: typ, NotNull: notNull})
 	}
 	if key, ok := h.Get("key"); ok {
-		for _, name := range strings.Split(key, ",") {
+		for name := range strings.SplitSeq(key, ",") {
 			name = strings.TrimSpace(name)
 			found := false
 			for _, f := range st.fields {

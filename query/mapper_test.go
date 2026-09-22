@@ -120,7 +120,7 @@ func TestEmbedded_FieldsAreColumnsInBothDirections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := embedder{Identity: Identity{ID: "a", CreatedAt: now}, Name: "Acme"}
+	want := embedder{ID: "a", CreatedAt: now, Name: "Acme"}
 	if !reflect.DeepEqual(e, want) {
 		t.Errorf("scanned %+v, want %+v", e, want)
 	}
@@ -145,7 +145,7 @@ func TestEmbedded_OuterFieldShadowsTheEmbeddedOne(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := shadower{Identity: Identity{CreatedAt: now}, ID: "outer"}
+	want := shadower{CreatedAt: now, ID: "outer"}
 	if !reflect.DeepEqual(e, want) {
 		t.Errorf("scanned %+v, want %+v: the id column reached the embedded field", e, want)
 	}

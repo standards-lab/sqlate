@@ -295,7 +295,7 @@ func readLayer(ns string, l layer) (map[string]pattern, error) {
 			continue
 		}
 		if alternate, ok := h.Get("alternate"); ok {
-			for _, name := range strings.Split(alternate, ",") {
+			for name := range strings.SplitSeq(alternate, ",") {
 				if name = strings.TrimSpace(name); name != "" {
 					p.alternate = append(p.alternate, name)
 				}
