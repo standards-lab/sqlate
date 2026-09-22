@@ -41,11 +41,13 @@ func (StandardCatalog) HistoryExists(param string) string {
 	return "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = " + param
 }
 
-// statements are the texts one migrator runs, rendered once with the
-// dialect's placeholders: the catalog pair from the Catalog, the rest
-// standard DML. Booleans bind as parameters, never as literals.
+// statements are the texts one set's layer runs against its history table,
+// rendered once with the dialect's placeholders: the catalog pair from the
+// Catalog, the rest standard DML, and drop, the DDL Reset runs to remove
+// the set's own history table once that set is reverted. Booleans bind as
+// parameters, never as literals.
 type statements struct {
-	create, exists, all, head, insert, setDirty, del, delAbove string
+	create, exists, all, head, insert, setDirty, del, delAbove, drop string
 }
 
 // history renders the statements for the history table t over
@@ -60,5 +62,6 @@ func history(t string, p func(int) string, c Catalog) statements {
 		setDirty: "UPDATE " + t + " SET dirty = " + p(1) + " WHERE version = " + p(2),
 		del:      "DELETE FROM " + t + " WHERE version = " + p(1),
 		delAbove: "DELETE FROM " + t + " WHERE version > " + p(1),
+		drop:     "DROP TABLE " + t,
 	}
 }

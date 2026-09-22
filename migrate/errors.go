@@ -19,7 +19,26 @@ var (
 	ErrNoDown = errors.New("migrate: migration has no down")
 	// ErrVersionNotFound reports a Force to a version outside the set.
 	ErrVersionNotFound = errors.New("migrate: version not in the migration set")
+	// ErrAboveApplied reports a revert of a layer refused because a layer
+	// above it still has applied migrations; revert that layer first.
+	ErrAboveApplied = errors.New("migrate: a layer above has applied migrations")
+	// ErrBelowPending reports an apply on a layer refused because a layer
+	// below it still has pending migrations; Up applies every layer in order.
+	ErrBelowPending = errors.New("migrate: a layer below has pending migrations")
 )
+
+// SetError is an error from one set's history or migrations, naming the
+// set. It unwraps to the set's own error, so errors.Is classifies it
+// (ErrDirty, ErrPending, ErrUnknownVersion) and errors.As reaches the
+// detail (*DirtyError, *PendingError, *UnknownVersionError).
+type SetError struct {
+	Set string
+	Err error
+}
+
+func (e *SetError) Error() string { return fmt.Sprintf("set %q: %v", e.Set, e.Err) }
+
+func (e *SetError) Unwrap() error { return e.Err }
 
 // DirtyError reports a version whose non-transactional migration failed
 // midway: the history row is marked dirty and every run refuses until Force

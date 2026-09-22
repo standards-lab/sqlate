@@ -38,8 +38,7 @@ func scratch(t testing.TB, db *sqlate.DB, history string, tables ...string) {
 
 func migrator(t testing.TB, db *sqlate.DB, history string, set []migrate.Migration, opts migrate.Options) *migrate.Migrator {
 	t.Helper()
-	opts.Table = history
-	m, err := migrate.New(db, set, opts)
+	m, err := migrate.New(db, []migrate.Set{{Name: "live", Table: history, Migrations: set}}, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
