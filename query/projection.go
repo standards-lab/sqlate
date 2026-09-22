@@ -180,13 +180,21 @@ func (p Projection[T]) One(ctx context.Context, s sqlate.Session, field string, 
 }
 
 // Verify prepares a probe naming every contract field and the key over the
-// base, so a field the base no longer outputs fails at startup.
+// base, so a field the base no longer outputs fails at startup, and comparing
+// each field against a cast of its declared type, so a field whose type no
+// longer matches fails there too.
 func (p Projection[T]) Verify(ctx context.Context, db sqlate.Session) error {
 	cols := make([]string, 0, len(p.base.fields))
+	predicates := make([]string, 0, len(p.base.fields))
 	for _, f := range p.base.fields {
 		cols = append(cols, "q."+f.Name)
+		// The probe is only ever prepared, never executed, so the cast takes
+		// the literal NULL in place of a placeholder and binds nothing.
+		value := p.base.catalog.render("value", map[string]string{"placeholder": "NULL", "type": f.Type})
+		predicates = append(predicates, p.base.catalog.render("filter_eq", map[string]string{"field": f.Name, "value": value}))
 	}
-	stmt, err := db.PrepareContext(ctx, p.base.catalog.render("verify", map[string]string{"columns": strings.Join(cols, ", "), "base": p.base.compiled.text}))
+	where := p.base.catalog.render("where", map[string]string{"predicates": strings.Join(predicates, " AND ")})
+	stmt, err := db.PrepareContext(ctx, p.base.catalog.render("verify", map[string]string{"columns": strings.Join(cols, ", "), "base": p.base.compiled.text, "where": where}))
 	if err != nil {
 		return fmt.Errorf("query: %s: field contract: %w", p.base.name, err)
 	}

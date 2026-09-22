@@ -228,7 +228,8 @@ func TestVerify_ProbesEveryContractField(t *testing.T) {
 	if err := projection(t).Verify(context.Background(), db); err != nil {
 		t.Fatal(err)
 	}
-	if got := rec.SQL(sqltest.OpPrepare); len(got) != 1 || got[0] != "SELECT q.id, q.name, q.age FROM ("+base+") q" {
+	want := "SELECT q.id, q.name, q.age FROM (" + base + ") q WHERE q.id = CAST(NULL AS uuid) AND q.name = CAST(NULL AS text) AND q.age = CAST(NULL AS integer)"
+	if got := rec.SQL(sqltest.OpPrepare); len(got) != 1 || got[0] != want {
 		t.Errorf("probe = %v", got)
 	}
 	rec.FailPrepare = func(string) error { return errors.New(`column q.age does not exist`) }
