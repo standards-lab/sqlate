@@ -11,6 +11,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/standards-lab/sqlate"
+	"github.com/standards-lab/sqlate/migrate"
 	"github.com/standards-lab/sqlate/postgres"
 	"github.com/standards-lab/sqlate/sqltest"
 )
@@ -25,6 +26,20 @@ func TestDialect_NameAndPlaceholder(t *testing.T) {
 func TestDialect_ServerVersion(t *testing.T) {
 	if got := (postgres.Dialect{}).ServerVersion(); got != "SELECT version()" {
 		t.Errorf("ServerVersion() = %q", got)
+	}
+}
+
+func TestDialect_CreateHistoryDelegatesToStandardCatalog(t *testing.T) {
+	want := migrate.StandardCatalog{}.CreateHistory("schema_version")
+	if got := (postgres.Dialect{}).CreateHistory("schema_version"); got != want {
+		t.Errorf("CreateHistory() = %q, want %q", got, want)
+	}
+}
+
+func TestDialect_HistoryExistsQualifiesByCurrentSchema(t *testing.T) {
+	want := "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1"
+	if got := (postgres.Dialect{}).HistoryExists("$1"); got != want {
+		t.Errorf("HistoryExists() = %q, want %q", got, want)
 	}
 }
 
