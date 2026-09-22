@@ -5,6 +5,7 @@
 //   - the session-level advisory lock the migrate protocol takes
 //   - the statement that reads the server's version
 //   - its spelling of the keyset predicate a cursor continues by
+//   - its migrate.Catalog implementation, the history protocol's engine half
 //
 // It is a sub-module so the driver it names, pgx, enters a consumer's build only
 // through this import, made once where it opens its pool; a consumer opens
@@ -17,15 +18,20 @@
 // datetime), becomes sqlate.ErrInvalidValue wrapping the driver error, the
 // engine-side half of request validation. Class 23 constraint violations
 // become a sqlate.ConstraintError whose fields are the class sentinel, the
-// driver error, and the violated constraint's name:
+// driver error, and the violated constraint's name, table, and column when
+// the driver exposes them — a not-null violation names no constraint, so
+// the column is the only handle a consumer has for that case:
 //
 //   - 23505 unique
 //   - 23503 foreign key
 //   - 23514 check
 //   - 23502 not null
 //
-// MapError returns everything else unchanged, sql.ErrNoRows
-// included, and errors.As finds the driver error through every wrap.
+// 2BP01 (dependent objects still exist) and 40001 (serialization failure)
+// become sqlate.ErrDependentObjects and sqlate.ErrSerializationFailure, the
+// two classes a multi-set migrator's own tests need. MapError returns
+// everything else unchanged, sql.ErrNoRows included, and errors.As finds
+// the driver error through every wrap.
 //
 // # Locking
 //
@@ -42,6 +48,15 @@
 // administrative layer runs to report the engine's version. It is a
 // capability rather than part of sqlate.Dialect, since every engine spells
 // the read differently and the session layer never needs it.
+//
+// # Migration history
+//
+// [Dialect.CreateHistory] delegates to migrate.StandardCatalog unchanged.
+// [Dialect.HistoryExists] qualifies the check by the session's current
+// schema, closing a defect in the standard form: information_schema.tables
+// spans every schema on the search path, so a same-named table in an
+// unrelated schema would satisfy the check even though the current
+// schema's own history table does not exist.
 //
 // # Native forms
 //

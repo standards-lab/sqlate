@@ -19,10 +19,10 @@ var ErrVersionMismatch = errors.New("version mismatch")
 // ErrRefused classifies a guarded command whose row exists, at the version
 // the caller expected, but whose own predicate — beyond the key and the
 // version — still matched no row. A plain Guard's command carries no such
-// predicate, so an equal-version check result there means the row was
-// concurrently restored to the expected version between the command and
-// the check, not a refusal; RowGuard's second predicate is what makes this
-// a real, reachable outcome.
+// predicate, so its own equal-version branch can never actually be reached:
+// a row at the expected version would already have matched the command's
+// update. RowGuard's second predicate is what makes this a real, reachable
+// outcome.
 var ErrRefused = errors.New("refused")
 
 // RefusedError is a guarded command's row-level refusal: the row

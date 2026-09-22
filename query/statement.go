@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"reflect"
+	"strings"
 	"sync"
 
 	"github.com/standards-lab/sqlate"
@@ -122,9 +123,16 @@ func (st Statement) GuardedRow[T any](check Rows[T], version string, current fun
 	return RowGuard[T]{command: st, check: check, version: version, current: current}
 }
 
-// Key is the declared key of a projection base, in header order; empty
-// when none is declared.
-func (st Statement) Key() []string {
+// Key is the declared key of a projection base, as the header declares it:
+// a composite key's parts in header order, joined by ", ". It is empty when
+// none is declared.
+func (st Statement) Key() string {
+	return strings.Join(st.key, ", ")
+}
+
+// Keys is the declared key of a projection base, its parts in header order;
+// empty when none is declared.
+func (st Statement) Keys() []string {
 	out := make([]string, len(st.key))
 	copy(out, st.key)
 	return out

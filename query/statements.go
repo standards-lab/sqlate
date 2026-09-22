@@ -129,7 +129,8 @@ func Verify(ctx context.Context, db sqlate.Session, vs ...Verifier) error {
 // native only, the port as its own declaration; transaction optional
 // (required); key optional, naming one declared field or several separated
 // by commas, each named once; field repeated, "<name> <type>" with an
-// optional trailing "not null", the name an identifier.
+// optional trailing "not null", matched case-insensitively, the name an
+// identifier.
 func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, error) {
 	st := Statement{name: name, dialect: d, catalog: c}
 	h, err := header.Parse(text)
@@ -171,7 +172,7 @@ func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, error) 
 		st.txRequired = true
 	}
 	for _, f := range h.All("field") {
-		decl, notNull := strings.CutSuffix(f, " not null")
+		decl, notNull := cutNotNull(f)
 		fname, typ, ok := strings.Cut(decl, " ")
 		typ = strings.TrimSpace(typ)
 		if !ok || !identifier.MatchString(fname) || !sqlType.MatchString(typ) {
@@ -204,6 +205,18 @@ func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, error) 
 		st.renderings = &sync.Map{}
 	}
 	return st, err
+}
+
+// notNullSuffix is the optional trailing suffix of a field declaration.
+const notNullSuffix = " not null"
+
+// cutNotNull returns decl without its trailing "not null" suffix, matched
+// case-insensitively as SQL keywords are, and whether the suffix was there.
+func cutNotNull(decl string) (string, bool) {
+	if len(decl) > len(notNullSuffix) && strings.EqualFold(decl[len(decl)-len(notNullSuffix):], notNullSuffix) {
+		return decl[:len(decl)-len(notNullSuffix)], true
+	}
+	return decl, false
 }
 
 // identifier is a contract field name as it appears in the composed SQL:

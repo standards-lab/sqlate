@@ -34,15 +34,15 @@ func TestLoad_ParsesTheHeaderIntoTheStatement(t *testing.T) {
 	}
 
 	view := stmts.Statement("organization_view")
-	if view.Tier() != query.TierStandard || !slices.Equal(view.Key(), []string{"id"}) || len(view.Fields()) != 3 ||
-		view.Fields()[2] != (query.Field{Name: "version", Type: "integer"}) {
-		t.Errorf("view = tier %s key %v fields %v", view.Tier(), view.Key(), view.Fields())
+	if view.Tier() != query.TierStandard || view.Key() != "id" || !slices.Equal(view.Keys(), []string{"id"}) ||
+		len(view.Fields()) != 3 || view.Fields()[2] != (query.Field{Name: "version", Type: "integer"}) {
+		t.Errorf("view = tier %s key %q keys %v fields %v", view.Tier(), view.Key(), view.Keys(), view.Fields())
 	}
 	lock := stmts.Statement("lock_tree")
 	if lock.Tier() != query.TierNative || !strings.HasPrefix(lock.Native(), "postgres") || !lock.TransactionRequired() {
 		t.Errorf("lock = %+v", lock)
 	}
-	if edit := stmts.Statement("edit"); edit.TransactionRequired() || len(edit.Key()) != 0 || len(edit.Params()) != 3 {
+	if edit := stmts.Statement("edit"); edit.TransactionRequired() || edit.Key() != "" || len(edit.Keys()) != 0 || len(edit.Params()) != 3 {
 		t.Errorf("edit = %+v", edit)
 	}
 	defer func() {
@@ -68,8 +68,11 @@ func TestLoad_ParsesACompositeKeyNotNullFieldsAndAPort(t *testing.T) {
 		t.Fatalf("Compile: %v", err)
 	}
 	view := stmts.Statement("event_view")
-	if !slices.Equal(view.Key(), []string{"occurred_at", "id"}) {
-		t.Errorf("Key() = %v, want the two parts in header order", view.Key())
+	if !slices.Equal(view.Keys(), []string{"occurred_at", "id"}) {
+		t.Errorf("Keys() = %v, want the two parts in header order", view.Keys())
+	}
+	if view.Key() != "occurred_at, id" {
+		t.Errorf("Key() = %q, want the parts comma-joined as declared", view.Key())
 	}
 	want := []query.Field{
 		{Name: "id", Type: "uuid", NotNull: true},
@@ -81,6 +84,27 @@ func TestLoad_ParsesACompositeKeyNotNullFieldsAndAPort(t *testing.T) {
 	}
 	if !strings.HasPrefix(view.Port(), "sqlserver") {
 		t.Errorf("Port() = %q", view.Port())
+	}
+}
+
+func TestLoad_MatchesNotNullInAnyCase(t *testing.T) {
+	cases := map[string]query.Field{
+		"id uuid not null":  {Name: "id", Type: "uuid", NotNull: true},
+		"id uuid NOT NULL":  {Name: "id", Type: "uuid", NotNull: true},
+		"id uuid Not Null":  {Name: "id", Type: "uuid", NotNull: true},
+		"id uuid":           {Name: "id", Type: "uuid"},
+		"id uuid not nul l": {Name: "id", Type: "uuid not nul l"},
+	}
+	for decl, want := range cases {
+		fsys := fstest.MapFS{"sql/v.sql": {Data: []byte("--| tier: standard\n--| field: " + decl + "\nSELECT id FROM t")}}
+		stmts, err := catalog().Compile(fsys, "sql", sqltest.Dialect{})
+		if err != nil {
+			t.Errorf("%q: Compile: %v", decl, err)
+			continue
+		}
+		if got := stmts.Statement("v").Fields(); !slices.Equal(got, []query.Field{want}) {
+			t.Errorf("%q: Fields() = %+v, want %+v", decl, got, want)
+		}
 	}
 }
 

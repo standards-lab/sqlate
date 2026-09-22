@@ -212,7 +212,7 @@ func (p Projection[T]) List(ctx context.Context, s sqlate.Session, d Directives,
 		}
 		width = len(cols)
 	}
-	out := make([]T, 0, d.Page.Size)
+	var out []T
 	var last []string
 	more := false
 	for rows.Next() {
