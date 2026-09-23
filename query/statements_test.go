@@ -89,11 +89,13 @@ func TestLoad_ParsesACompositeKeyNotNullFieldsAndAPort(t *testing.T) {
 
 func TestLoad_MatchesNotNullInAnyCase(t *testing.T) {
 	cases := map[string]query.Field{
-		"id uuid not null":  {Name: "id", Type: "uuid", NotNull: true},
-		"id uuid NOT NULL":  {Name: "id", Type: "uuid", NotNull: true},
-		"id uuid Not Null":  {Name: "id", Type: "uuid", NotNull: true},
-		"id uuid":           {Name: "id", Type: "uuid"},
-		"id uuid not nul l": {Name: "id", Type: "uuid not nul l"},
+		"id uuid not null":                     {Name: "id", Type: "uuid", NotNull: true},
+		"id uuid NOT NULL":                     {Name: "id", Type: "uuid", NotNull: true},
+		"id uuid Not Null":                     {Name: "id", Type: "uuid", NotNull: true},
+		"id uuid":                              {Name: "id", Type: "uuid"},
+		"at timestamp with time zone not null": {Name: "at", Type: "timestamp with time zone", NotNull: true},
+		"n double precision":                   {Name: "n", Type: "double precision"},
+		"s character varying(20) not null":     {Name: "s", Type: "character varying(20)", NotNull: true},
 	}
 	for decl, want := range cases {
 		fsys := fstest.MapFS{"sql/v.sql": {Data: []byte("--| tier: standard\n--| field: " + decl + "\nSELECT id FROM t")}}
@@ -121,6 +123,10 @@ func TestLoad_RejectsBrokenHeaders(t *testing.T) {
 		"transaction none":              "--| tier: standard\n--| transaction: none\nSELECT 1",
 		"field without kind":            "--| tier: standard\n--| field: id\nSELECT 1",
 		"field with a bad type":         "--| tier: standard\n--| field: id uuid; drop\nSELECT 1",
+		"not null misspelled":           "--| tier: standard\n--| field: size bigint nott null\nSELECT 1",
+		"not null truncated":            "--| tier: standard\n--| field: size bigint not nul\nSELECT 1",
+		"not null double-spaced":        "--| tier: standard\n--| field: size bigint not  null\nSELECT 1",
+		"not null split":                "--| tier: standard\n--| field: id uuid not nul l\nSELECT 1",
 		"key not a declared field":      "--| tier: standard\n--| key: id\n--| field: name text\nSELECT 1",
 		"key part not a declared field": "--| tier: standard\n--| key: id, ghost\n--| field: id uuid\nSELECT 1",
 		"key part repeated":             "--| tier: standard\n--| key: id, id\n--| field: id uuid\nSELECT 1",
