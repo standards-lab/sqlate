@@ -82,8 +82,10 @@ func TestLive_ProjectionAndGuard(t *testing.T) {
 	c, err = view.List(ctx, db, query.Directives{
 		Filters: []query.Filter{{Field: "at", Op: query.OpLt, Value: "2026-02-01T00:00:00Z"}, {Field: "name", Op: query.OpIn, Value: []any{"a", "b", "c"}}},
 	}, query.Page{Number: 2, Size: 2})
-	if err != nil || c.Total != 1 || len(c.Items) != 0 {
-		t.Fatalf("page past the end: List = %+v, %v", c, err)
+	// A page past the end has no row to carry the count, so it reports
+	// none rather than a count its statement never read.
+	if err != nil || c.Total != query.NoTotal || len(c.Items) != 0 || c.More {
+		t.Fatalf("page past the end: List = %+v, %v; want no items and NoTotal", c, err)
 	}
 
 	// A value the engine cannot read as the field's type is the request's
@@ -207,15 +209,17 @@ func TestLive_CursorPagingThroughTheOverlay(t *testing.T) {
 	if !slices.Equal(walked, whole.Items) {
 		t.Errorf("cursor walk = %v\nwant the offset read %v", walked, whole.Items)
 	}
+	// Each continued page is one statement carrying both the row-value
+	// keyset predicate and the window that counts its total.
 	const rowValue = "(q.grp, q.id) > (CAST($1 AS text), CAST($2 AS uuid))"
 	continued := 0
 	for _, q := range rec.queries {
-		if strings.Contains(q, rowValue) {
+		if strings.Contains(q, rowValue) && strings.Contains(q, "COUNT(*) OVER ()") {
 			continued++
 		}
 	}
 	if continued != 2 {
-		t.Errorf("%d queries carried the row-value keyset predicate, want 2 (pages 2 and 3):\n%s", continued, strings.Join(rec.queries, "\n"))
+		t.Errorf("%d queries carried the row-value keyset predicate and the window count, want 2 (pages 2 and 3):\n%s", continued, strings.Join(rec.queries, "\n"))
 	}
 
 	// Descending: the keyed prefix takes the sort's direction and the

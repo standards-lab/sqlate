@@ -585,5 +585,8 @@ The module's `sqlint.toml` exports the engine's native forms and the overlay dir
 integration tier, behind the `integration` build tag, is the proofs only an engine can give:
 non-transactional DDL, dirty state and repair, concurrent starters in one process and across
 processes, the cancelled context, request values parsed by the engine, and both forms of a
-returning command returning the same row. `mise run acceptance` runs them against a compose
-PostgreSQL and tears it down.
+returning command returning the same row. They also prove that the counted total agrees with
+its page while writes commit between the statement and the caller and under concurrent writers,
+where a count read as its own statement does not, and that the counted page scans its base once
+under one window while the uncounted page keeps the key's index order. `mise run acceptance`
+runs them against a compose PostgreSQL and tears it down.

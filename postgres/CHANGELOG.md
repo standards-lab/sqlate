@@ -5,6 +5,19 @@ documented here. The format follows [Keep a Changelog](https://keepachangelog.co
 and the module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). This
 changelog covers this sub-module only; the base module keeps its own.
 
+## [Unreleased]
+
+### Changed
+
+- The live proofs cover the total counted in the page's own statement: a page agrees with its
+  total while writes commit between the statement and the caller, where a count read as its own
+  statement does not; it agrees under concurrent writers on the pool; and the counted page plans
+  one window over one scan of its base, while the uncounted page reads the key's index in
+  order. The page-past-the-end assertion expects `NoTotal`, and the cursor proof checks that
+  each continued page carries both the row-value predicate and the window count.
+
+Requires `github.com/standards-lab/sqlate v0.4.0`.
+
 ## [v0.3.0] - 2026-09-23
 
 ### Added
