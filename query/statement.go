@@ -140,14 +140,6 @@ func (st Statement) Guarded(check Statement, version string) Guard {
 	return Guard{command: st, check: check, version: version}
 }
 
-// GuardedRow binds the statement, a guarded command whose own predicate
-// may refuse a row the key and version alone would have matched, to a
-// row-returning check: version names the parameter both bind the expected
-// version to, and current reads a checked row's own version.
-func (st Statement) GuardedRow[T any](check Rows[T], version string, current func(T) int64) RowGuard[T] {
-	return RowGuard[T]{command: st, check: check, version: version, current: current}
-}
-
 // Key is the declared key of a projection base, as the header declares it:
 // a composite key's parts in header order, joined by ", ". It is empty when
 // none is declared.

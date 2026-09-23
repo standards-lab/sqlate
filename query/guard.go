@@ -26,8 +26,8 @@ var ErrVersionMismatch = errors.New("version mismatch")
 var ErrRefused = errors.New("refused")
 
 // RefusedError is a guarded command's row-level refusal: the row
-// RowGuard's check read, at the version the caller expected. Unwrap
-// yields ErrRefused.
+// RowGuard read back, at the version the caller expected. Unwrap yields
+// ErrRefused.
 type RefusedError[T any] struct {
 	Version int64
 	Row     T
@@ -82,48 +82,42 @@ func (g Guard) Run(ctx context.Context, s sqlate.Session, version int64, args Ar
 	return 0, fmt.Errorf("%w: expected %d, current %d", ErrVersionMismatch, version, current)
 }
 
-// RowGuard is Guard's counterpart for a command with its own second
-// predicate: check reads the whole row instead of a bare version, so Run
-// can tell no row at all, a row at another version, and a row at the
-// expected version the command's own predicate refused apart, where Guard
-// could only ever report the last two cases as the same version mismatch.
+// RowGuard is Guard's counterpart over a returning command, one whose own
+// predicate beyond the key and the version may refuse the write: it yields
+// the row as it stands afterward, and where the command changed nothing it
+// tells no row at all, a row at another version, and a row at the expected
+// version the command's own predicate refused apart, from the row the
+// command's handle already read back. Returning.Guarded builds it.
 type RowGuard[T any] struct {
-	command Statement
-	check   Rows[T]
-	version string
-	current func(T) int64
+	returning Returning[T]
+	version   string
+	current   func(T) int64
 }
 
-// Run executes the command with version bound under the guard's parameter
-// name alongside args, exactly as Guard.Run. A row affected is success and
-// the new version, version+1, with no second round trip. No row affected
-// reads the row with the check, using the same bound args: no row is
-// sql.ErrNoRows; a row whose current version (read through the current
-// function) does not match the expected one is ErrVersionMismatch, with
-// both versions in its text; a row at the expected version is a
+// Run runs the command through its handle's One with version bound under
+// the guard's parameter name alongside args. A changed row is success: the
+// row as it stands afterward, its new version current(row). An unchanged
+// row classifies: no row is sql.ErrNoRows; a row whose current version
+// does not match the expected one is ErrVersionMismatch, with both
+// versions in its text; a row at the expected version is a
 // *RefusedError[T] carrying it, since the command's own predicate is what
-// refused the write.
-func (g RowGuard[T]) Run(ctx context.Context, s sqlate.Session, version int64, args Args) (int64, error) {
+// refused the write. Every error One returns, ErrNotOneRow among them,
+// passes through.
+func (g RowGuard[T]) Run(ctx context.Context, s sqlate.Session, version int64, args Args) (T, error) {
+	var zero T
 	bound := make(Args, len(args)+1)
 	maps.Copy(bound, args)
 	bound[g.version] = version
-	n, err := g.command.Exec(ctx, s, bound)
+	row, changed, err := g.returning.One(ctx, s, bound)
 	if err != nil {
-		return 0, err
+		return zero, err
 	}
-	if n > 0 {
-		return version + 1, nil
-	}
-	row, err := g.check.One(ctx, s, bound)
-	if errors.Is(err, sql.ErrNoRows) {
-		return 0, sql.ErrNoRows
-	}
-	if err != nil {
-		return 0, err
+	if changed {
+		return row, nil
 	}
 	current := g.current(row)
 	if current == version {
-		return 0, &RefusedError[T]{Version: version, Row: row}
+		return zero, &RefusedError[T]{Version: version, Row: row}
 	}
-	return 0, fmt.Errorf("%w: expected %d, current %d", ErrVersionMismatch, version, current)
+	return zero, fmt.Errorf("%w: expected %d, current %d", ErrVersionMismatch, version, current)
 }

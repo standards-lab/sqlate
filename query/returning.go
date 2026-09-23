@@ -1,6 +1,8 @@
 package query
 
 import (
+	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"regexp"
@@ -170,4 +172,157 @@ func resolveReturning(st *Statement, sources map[string]source, stmts map[string
 	}
 	st.returning = form
 	return nil
+}
+
+// Returning is a returning command bound to the scan of its read: the
+// handle that runs the command and yields the row as it stands afterward.
+// It is a value, built once in a constructor and held.
+type Returning[T any] struct {
+	cmd  Statement
+	read Rows[T]
+}
+
+// Returning binds the statement, a returning command, to scan, the scan of
+// the read its returning declaration names; the read's SELECT list is the
+// scan order on both forms. A statement that declares no returning is a
+// defect in the caller's constructor and panics.
+func (st Statement) Returning[T any](scan ScanFunc[T]) Returning[T] {
+	if st.returning == nil {
+		panic(fmt.Sprintf("query: %s: declares no returning; a returning handle binds a returning command", st.name))
+	}
+	return Returning[T]{cmd: st, read: st.returning.read.Scan(scan)}
+}
+
+// Statement returns the command.
+func (r Returning[T]) Statement() Statement { return r.cmd }
+
+// One runs the command and returns the row as it stands afterward, and
+// whether the command changed it. A command that changed no row reads the
+// row as it is, changed=false; no row at all is sql.ErrNoRows, unmapped. A
+// command that changed more than one row, or whose read finds no row after
+// one changed, is ErrNotOneRow. A command headed "transaction: required" is
+// ErrTransactionRequired outside a *sqlate.Tx, on either form, before any
+// SQL runs.
+//
+// Where the dialect rendered the single-statement form, it is one query on
+// s, atomic by itself; a second row it returns has already been changed,
+// and only the caller's transaction undoes that. Otherwise the command and
+// then its read run as one unit: inside s when s is a *sqlate.Tx, inside a
+// transaction One opens, commits, and rolls back on any error when s is a
+// sqlate.Beginner, and ErrTransactionRequired on any other session.
+func (r Returning[T]) One(ctx context.Context, s sqlate.Session, args Args) (T, bool, error) {
+	var zero T
+	if r.cmd.txRequired {
+		if _, ok := s.(*sqlate.Tx); !ok {
+			return zero, false, ErrTransactionRequired
+		}
+	}
+	if r.cmd.returning.native != nil {
+		return r.single(ctx, s, args)
+	}
+	switch s := s.(type) {
+	case *sqlate.Tx:
+		return r.fallback(ctx, s, args)
+	case sqlate.Beginner:
+		return r.owned(ctx, s, args)
+	}
+	return zero, false, ErrTransactionRequired
+}
+
+// single runs the single-statement form: one row is the changed row; no row
+// reads the row as it is with the read.
+func (r Returning[T]) single(ctx context.Context, s sqlate.Session, args Args) (T, bool, error) {
+	var zero T
+	form := r.cmd.returning
+	text, values, err := r.cmd.bindForm(*form.native, form.renderings, s, args)
+	if err != nil {
+		return zero, false, err
+	}
+	rows, err := s.QueryContext(ctx, text, values...)
+	if err != nil {
+		return zero, false, err
+	}
+	defer func() { _ = rows.Close() }()
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return zero, false, mapErr(s, err)
+		}
+		// Closed before the read, which may share the connection.
+		if err := rows.Close(); err != nil {
+			return zero, false, mapErr(s, err)
+		}
+		row, err := r.read.One(ctx, s, args)
+		return row, false, err
+	}
+	row, err := r.read.scan(rows)
+	if err != nil {
+		return zero, false, mapErr(s, err)
+	}
+	if rows.Next() {
+		return zero, false, fmt.Errorf("%w: %s changed more than one row", ErrNotOneRow, r.cmd.name)
+	}
+	if err := rows.Err(); err != nil {
+		return zero, false, mapErr(s, err)
+	}
+	return row, true, nil
+}
+
+// fallback runs the command and then its read, on tx.
+func (r Returning[T]) fallback(ctx context.Context, tx *sqlate.Tx, args Args) (T, bool, error) {
+	var zero T
+	n, err := r.cmd.Exec(ctx, tx, args)
+	if err != nil {
+		return zero, false, err
+	}
+	if n > 1 {
+		return zero, false, fmt.Errorf("%w: %s changed %d rows", ErrNotOneRow, r.cmd.name, n)
+	}
+	row, err := r.read.One(ctx, tx, args)
+	if errors.Is(err, sql.ErrNoRows) && n == 1 {
+		return zero, false, fmt.Errorf("%w: %s changed a row its read %s does not find", ErrNotOneRow, r.cmd.name, r.read.stmt.name)
+	}
+	if err != nil {
+		return zero, false, err
+	}
+	return row, n == 1, nil
+}
+
+// owned runs the fallback in a transaction of its own, as DB.Transact does:
+// commit on success; on an error roll back and return it, a rollback
+// failure joined onto it; on a panic roll back and re-panic.
+func (r Returning[T]) owned(ctx context.Context, b sqlate.Beginner, args Args) (T, bool, error) {
+	var zero T
+	tx, err := b.Begin(ctx)
+	if err != nil {
+		return zero, false, err
+	}
+	defer func() {
+		if p := recover(); p != nil {
+			_ = tx.Rollback()
+			panic(p)
+		}
+	}()
+	row, changed, err := r.fallback(ctx, tx, args)
+	if err != nil {
+		if rbErr := tx.Rollback(); rbErr != nil {
+			err = errors.Join(err, fmt.Errorf("rollback: %w", rbErr))
+		}
+		return zero, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return zero, false, err
+	}
+	return row, changed, nil
+}
+
+// Guarded binds the handle, a command whose WHERE names the key and the
+// expected version, to the optimistic-concurrency protocol: version names
+// the command's parameter the expected version binds to, and current reads
+// a row's own version. A version that is not a parameter of the command is
+// a defect in the caller's constructor and panics.
+func (r Returning[T]) Guarded(version string, current func(T) int64) RowGuard[T] {
+	if !slices.Contains(r.cmd.Params(), version) {
+		panic(fmt.Sprintf("query: %s: version %q is not a parameter of the command", r.cmd.name, version))
+	}
+	return RowGuard[T]{returning: r, version: version, current: current}
 }
