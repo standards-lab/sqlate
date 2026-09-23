@@ -5,7 +5,7 @@ documented here. The format follows [Keep a Changelog](https://keepachangelog.co
 and the module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). This
 changelog covers this sub-module only; the base module keeps its own.
 
-## [Unreleased]
+## [v0.3.0] - 2026-09-23
 
 ### Added
 
