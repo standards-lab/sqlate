@@ -8,14 +8,26 @@ import (
 	"github.com/standards-lab/sqlate"
 )
 
+// Row is the current row of a result set, as a scan sees it. Columns
+// names the columns the scan sees, and Scan copies them, in order, into
+// dest, as sql.Rows.Scan does. *sql.Rows satisfies Row. A scan relies on
+// nothing beyond this interface, so the library can hand it an adapter
+// that shows only the columns the consumer's SELECT list declares.
+type Row interface {
+	Columns() ([]string, error)
+	Scan(dest ...any) error
+}
+
 // ScanFunc reads the current row into a T. The consumer writes one per row
-// shape; the SELECT list is the scan order.
-type ScanFunc[T any] func(*sql.Rows) (T, error)
+// shape; the SELECT list is the scan order. A scan reads the row with one
+// call to Row.Scan and relies on nothing beyond Row: it must not assume
+// the Row is a *sql.Rows, nor advance or close it.
+type ScanFunc[T any] func(Row) (T, error)
 
 // Scalar is the ScanFunc for a single-column row.
-func Scalar[T any](rows *sql.Rows) (T, error) {
+func Scalar[T any](row Row) (T, error) {
 	var v T
-	err := rows.Scan(&v)
+	err := row.Scan(&v)
 	return v, err
 }
 

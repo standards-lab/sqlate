@@ -6,3 +6,7 @@ require (
 	github.com/BurntSushi/toml v1.6.0
 	github.com/standards-lab/sqlate v0.3.0
 )
+
+// Transient bridge while this module builds against the base module's
+// unreleased v0.4.0 changes; the v0.4.0 release drops this.
+replace github.com/standards-lab/sqlate => ../

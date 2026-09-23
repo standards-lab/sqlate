@@ -7,6 +7,37 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-09-23
+
+A collection read's total can no longer disagree with its page: the count is a window in the
+page's own statement. Found by `blobfs`, whose listings promise that agreement.
+
+### Added
+
+- `query.Row`, the interface a scan reads its row through: `Columns` and `Scan`. `*sql.Rows`
+  satisfies it.
+- The library pattern `sql.collection_counted`, the collection read with its window count.
+- `sqltest.WithTotal`, which scripts the counted read's trailing column.
+- `Projection.Verify` prepares a third probe, the counted cursor page.
+
+### Changed
+
+- **Breaking:** `ScanFunc[T]`, `Scalar`, and `Scanner` take a `query.Row` instead of
+  `*sql.Rows`. A hand-written scan changes its parameter type only.
+- **Breaking:** `TotalExact` counts with `COUNT(*) OVER ()` in the page's own statement instead
+  of a separate count before it. An empty page after the first and an empty continued page
+  report `NoTotal`; an empty first page reports 0. A scan that never calls `Scan` is an error
+  under `TotalExact`, and a field named `sqlate_total` panics at `Project`. A counted page whose
+  last column is not `sqlate_total`, or whose base outputs an undeclared column of that name, is
+  an error naming the base.
+- **Breaking:** the library pattern `sql.count` is removed.
+
+### Fixed
+
+- A misspelled `not null` suffix, which leaves `not` or `null` in a field declaration's type
+  once the suffix is cut, or a type ending in `notnull` or `not_null`, is a load error. It was
+  taken as part of the type, leaving the field nullable.
+
 ## [v0.3.0] - 2026-09-23
 
 The returning command, promoted from the `blobfs` experiment, whose engine kept two copies of

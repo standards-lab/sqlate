@@ -221,6 +221,9 @@ func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, source,
 		if !ok || !identifier.MatchString(fname) || !sqlType.MatchString(typ) {
 			return st, src, fmt.Errorf("field declaration %q is not \"<name> <type>\"", f)
 		}
+		if strayNotNull(typ) {
+			return st, src, fmt.Errorf("field declaration %q: the type contains \"not\" or \"null\"; the suffix is %q", f, notNullSuffix)
+		}
 		st.fields = append(st.fields, Field{Name: fname, Type: typ, NotNull: notNull})
 	}
 	if key, ok := h.Get("key"); ok {
@@ -265,6 +268,26 @@ func cutNotNull(decl string) (string, bool) {
 		return decl[:len(decl)-len(notNullSuffix)], true
 	}
 	return decl, false
+}
+
+// strayNotNull reports whether a field's type, with its "not null" suffix
+// already cut, still contains the word not or null, or ends in the one-word
+// spelling notnull or not_null. Each marks a misspelled suffix, such as
+// "nott null", "not  null", or "notnull", which the type grammar would
+// otherwise accept as part of the type, leaving the field nullable and the
+// failure to the engine. No SQL type name contains any of these words.
+func strayNotNull(typ string) bool {
+	words := strings.Fields(typ)
+	for _, w := range words {
+		if strings.EqualFold(w, "not") || strings.EqualFold(w, "null") {
+			return true
+		}
+	}
+	if len(words) > 0 {
+		last := words[len(words)-1]
+		return strings.EqualFold(last, "notnull") || strings.EqualFold(last, "not_null")
+	}
+	return false
 }
 
 // identifier is a contract field name as it appears in the composed SQL:

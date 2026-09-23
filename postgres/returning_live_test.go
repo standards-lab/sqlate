@@ -47,7 +47,7 @@ type item struct {
 	CreatedAt, UpdatedAt time.Time
 }
 
-func scanItem(rows *sql.Rows) (item, error) {
+func scanItem(rows query.Row) (item, error) {
 	var it item
 	err := rows.Scan(&it.ID, &it.Status, &it.Size, &it.Version, &it.CreatedAt, &it.UpdatedAt)
 	it.CreatedAt, it.UpdatedAt = it.CreatedAt.UTC(), it.UpdatedAt.UTC()

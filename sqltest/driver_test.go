@@ -181,3 +181,22 @@ func TestOpen_ScriptedErrorSkipsTheShapeCheck(t *testing.T) {
 		t.Errorf("err = %v, want the scripted error", err)
 	}
 }
+
+func TestWithTotal_AppendsTheCountToEveryRowAndLeavesTheResponse(t *testing.T) {
+	r := sqltest.Response{Columns: []string{"id"}, Rows: [][]driver.Value{{"a"}, {"b"}}}
+	got := sqltest.WithTotal(r, 7)
+	if len(got.Columns) != 2 || got.Columns[0] != "id" || got.Columns[1] != "sqlate_total" {
+		t.Errorf("columns = %v", got.Columns)
+	}
+	for i, row := range got.Rows {
+		if len(row) != 2 || row[1] != int64(7) {
+			t.Errorf("row %d = %v", i, row)
+		}
+	}
+	if len(r.Columns) != 1 || len(r.Rows[0]) != 1 {
+		t.Errorf("the response was changed: %+v", r)
+	}
+	if empty := sqltest.WithTotal(sqltest.Response{Columns: []string{"id"}}, 0); len(empty.Columns) != 2 || len(empty.Rows) != 0 {
+		t.Errorf("empty = %+v", empty)
+	}
+}

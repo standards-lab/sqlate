@@ -18,10 +18,11 @@ import (
 // slots in the {{ }} syntax; a pattern contains slots only and never includes
 // another, so it reads on its own. Two uses:
 //
-//   - at request time, the collection read composes count, page, and one
-//     from the library's patterns over a program's base and the request's
-//     declarations; the library fills the slots with text it composed from
-//     other patterns, never with request input;
+//   - at request time, the collection read composes its page, counted or
+//     not, and its single-row read from the library's patterns over a
+//     program's base and the request's declarations; the library fills the
+//     slots with text it composed from other patterns, never with request
+//     input;
 //   - at load time, a statement includes a pattern with {{> namespace.name}},
 //     and the pattern's text is spliced in before parameters are rewritten,
 //     so a protocol's predicate and columns are written once.

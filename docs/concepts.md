@@ -246,18 +246,21 @@ and by a set of codes, becomes:
 
 ```sql
 SELECT * FROM (
-  SELECT id, code, name, version, created_at, updated_at
-  FROM team
+  SELECT q.*, COUNT(*) OVER () AS sqlate_total FROM (
+    SELECT id, code, name, version, created_at, updated_at
+    FROM team
+  ) q
+  WHERE q.name LIKE CAST($1 AS text) AND q.code IN (CAST($2 AS text), CAST($3 AS text))
 ) q
-WHERE q.name LIKE CAST($1 AS text) AND q.code IN (CAST($2 AS text), CAST($3 AS text))
 ORDER BY q.code, q.created_at DESC, q.id
 OFFSET $4 ROWS FETCH NEXT $5 ROWS ONLY
 ```
 
 Request values never enter as text: each is bound through its field's declared type, so a value
-the engine cannot read as that type is a rejected request, not a server error. The count under
-the same filters is the read's twin, and the single-row read is the base under one equality
-predicate.
+the engine cannot read as that type is a rejected request, not a server error. The total is a
+window count over the filtered base in the page's own statement, so it cannot disagree with the
+page; a request that declines the total gets the read without the inner layer. The single-row
+read is the base under one equality predicate.
 
 A page can also continue from a cursor, the previous page's last row, in place of an offset.
 The read then replaces the offset with the keyset predicate, the rows past that row in the sort

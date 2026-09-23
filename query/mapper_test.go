@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -84,6 +85,56 @@ func TestScanner_UnknownColumnIsAnError(t *testing.T) {
 	}
 	if _, ok := errors.AsType[*sqltest.MappedError](err); !ok {
 		t.Error("the scan failure did not cross the mapping boundary")
+	}
+}
+
+// fakeRow is a Row that is not *sql.Rows: the shape of an adapter that
+// shows a scan fewer columns than the statement returns.
+type fakeRow struct {
+	cols  []string
+	vals  []any
+	scans int
+}
+
+func (r *fakeRow) Columns() ([]string, error) { return r.cols, nil }
+
+func (r *fakeRow) Scan(dest ...any) error {
+	r.scans++
+	if len(dest) != len(r.vals) {
+		return fmt.Errorf("fakeRow: %d destinations for %d columns", len(dest), len(r.vals))
+	}
+	for i, d := range dest {
+		reflect.ValueOf(d).Elem().Set(reflect.ValueOf(r.vals[i]))
+	}
+	return nil
+}
+
+func TestScanner_ReadsAnyRow(t *testing.T) {
+	now := time.Now()
+	row := &fakeRow{
+		cols: []string{"plain", "id", "created_at"},
+		vals: []any{int64(3), "a", now},
+	}
+	e, err := query.Scanner[entity]()(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (entity{ID: "a", CreatedAt: now, Plain: 3}); !reflect.DeepEqual(e, want) {
+		t.Errorf("scanned %+v, want %+v", e, want)
+	}
+	if row.scans != 1 {
+		t.Errorf("Scan called %d times, want once", row.scans)
+	}
+	_, err = query.Scanner[entity]()(&fakeRow{cols: []string{"id", "derived"}, vals: []any{"a", "x"}})
+	if err == nil || !strings.Contains(err.Error(), `column "derived" has no field`) {
+		t.Errorf("err = %v, want the unmapped column named", err)
+	}
+}
+
+func TestScalar_ReadsAnyRow(t *testing.T) {
+	n, err := query.Scalar[int64](&fakeRow{cols: []string{"count"}, vals: []any{int64(9)}})
+	if err != nil || n != 9 {
+		t.Errorf("Scalar = %d, %v; want 9", n, err)
 	}
 }
 
