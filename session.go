@@ -54,6 +54,15 @@ type Locker interface {
 	Unlock(ctx context.Context, conn *sql.Conn, name string) error
 }
 
+// Beginner is a session that can open a transaction: *DB, and any type that
+// embeds it. A protocol that must run several statements as one unit, and
+// is handed a session rather than a transaction, asserts it to open its own.
+type Beginner interface {
+	Begin(ctx context.Context, opts ...TxOption) (*Tx, error)
+}
+
+var _ Beginner = (*DB)(nil)
+
 // DB is the pool session over a plain *sql.DB. Lifecycle (opening,
 // readiness, closing) belongs to whoever owns the pool; DB adds mapping,
 // prepare, options on Begin, and pinned connections.

@@ -14,3 +14,7 @@ require (
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 )
+
+// Transient bridge while this module builds against the base module's
+// unreleased v0.3.0 changes; the v0.3.0 release drops this.
+replace github.com/standards-lab/sqlate => ../
