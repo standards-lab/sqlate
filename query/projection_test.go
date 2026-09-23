@@ -516,6 +516,81 @@ func TestList_TheScansDestinationsAreLeftAsGiven(t *testing.T) {
 	}
 }
 
+func TestList_ReadsTheTotalFromWithTotalsColumn(t *testing.T) {
+	// sqltest.WithTotal keeps its own copy of the reserved name; a counted
+	// read checks the last column's name, so a copy that drifted would fail
+	// here.
+	db, _ := session(t, sqltest.WithTotal(people(2), 7))
+	got, err := projection(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 5})
+	if err != nil || got.Total != 7 || len(got.Items) != 2 {
+		t.Errorf("List over WithTotal = %+v, %v; want 2 items of 7", got, err)
+	}
+}
+
+func TestList_RefusesACountedPageWithoutItsTotalColumnLast(t *testing.T) {
+	ctx := context.Background()
+	cases := []struct {
+		name string
+		page sqltest.Response
+		want string
+	}{
+		{
+			// An overlay that moved the count: the last column would be
+			// hidden from the scan and read as the total.
+			name: "count not last",
+			page: sqltest.Response{Columns: []string{"id", "sqlate_total", "name", "age"}, Rows: [][]driver.Value{{"a", int64(1), "P", int64(20)}}},
+			want: `query: person_view: a counted page's last column is "age", not sqlate_total`,
+		},
+		{
+			name: "no count",
+			page: people(1),
+			want: `query: person_view: a counted page's last column is "age", not sqlate_total`,
+		},
+		{
+			// A base that outputs the reserved name without declaring it.
+			name: "base outputs the name",
+			page: sqltest.WithTotal(sqltest.Response{Columns: []string{"id", "name", "age", "SQLATE_TOTAL"}, Rows: [][]driver.Value{{"a", "P", int64(20), int64(5)}}}, 1),
+			want: "query: person_view: the base outputs a column named sqlate_total, which the library reserves",
+		},
+	}
+	for _, c := range cases {
+		db, rec := session(t, c.page)
+		_, err := projection(t).List(ctx, db, query.Directives{}, query.Page{Number: 1, Size: 5})
+		if err == nil || err.Error() != c.want {
+			t.Errorf("%s: List err = %v, want %q", c.name, err, c.want)
+		}
+		if rec.RowsLeaked() != 0 {
+			t.Errorf("%s: the refused page leaked its row set", c.name)
+		}
+	}
+	// Continue reads through the same check, naming its own base.
+	db, _ := session(t, members("c"))
+	_, err := memberView(t).Continue(ctx, db, query.Directives{}, issue(t, nil), 2)
+	if want := `query: member: a counted page's last column is "name", not sqlate_total`; err == nil || err.Error() != want {
+		t.Errorf("Continue err = %v, want %q", err, want)
+	}
+}
+
+func TestList_AWrongDestinationCountNamesTheVisibleColumns(t *testing.T) {
+	short := func(rows query.Row) (person, error) {
+		var p person
+		return p, rows.Scan(&p.ID, &p.Name)
+	}
+	view := catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement("person_view").Project(short)
+	db, _ := session(t, sqltest.WithTotal(people(1), 1))
+	_, err := view.List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 5})
+	// The same words database/sql uses over an uncounted page, with the
+	// count column left out of both sides.
+	if want := "sql: expected 3 destination arguments in Scan, not 2"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("err = %v, want %q", err, want)
+	}
+	db, _ = session(t, people(1))
+	_, uncounted := view.List(context.Background(), db, query.Directives{Total: query.TotalNone}, query.Page{Number: 1, Size: 5})
+	if err == nil || uncounted == nil || err.Error() != uncounted.Error() {
+		t.Errorf("counted err = %v, uncounted err = %v; want the same", err, uncounted)
+	}
+}
+
 func TestList_AScanThatDoesNotReadItsRowIsAnError(t *testing.T) {
 	lazy := func(query.Row) (person, error) { return person{}, nil }
 	view := catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement("person_view").Project(lazy)

@@ -127,6 +127,8 @@ func TestLoad_RejectsBrokenHeaders(t *testing.T) {
 		"not null truncated":            "--| tier: standard\n--| field: size bigint not nul\nSELECT 1",
 		"not null double-spaced":        "--| tier: standard\n--| field: size bigint not  null\nSELECT 1",
 		"not null split":                "--| tier: standard\n--| field: id uuid not nul l\nSELECT 1",
+		"not null as one word":          "--| tier: standard\n--| field: size bigint notnull\nSELECT 1",
+		"not null underscored":          "--| tier: standard\n--| field: size BIGINT Not_Null\nSELECT 1",
 		"key not a declared field":      "--| tier: standard\n--| key: id\n--| field: name text\nSELECT 1",
 		"key part not a declared field": "--| tier: standard\n--| key: id, ghost\n--| field: id uuid\nSELECT 1",
 		"key part repeated":             "--| tier: standard\n--| key: id, id\n--| field: id uuid\nSELECT 1",
@@ -136,6 +138,11 @@ func TestLoad_RejectsBrokenHeaders(t *testing.T) {
 		_, err := catalog().Compile(fstest.MapFS{"sql/s.sql": {Data: []byte(text)}}, "sql", sqltest.Dialect{})
 		if err == nil || !strings.Contains(err.Error(), "s.sql") {
 			t.Errorf("%s: err = %v, want a load error naming the file", name, err)
+		}
+		// A misspelled suffix passes the type grammar, so only the
+		// suffix check refuses it.
+		if strings.HasPrefix(name, "not null") && (err == nil || !strings.Contains(err.Error(), `the type contains "not" or "null"`)) {
+			t.Errorf("%s: err = %v, want the misspelled suffix named", name, err)
 		}
 	}
 	defer func() {

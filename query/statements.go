@@ -271,16 +271,21 @@ func cutNotNull(decl string) (string, bool) {
 }
 
 // strayNotNull reports whether a field's type, with its "not null" suffix
-// already cut, still contains the word not or null. Either word marks a
-// misspelled suffix, such as "nott null" or "not  null", which the type
-// grammar would otherwise accept as part of the type, leaving the field
-// nullable and the failure to the engine. No SQL type name contains
-// either word.
+// already cut, still contains the word not or null, or ends in the one-word
+// spelling notnull or not_null. Each marks a misspelled suffix, such as
+// "nott null", "not  null", or "notnull", which the type grammar would
+// otherwise accept as part of the type, leaving the field nullable and the
+// failure to the engine. No SQL type name contains any of these words.
 func strayNotNull(typ string) bool {
-	for _, w := range strings.Fields(typ) {
+	words := strings.Fields(typ)
+	for _, w := range words {
 		if strings.EqualFold(w, "not") || strings.EqualFold(w, "null") {
 			return true
 		}
+	}
+	if len(words) > 0 {
+		last := words[len(words)-1]
+		return strings.EqualFold(last, "notnull") || strings.EqualFold(last, "not_null")
 	}
 	return false
 }

@@ -25,14 +25,16 @@ page's own statement. Found by `blobfs`, whose listings promise that agreement.
 - **Breaking:** `TotalExact` counts with `COUNT(*) OVER ()` in the page's own statement instead
   of a separate count before it. An empty page after the first and an empty continued page
   report `NoTotal`; an empty first page reports 0. A scan that never calls `Scan` is an error
-  under `TotalExact`, and a field named `sqlate_total` panics at `Project`.
+  under `TotalExact`, and a field named `sqlate_total` panics at `Project`. A counted page whose
+  last column is not `sqlate_total`, or whose base outputs an undeclared column of that name, is
+  an error naming the base.
 - **Breaking:** the library pattern `sql.count` is removed.
 
 ### Fixed
 
 - A misspelled `not null` suffix, which leaves `not` or `null` in a field declaration's type
-  once the suffix is cut, is a load error. It was taken as part of the type, leaving the field
-  nullable.
+  once the suffix is cut, or a type ending in `notnull` or `not_null`, is a load error. It was
+  taken as part of the type, leaving the field nullable.
 
 ## [v0.3.0] - 2026-09-23
 

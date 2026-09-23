@@ -5,7 +5,8 @@
 // one snapshot and agree even while writes land between the statement and
 // the caller. A count run as its own statement before the page is shown to
 // disagree under the same writes. The agreement holds under concurrent
-// writers on the pool. The counted page scans its base once under one
+// writers on the pool, where the two-statement form is shown to disagree
+// too. The counted page scans its base once under one
 // window, and the uncounted page keeps the key's index order.
 // `mise run integration`.
 package postgres_test
@@ -122,22 +123,29 @@ func (r *racer) QueryContext(ctx context.Context, q string, args ...any) (*sql.R
 	return rows, nil
 }
 
-// countX reads the filtered rows' count now, on the pool.
+// countX reads the filtered rows' count now, failing the test on an error.
 func countX(t testing.TB, s sqlate.Session, table string) int {
 	t.Helper()
-	rows, err := s.QueryContext(context.Background(), "SELECT COUNT(*) FROM "+table+" WHERE grp = 'x'")
+	n, err := readX(s, table)
 	if err != nil {
 		t.Fatal(err)
+	}
+	return n
+}
+
+// readX reads the filtered rows' count now.
+func readX(s sqlate.Session, table string) (int, error) {
+	rows, err := s.QueryContext(context.Background(), "SELECT COUNT(*) FROM "+table+" WHERE grp = 'x'")
+	if err != nil {
+		return 0, err
 	}
 	defer func() { _ = rows.Close() }()
 	var n int
 	if !rows.Next() {
-		t.Fatalf("no count: %v", rows.Err())
+		return 0, fmt.Errorf("no count: %v", rows.Err())
 	}
-	if err := rows.Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	return n
+	err = rows.Scan(&n)
+	return n, err
 }
 
 // Proof: the counted total agrees with its page when a write commits between
@@ -217,10 +225,31 @@ func TestLive_TotalAgreesUnderRacingWrites(t *testing.T) {
 	}
 	t.Logf("counted: %d pages, each raced by a write (%d writes), 0 disagreements", pages, r.writes)
 
-	// The control: the total from its own statement, then the page. Each
-	// round's page reads every filtered row, so it agrees with the count
-	// only when nothing changed between the two statements.
+	// The counted rounds, the control's shape under TotalExact: each round
+	// reads every filtered row on one page, so its items number exactly its
+	// total, and the write racing it still lands.
 	const rounds = 6
+	agreed := 0
+	for round := range rounds {
+		c, err := items.List(ctx, r, d, query.Page{Number: 1, Size: 1000})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if now := countX(t, db, table); now == c.Total {
+			t.Errorf("counted round %d: the count is still %d; the racer did not land", round, now)
+		}
+		if d := disagreement(c, c.Total, 0, 1000); d != "" || len(c.Items) != c.Total || c.More {
+			t.Errorf("counted round %d: %d items, More %v, total %d: %s", round, len(c.Items), c.More, c.Total, d)
+			continue
+		}
+		agreed++
+	}
+	t.Logf("counted rounds agreed in %d of %d", agreed, rounds)
+
+	// The control: the total from its own statement, then the page. Each
+	// round's page reads every filtered row, as a counted round does, so it
+	// agrees with the count only when nothing changed between the two
+	// statements.
 	disagreed := 0
 	for round := range rounds {
 		// Each round runs two queries, so the write racing the count
@@ -247,16 +276,20 @@ func TestLive_TotalAgreesUnderRacingWrites(t *testing.T) {
 	t.Logf("control: two statements disagreed in %d of %d rounds", disagreed, rounds)
 }
 
-// Proof: under concurrent writers on the pool, every counted page a reader
-// sees agrees with its own total. Two writers insert and delete batches of
-// 50 filtered rows for two seconds while four readers run List at a random
-// page and Continue from it, outside any transaction; no page may disagree.
-func TestLive_TotalAgreesUnderConcurrentWrites(t *testing.T) {
+// stressResult is what one stress run saw: its reads and writes, and the
+// pages that disagreed with their totals, the first five described.
+type stressResult struct {
+	lists, continues, writes, violations int64
+	first                                []string
+}
+
+// stress runs two writers that insert and delete batches of 50 filtered
+// rows for two seconds against four readers outside any transaction. Each
+// reader calls read in a loop, which reports each disagreement it finds
+// through violate and whether it continued a page.
+func stress(t *testing.T, db *sqlate.DB, table string, read func(violate func(string)) (continued int)) stressResult {
+	t.Helper()
 	ctx := context.Background()
-	db := live(t)
-	const table = "live_total_stress"
-	items := liveTotal(t, db, table, 400)
-	const size = 25
 	deadline := time.Now().Add(2 * time.Second)
 
 	var lists, continues, writes, violations atomic.Int64
@@ -292,48 +325,92 @@ func TestLive_TotalAgreesUnderConcurrentWrites(t *testing.T) {
 	}
 	for range 4 {
 		wg.Go(func() {
-			d := query.Directives{Sort: []query.Sort{{Field: "n"}}, Filters: onlyX}
-			for time.Now().Before(deadline) {
-				number := 1 + rand.IntN(20)
-				c, err := items.List(ctx, db, d, query.Page{Number: number, Size: size})
-				if err != nil {
-					t.Errorf("List: %v", err)
-					return
-				}
+			for time.Now().Before(deadline) && !t.Failed() {
+				continues.Add(int64(read(violate)))
 				lists.Add(1)
-				empty := query.NoTotal // an empty later page carries no count
-				if number == 1 {
-					empty = 0
-				}
-				if len(c.Items) == 0 && c.Total != empty {
-					violate(fmt.Sprintf("empty page %d: Total = %d", number, c.Total))
-				}
-				if msg := disagreement(c, c.Total, (number-1)*size, size); msg != "" {
-					violate(fmt.Sprintf("page %d: %s", number, msg))
-				}
-				for hop := 0; hop < 3 && c.Next != ""; hop++ {
-					if c, err = items.Continue(ctx, db, d, c.Next, size); err != nil {
-						t.Errorf("Continue: %v", err)
-						return
-					}
-					continues.Add(1)
-					if len(c.Items) == 0 && c.Total != query.NoTotal {
-						violate(fmt.Sprintf("empty Continue page: Total = %d", c.Total))
-					}
-					if msg := disagreement(c, c.Total, -1, size); msg != "" {
-						violate("Continue: " + msg)
-					}
-				}
 			}
 		})
 	}
 	wg.Wait()
-	t.Logf("stress: %d List and %d Continue reads against %d committed write batches, %d violations", lists.Load(), continues.Load(), writes.Load(), violations.Load())
-	if n := violations.Load(); n != 0 {
-		t.Errorf("%d pages disagreed with their totals; the first:\n%s", n, strings.Join(first, "\n"))
+	return stressResult{lists: lists.Load(), continues: continues.Load(), writes: writes.Load(), violations: violations.Load(), first: first}
+}
+
+// Proof: under concurrent writers on the pool, every counted page a reader
+// sees agrees with its own total. Four readers run List at a random page and
+// Continue from it while the writers run; no page may disagree. The control
+// runs the same stress over the two-statement form, a COUNT(*) statement
+// and then an uncounted page of the whole filtered listing, and shows the
+// stress catches it disagreeing.
+func TestLive_TotalAgreesUnderConcurrentWrites(t *testing.T) {
+	ctx := context.Background()
+	db := live(t)
+	const size = 25
+	items := liveTotal(t, db, "live_total_stress", 400)
+	d := query.Directives{Sort: []query.Sort{{Field: "n"}}, Filters: onlyX}
+	res := stress(t, db, "live_total_stress", func(violate func(string)) int {
+		number := 1 + rand.IntN(20)
+		c, err := items.List(ctx, db, d, query.Page{Number: number, Size: size})
+		if err != nil {
+			t.Errorf("List: %v", err)
+			return 0
+		}
+		empty := query.NoTotal // an empty later page carries no count
+		if number == 1 {
+			empty = 0
+		}
+		if len(c.Items) == 0 && c.Total != empty {
+			violate(fmt.Sprintf("empty page %d: Total = %d", number, c.Total))
+		}
+		if msg := disagreement(c, c.Total, (number-1)*size, size); msg != "" {
+			violate(fmt.Sprintf("page %d: %s", number, msg))
+		}
+		hops := 0
+		for ; hops < 3 && c.Next != ""; hops++ {
+			if c, err = items.Continue(ctx, db, d, c.Next, size); err != nil {
+				t.Errorf("Continue: %v", err)
+				return hops
+			}
+			if len(c.Items) == 0 && c.Total != query.NoTotal {
+				violate(fmt.Sprintf("empty Continue page: Total = %d", c.Total))
+			}
+			if msg := disagreement(c, c.Total, -1, size); msg != "" {
+				violate("Continue: " + msg)
+			}
+		}
+		return hops
+	})
+	t.Logf("stress: %d List and %d Continue reads against %d committed write batches, %d violations", res.lists, res.continues, res.writes, res.violations)
+	if res.violations != 0 {
+		t.Errorf("%d pages disagreed with their totals; the first:\n%s", res.violations, strings.Join(res.first, "\n"))
 	}
-	if lists.Load() == 0 || continues.Load() == 0 || writes.Load() == 0 {
+	if res.lists == 0 || res.continues == 0 || res.writes == 0 {
 		t.Errorf("the stress ran no reads or writes of some kind")
+	}
+
+	// The control: the same stress over the two-statement form. Each read
+	// is the whole filtered listing on one page, so it agrees with the
+	// count only when no batch committed between the two statements.
+	const control = "live_total_stress_control"
+	plain := liveTotal(t, db, control, 400)
+	res = stress(t, db, control, func(violate func(string)) int {
+		total, err := readX(db, control)
+		if err != nil {
+			t.Errorf("control count: %v", err)
+			return 0
+		}
+		c, err := plain.List(ctx, db, query.Directives{Sort: d.Sort, Filters: onlyX, Total: query.TotalNone}, query.Page{Number: 1, Size: 1000})
+		if err != nil {
+			t.Errorf("control List: %v", err)
+			return 0
+		}
+		if msg := disagreement(c, total, 0, 1000); msg != "" {
+			violate(fmt.Sprintf("counted %d, page has %d: %s", total, len(c.Items), msg))
+		}
+		return 0
+	})
+	t.Logf("stress control: %d two-statement reads against %d committed write batches, %d violations", res.lists, res.writes, res.violations)
+	if res.violations == 0 {
+		t.Errorf("the two-statement control never disagreed under the stress; the stress cannot catch the form it guards against")
 	}
 }
 

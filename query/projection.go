@@ -226,7 +226,13 @@ func (p Projection[T]) list(ctx context.Context, s sqlate.Session, d Directives,
 	var row Row = rows
 	var adapter *countedRow
 	if counted {
-		adapter = &countedRow{rows: rows}
+		cols, err := rows.Columns()
+		if err != nil {
+			return none, mapErr(s, err)
+		}
+		if adapter, err = newCountedRow(p.base.name, rows, cols); err != nil {
+			return none, err
+		}
 		row = adapter
 	}
 
@@ -488,7 +494,8 @@ func (p Projection[T]) page(b *binding, predicates, keyset []string, o ordering,
 // page's columns without the trailing count, and each Scan reads the count
 // alongside the consumer's destinations, recording that the row was read.
 type countedRow struct {
-	rows  *sql.Rows
+	rows *sql.Rows
+	// cols is the page's columns without the count, the columns a scan sees.
 	cols  []string
 	total int64
 	// read reports whether the current row's Scan ran; the caller resets
@@ -496,28 +503,43 @@ type countedRow struct {
 	read bool
 }
 
-// Columns returns the page's columns without the trailing count; they are
-// read from the row set once, on the first call.
-func (c *countedRow) Columns() ([]string, error) {
-	if c.cols == nil {
-		cols, err := c.rows.Columns()
-		if err != nil {
-			return nil, err
+// newCountedRow returns the adapter over a counted page of the base named
+// base, whose output columns are cols. The count must be the last column
+// and the only one of its name, in any case: a pattern overlay that moved
+// the count would otherwise hide a real column and read it as the total,
+// and a base that outputs a column of the name, declared or not, would
+// read as a second count.
+func newCountedRow(base string, rows *sql.Rows, cols []string) (*countedRow, error) {
+	if len(cols) == 0 || !strings.EqualFold(cols[len(cols)-1], totalColumn) {
+		last := ""
+		if len(cols) > 0 {
+			last = cols[len(cols)-1]
 		}
-		if len(cols) == 0 {
-			return nil, fmt.Errorf("query: a counted page has no %s column", totalColumn)
-		}
-		c.cols = cols
+		return nil, fmt.Errorf("query: %s: a counted page's last column is %q, not %s", base, last, totalColumn)
 	}
+	visible := cols[:len(cols)-1]
+	if slices.ContainsFunc(visible, func(c string) bool { return strings.EqualFold(c, totalColumn) }) {
+		return nil, fmt.Errorf("query: %s: the base outputs a column named %s, which the library reserves", base, totalColumn)
+	}
+	return &countedRow{rows: rows, cols: visible}, nil
+}
+
+// Columns returns the page's columns without the trailing count.
+func (c *countedRow) Columns() ([]string, error) {
 	// A copy, as sql.Rows.Columns returns one, so a scan that changes it
 	// changes nothing here.
-	return slices.Clone(c.cols[:len(c.cols)-1]), nil
+	return slices.Clone(c.cols), nil
 }
 
 // Scan scans the row into dest and the count into the adapter, and records
-// that the row was read. It copies dest rather than appending to it, so
-// the caller's slice is left as it was.
+// that the row was read. dest is checked against the columns the scan sees,
+// in database/sql's words, so a wrong count is reported without the hidden
+// column. Scan copies dest rather than appending to it, so the caller's
+// slice is left as it was.
 func (c *countedRow) Scan(dest ...any) error {
+	if len(dest) != len(c.cols) {
+		return fmt.Errorf("sql: expected %d destination arguments in Scan, not %d", len(c.cols), len(dest))
+	}
 	all := make([]any, len(dest)+1)
 	copy(all, dest)
 	all[len(dest)] = &c.total

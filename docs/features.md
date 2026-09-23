@@ -297,8 +297,10 @@ Under `TotalExact` the read adds `COUNT(*) OVER ()` in an inner layer over the f
 and applies the keyset predicate, the order, and the paging in an outer layer, so the count
 covers every row the filters keep, not only those past a cursor. The count arrives as a
 trailing column, `sqlate_total`, which the scan never sees; a base may declare no field of that
-name, in any case, and `Project` panics on one. A scan that returns without calling `Scan` is an error,
-since the page's total would go unread. The window reads every filtered row before paging,
+name, in any case, and `Project` panics on one. A base that outputs an undeclared column of that
+name is refused when the page is read, as is a page whose last column is not the count. A scan
+that returns without calling `Scan` is an error, since the page's total would go unread, and a
+scan given the wrong number of destinations is told the count of the columns it sees. The window reads every filtered row before paging,
 where the plan under `TotalNone` can stop early along an index, so a caller walking a large
 collection by cursor reads the total once and declines it after.
 
