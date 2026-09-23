@@ -32,7 +32,7 @@ func TestRender_PanicsWithoutTheLibrary(t *testing.T) {
 			t.Error("render did not panic")
 		}
 	}()
-	MustCatalog(Publish("app", fstest.MapFS{"p/x.sql": {Data: []byte("--| tier: standard\nSELECT 1")}}, "p")).render("count", nil)
+	MustCatalog(Publish("app", fstest.MapFS{"p/x.sql": {Data: []byte("--| tier: standard\nSELECT 1")}}, "p")).render("collection", nil)
 }
 
 func TestReadLayer_RejectsMalformedPatterns(t *testing.T) {

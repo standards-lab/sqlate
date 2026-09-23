@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"sync"
 )
@@ -42,6 +43,25 @@ type Response struct {
 	Columns  []string
 	Rows     [][]driver.Value
 }
+
+// WithTotal returns r as a counted collection page returns it: every row
+// gains a trailing count column holding n, the column a query.Projection
+// reads its exact total from and hides from the scan. It is how a unit
+// suite scripts a List or Continue under query.TotalExact without spelling
+// the library's reserved column name. r is left as it was; an empty r
+// still gains the column, as an empty counted page declares it.
+func WithTotal(r Response, n int64) Response {
+	out := r
+	out.Columns = append(slices.Clip(r.Columns), totalColumn)
+	out.Rows = make([][]driver.Value, len(r.Rows))
+	for i, row := range r.Rows {
+		out.Rows[i] = append(slices.Clip(row), n)
+	}
+	return out
+}
+
+// totalColumn is the name query reserves for a counted page's total.
+const totalColumn = "sqlate_total"
 
 // Recorder is the shared state behind every connection a connector hands
 // out: the response queue, the call log, and the failure switches.

@@ -20,5 +20,6 @@
 // with one errors.As that an error passed through MapError.
 // [ReturningDialect] adds the query.Returner capability to it, so a suite
 // covers a returning command's single-statement form as well as its
-// fallback.
+// fallback. [WithTotal] scripts a collection page read under
+// query.TotalExact, whose rows carry the total in a trailing column.
 package sqltest

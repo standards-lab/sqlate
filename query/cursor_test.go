@@ -48,7 +48,7 @@ func memberView(t *testing.T) query.Projection[member] {
 // issued, failing the test when it issued none.
 func issue(t *testing.T, sorts []query.Sort, filters ...query.Filter) query.Cursor {
 	t.Helper()
-	db, _ := session(t, count(9), members("a", "b", "c"))
+	db, _ := session(t, sqltest.WithTotal(members("a", "b", "c"), 9))
 	got, err := memberView(t).List(context.Background(), db, query.Directives{Sort: sorts, Filters: filters}, query.Page{Number: 1, Size: 2})
 	if err != nil {
 		t.Fatal(err)
@@ -63,7 +63,7 @@ func TestContinue_ContinuesFromThePagesLastItem(t *testing.T) {
 	c := issue(t, nil)
 	// The cursor's page takes no page number: the keyset predicate stands in
 	// for the offset, which stays 0.
-	db, rec := session(t, count(9), members("c"))
+	db, rec := session(t, sqltest.WithTotal(members("c"), 9))
 	got, err := memberView(t).Continue(context.Background(), db, query.Directives{}, c, 2)
 	if err != nil {
 		t.Fatalf("Continue = %+v, %v", got, err)
@@ -73,17 +73,20 @@ func TestContinue_ContinuesFromThePagesLastItem(t *testing.T) {
 	}
 	keyset := "(q.org > CAST($1 AS uuid) OR (q.org = CAST($1 AS uuid) AND q.id > CAST($2 AS uuid)))"
 	calls := rec.Calls()
-	// The count runs under the request's filters alone, so the cursor's
-	// values are bound for the page only.
-	if calls[0].SQL != "SELECT COUNT(*) FROM ("+memberBase+") q" || len(calls[0].Args) != 0 {
-		t.Errorf("count = %+v", calls[0])
+	// One statement: the window counts under the request's filters alone,
+	// and the keyset predicate outside it narrows the page, not the total.
+	if len(calls) != 1 {
+		t.Fatalf("ops = %v, want the counted page alone", rec.Ops())
 	}
-	if calls[1].SQL != "SELECT * FROM ("+memberBase+") q WHERE "+keyset+" ORDER BY q.org, q.id OFFSET $3 ROWS FETCH NEXT $4 ROWS ONLY" {
-		t.Errorf("page sql = %q", calls[1].SQL)
+	if want := counted(memberBase, "", " WHERE "+keyset, " ORDER BY q.org, q.id OFFSET $3 ROWS FETCH NEXT $4 ROWS ONLY"); calls[0].SQL != want {
+		t.Errorf("page sql = %q", calls[0].SQL)
+	}
+	if got.Total != 9 {
+		t.Errorf("total = %d, want the window's 9", got.Total)
 	}
 	// The page's last item was ("o", "b"): each keyed value is bound once,
 	// and the disjunct that repeats it reuses its placeholder.
-	if a := calls[1].Args; len(a) != 4 || a[0] != "o" || a[1] != "b" || a[2] != 0 || a[3] != 3 {
+	if a := calls[0].Args; len(a) != 4 || a[0] != "o" || a[1] != "b" || a[2] != 0 || a[3] != 3 {
 		t.Errorf("page args = %v", a)
 	}
 }
@@ -91,13 +94,13 @@ func TestContinue_ContinuesFromThePagesLastItem(t *testing.T) {
 func TestContinue_ADescendingOrderingComparesTheOtherWay(t *testing.T) {
 	sorts := []query.Sort{{Field: "org", Descending: true}, {Field: "id", Descending: true}}
 	c := issue(t, sorts)
-	db, rec := session(t, count(9), members("c"))
+	db, rec := session(t, sqltest.WithTotal(members("c"), 9))
 	if _, err := memberView(t).Continue(context.Background(), db, query.Directives{Sort: sorts}, c, 2); err != nil {
 		t.Fatal(err)
 	}
 	keyset := "(q.org < CAST($1 AS uuid) OR (q.org = CAST($1 AS uuid) AND q.id < CAST($2 AS uuid)))"
-	want := "SELECT * FROM (" + memberBase + ") q WHERE " + keyset + " ORDER BY q.org DESC, q.id DESC OFFSET $3 ROWS FETCH NEXT $4 ROWS ONLY"
-	if got := rec.Calls()[1].SQL; got != want {
+	want := counted(memberBase, "", " WHERE "+keyset, " ORDER BY q.org DESC, q.id DESC OFFSET $3 ROWS FETCH NEXT $4 ROWS ONLY")
+	if got := rec.Calls()[0].SQL; got != want {
 		t.Errorf("page sql = %q", got)
 	}
 }
@@ -105,7 +108,7 @@ func TestContinue_ADescendingOrderingComparesTheOtherWay(t *testing.T) {
 func TestContinue_CursorIsBoundAfterTheRequestsFilters(t *testing.T) {
 	byName := query.Filter{Field: "name", Op: query.OpEq, Value: "M"}
 	c := issue(t, nil, byName)
-	db, rec := session(t, count(9), members("c"))
+	db, rec := session(t, sqltest.WithTotal(members("c"), 9))
 	_, err := memberView(t).Continue(context.Background(), db, query.Directives{
 		Filters: []query.Filter{byName},
 	}, c, 2)
@@ -113,14 +116,11 @@ func TestContinue_CursorIsBoundAfterTheRequestsFilters(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := rec.Calls()
-	if calls[0].SQL != "SELECT COUNT(*) FROM ("+memberBase+") q WHERE q.name = CAST($1 AS text)" {
-		t.Errorf("count sql = %q", calls[0].SQL)
-	}
 	keyset := "(q.org > CAST($2 AS uuid) OR (q.org = CAST($2 AS uuid) AND q.id > CAST($3 AS uuid)))"
-	if got := calls[1].SQL; !strings.Contains(got, "WHERE q.name = CAST($1 AS text) AND "+keyset) {
+	if got := calls[0].SQL; !strings.Contains(got, "q WHERE q.name = CAST($1 AS text)) q WHERE "+keyset) {
 		t.Errorf("page sql = %q", got)
 	}
-	if a := calls[1].Args; len(a) != 5 || a[0] != "M" || a[1] != "o" || a[2] != "b" || a[3] != 0 || a[4] != 3 {
+	if a := calls[0].Args; len(a) != 5 || a[0] != "M" || a[1] != "o" || a[2] != "b" || a[3] != 0 || a[4] != 3 {
 		t.Errorf("page args = %v, want the filter, the cursor, then the paging bounds", a)
 	}
 }
@@ -186,7 +186,7 @@ func TestContinue_RefusesOtherFilters(t *testing.T) {
 
 	// The same filters rebuilt as a new slice continue: the cursor compares
 	// their content, not their identity.
-	db, _ := session(t, count(9), members("c"))
+	db, _ := session(t, sqltest.WithTotal(members("c"), 9))
 	same := []query.Filter{{Field: "name", Op: query.OpEq, Value: "M"}}
 	if _, err := memberView(t).Continue(context.Background(), db, query.Directives{Filters: same}, c, 2); err != nil {
 		t.Errorf("the same filters = %v, want the page", err)
@@ -194,7 +194,7 @@ func TestContinue_RefusesOtherFilters(t *testing.T) {
 
 	// No filters and an empty filter slice are the same request.
 	unfiltered := issue(t, nil)
-	db, _ = session(t, count(9), members("c"))
+	db, _ = session(t, sqltest.WithTotal(members("c"), 9))
 	if _, err := memberView(t).Continue(context.Background(), db, query.Directives{Filters: []query.Filter{}}, unfiltered, 2); err != nil {
 		t.Errorf("an empty filter slice after none = %v, want the page", err)
 	}
@@ -203,7 +203,7 @@ func TestContinue_RefusesOtherFilters(t *testing.T) {
 func TestList_FiltersWithNoSignatureIssueNoCursor(t *testing.T) {
 	// A NaN has no JSON form, so the filters cannot be bound into a cursor:
 	// the page still reports that a further page exists, without one.
-	db, _ := session(t, count(9), members("a", "b", "c"))
+	db, _ := session(t, sqltest.WithTotal(members("a", "b", "c"), 9))
 	got, err := memberView(t).List(context.Background(), db, query.Directives{
 		Filters: []query.Filter{{Field: "name", Op: query.OpEq, Value: math.NaN()}},
 	}, query.Page{Number: 1, Size: 2})
@@ -285,7 +285,7 @@ func TestList_KeyedColumnsAreMatchedInThePagesOwnCase(t *testing.T) {
 	folded := sqltest.Response{Columns: []string{"ORG", "ID", "NAME"}, Rows: [][]driver.Value{
 		{"o", "a", "M"}, {"o", "b", "M"}, {"o", "c", "M"},
 	}}
-	db, _ := session(t, count(9), folded)
+	db, _ := session(t, sqltest.WithTotal(folded, 9))
 	got, err := memberView(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err != nil || got.Next == "" {
 		t.Fatalf("List = %+v, %v, want a cursor over the folded columns", got, err)
@@ -293,7 +293,7 @@ func TestList_KeyedColumnsAreMatchedInThePagesOwnCase(t *testing.T) {
 }
 
 func TestList_AKeyedFieldThePageDoesNotOutputIsTheContractsDefect(t *testing.T) {
-	db, _ := session(t, count(9), sqltest.Response{Columns: []string{"id", "name"}, Rows: [][]driver.Value{{"a", "M"}}})
+	db, _ := session(t, sqltest.WithTotal(sqltest.Response{Columns: []string{"id", "name"}, Rows: [][]driver.Value{{"a", "M"}}}, 9))
 	_, err := memberView(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err == nil || !strings.Contains(err.Error(), `keyed field "org" is not an output column`) {
 		t.Errorf("err = %v, want the missing column named", err)
@@ -303,7 +303,7 @@ func TestList_AKeyedFieldThePageDoesNotOutputIsTheContractsDefect(t *testing.T) 
 func TestList_NullInAKeyedColumnIsTheBasesDefect(t *testing.T) {
 	// The page's last row carries a null where the contract declared the
 	// field not null, so no cursor can be issued from it.
-	db, _ := session(t, count(9), members("a", nil, "c"))
+	db, _ := session(t, sqltest.WithTotal(members("a", nil, "c"), 9))
 	_, err := memberView(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err == nil {
 		t.Fatal("List did not fail")

@@ -60,20 +60,34 @@ type Filter struct {
 type TotalMode int
 
 const (
-	// TotalExact runs the count under the request's filters before the page.
+	// TotalExact counts the rows under the request's filters in the page's
+	// own statement, as a window over the filtered base, so the total and
+	// the page are read from one snapshot and cannot disagree.
 	TotalExact TotalMode = iota
 	// TotalNone skips the count; Collection.Total is NoTotal.
 	TotalNone
 )
 
-// NoTotal is Collection.Total when the request declined the count.
+// NoTotal is Collection.Total when the request declined the count, or when
+// the page has no row to carry it past the first page.
 const NoTotal = -1
 
+// totalColumn is the reserved name of the count's column: the last output
+// column of a counted page, read by the library and never shown to a scan.
+// No contract field may take it.
+const totalColumn = "sqlate_total"
+
 // Collection is one page of a collection read: the items, the total under
-// the request's filters (NoTotal when the request declined the count),
-// whether a further page exists, and the cursor that continues from this
-// page's last item, empty when More is false or the ordering cannot be
-// continued by cursor.
+// the request's filters, whether a further page exists, and the cursor that
+// continues from this page's last item, empty when More is false or the
+// ordering cannot be continued by cursor.
+//
+// The count rides on the page's rows, so a page with no row carries none:
+// Total is the count when the page has an item, 0 for an empty first page
+// of List, and NoTotal for an empty later page, an empty Continue page, or
+// a request that declined the count. Whenever Total is not NoTotal on a
+// List page, the page's items end at or before it, and More reports
+// whether they end before it.
 type Collection[T any] struct {
 	Items []T
 	Total int
@@ -124,6 +138,11 @@ func newProjection[T any](base Statement, scan ScanFunc[T]) Projection[T] {
 	}
 	fields := make(map[string]Field, len(base.fields))
 	for _, f := range base.fields {
+		// An engine folds an unquoted name's case, so the reserved name is
+		// refused in any case.
+		if strings.EqualFold(f.Name, totalColumn) {
+			panic(fmt.Sprintf("query: %s: field %q is the name the library reserves for the page's total", base.name, f.Name))
+		}
 		fields[f.Name] = f
 	}
 	return Projection[T]{base: base, scan: scan, fields: fields}
@@ -132,11 +151,12 @@ func newProjection[T any](base Statement, scan ScanFunc[T]) Projection[T] {
 // Statement returns the base.
 func (p Projection[T]) Statement() Statement { return p.base }
 
-// List runs the collection read by offset: the page under the declarations,
-// the total under the same filters unless the request declined it, and the
-// cursor that continues past the page. Sorts gain the key fields they do not
-// already name, so the ordering is total and paging is stable; a page reads
-// one row past its size to report whether a further page exists.
+// List runs the collection read by offset, in one statement: the page under
+// the declarations, the total under the same filters unless the request
+// declined it, and the cursor that continues past the page. Sorts gain the
+// key fields they do not already name, so the ordering is total and paging
+// is stable; a page reads one row past its size to report whether a further
+// page exists.
 func (p Projection[T]) List(ctx context.Context, s sqlate.Session, d Directives, page Page, base ...Args) (Collection[T], error) {
 	if page.Number < 1 {
 		return Collection[T]{}, fmt.Errorf("%w: page number must be at least 1", ErrDirectives)
@@ -163,8 +183,8 @@ func (p Projection[T]) Continue(ctx context.Context, s sqlate.Session, d Directi
 }
 
 // list is the shared body of List and Continue: bind, filter, resolve the
-// order, optionally count, then read one page, by offset when after is empty
-// and past the cursor's position otherwise.
+// order, then read one page, by offset when after is empty and past the
+// cursor's position otherwise, counted when the request asks for the total.
 func (p Projection[T]) list(ctx context.Context, s sqlate.Session, d Directives, size, offset int, after Cursor, base []Args) (Collection[T], error) {
 	var none Collection[T]
 	if d.Total != TotalExact && d.Total != TotalNone {
@@ -189,31 +209,26 @@ func (p Projection[T]) list(ctx context.Context, s sqlate.Session, d Directives,
 		}
 	}
 
-	total := NoTotal
-	if d.Total == TotalExact {
-		rows, err := s.QueryContext(ctx, p.base.catalog.render("count", map[string]string{"base": p.base.compiled.text, "where": p.clause(predicates)}), b.values...)
-		if err != nil {
-			return none, p.engine(err)
-		}
-		if !rows.Next() {
-			_ = rows.Close()
-			return none, errors.New("query: count returned no row")
-		}
-		if err := rows.Scan(&total); err != nil {
-			_ = rows.Close()
-			return none, mapErr(s, err)
-		}
-		_ = rows.Close()
-	}
-
+	counted := d.Total == TotalExact
+	var keyset []string
 	if after != "" {
-		predicates = append(predicates, p.keyset(b, o, afterValues))
+		keyset = []string{p.keyset(b, o, afterValues)}
 	}
-	rows, err := s.QueryContext(ctx, p.page(b, predicates, o, offset, size+1), b.values...)
+	rows, err := s.QueryContext(ctx, p.page(b, predicates, keyset, o, offset, size+1, counted), b.values...)
 	if err != nil {
 		return none, p.engine(err)
 	}
 	defer func() { _ = rows.Close() }()
+
+	// Under the count, the consumer's scan reads through an adapter that
+	// hides the trailing count column and reads it alongside the row; the
+	// library's own reads below stay on the full-width row.
+	var row Row = rows
+	var adapter *countedRow
+	if counted {
+		adapter = &countedRow{rows: rows}
+		row = adapter
+	}
 
 	// The keyed columns are located once for the row set, and only when a
 	// cursor can be issued at all.
@@ -244,14 +259,31 @@ func (p Projection[T]) list(ctx context.Context, s sqlate.Session, d Directives,
 				return none, mapErr(s, err)
 			}
 		}
-		v, err := p.scan(rows)
+		if adapter != nil {
+			adapter.read = false
+		}
+		v, err := p.scan(row)
 		if err != nil {
 			return none, mapErr(s, err)
+		}
+		if adapter != nil && !adapter.read {
+			return none, fmt.Errorf("query: %s: the scan did not read its row, so the page's total is unread", p.base.name)
 		}
 		out = append(out, v)
 	}
 	if err := rows.Err(); err != nil {
 		return none, mapErr(s, err)
+	}
+	total := NoTotal
+	switch {
+	case !counted:
+	case len(out) > 0:
+		total = int(adapter.total)
+	case after == "" && offset == 0:
+		// An empty first page is an empty result: nothing is under the
+		// filters. An empty later page only says the offset is past the
+		// end, which carries no count.
+		total = 0
 	}
 	c := Collection[T]{Items: out, Total: total, More: more}
 	if more && last != nil {
@@ -295,12 +327,14 @@ func (p Projection[T]) One(ctx context.Context, s sqlate.Session, field string, 
 	return v, mapErr(s, rows.Err())
 }
 
-// Verify prepares two probes over the base. The first names every contract
-// field and compares it against a cast of its declared type, so a field the
-// base no longer outputs, or one whose type no longer matches, fails at
-// startup. The second is one page past a cursor over the key alone, so the
-// keyset predicate and the paging clause, an engine's own respelling of
-// either included, are prepared at startup too.
+// Verify prepares three probes over the base. The first names every
+// contract field and compares it against a cast of its declared type, so a
+// field the base no longer outputs, or one whose type no longer matches,
+// fails at startup. The second is one page past a cursor over the key
+// alone, so the keyset predicate and the paging clause, an engine's own
+// respelling of either included, are prepared at startup too. The third is
+// the same page counted, so the window count's layering is prepared with
+// them.
 func (p Projection[T]) Verify(ctx context.Context, db sqlate.Session) error {
 	cols := make([]string, 0, len(p.base.fields))
 	predicates := make([]string, 0, len(p.base.fields))
@@ -326,19 +360,28 @@ func (p Projection[T]) Verify(ctx context.Context, db sqlate.Session) error {
 	b := &binding{dialect: p.base.dialect, catalog: p.base.catalog, values: make([]any, len(p.base.compiled.params))}
 	// The key alone, ascending: no sort names a field, so this cannot fail.
 	o, _ := p.order(nil)
-	text := p.page(b, []string{p.keyset(b, o, make([]string, len(o.keyed)))}, o, 0, 1)
-	stmt, err = db.PrepareContext(ctx, text)
-	if err != nil {
-		return fmt.Errorf("query: %s: cursor page: %w", p.base.name, err)
+	for _, probe := range []struct {
+		name    string
+		counted bool
+	}{{"cursor page", false}, {"counted cursor page", true}} {
+		pb := &binding{dialect: b.dialect, catalog: b.catalog, values: slices.Clone(b.values)}
+		keyset := []string{p.keyset(pb, o, make([]string, len(o.keyed)))}
+		stmt, err = db.PrepareContext(ctx, p.page(pb, nil, keyset, o, 0, 1, probe.counted))
+		if err != nil {
+			return fmt.Errorf("query: %s: %s: %w", p.base.name, probe.name, err)
+		}
+		if err := stmt.Close(); err != nil {
+			return err
+		}
 	}
-	return stmt.Close()
+	return nil
 }
 
 // binding is one composed read's bind list in placeholder order: the base's
 // own values first, then each request value at the position its placeholder
-// was allocated. Both queries of a List share one binding: the count runs
-// over the values as they stand after the filters, and the page appends the
-// cursor's values and the paging bounds after it.
+// was allocated. The values bind in the page text's order: the base's, the
+// filters', the cursor's, then the paging bounds, so a dialect whose
+// placeholders are positional reads them in order.
 type binding struct {
 	dialect sqlate.Dialect
 	catalog *Catalog
@@ -428,11 +471,58 @@ func (p Projection[T]) clause(predicates []string) string {
 	return p.base.catalog.render("where", map[string]string{"predicates": strings.Join(predicates, " AND ")})
 }
 
-// page composes the page text: the base as a derived table under predicates
-// and o, with offset and fetch bound last.
-func (p Projection[T]) page(b *binding, predicates []string, o ordering, offset, fetch int) string {
+// page composes the page text: the base as a derived table under the
+// filters' predicates and the keyset predicate, ordered by o, with offset
+// and fetch bound last. Counted, the filters apply inside the window that
+// counts the rows and the keyset outside it, so a cursor narrows the page
+// and not the total; the keyset's values bind after the filters' either
+// way, since that is their order in the text.
+func (p Projection[T]) page(b *binding, predicates, keyset []string, o ordering, offset, fetch int, counted bool) string {
 	paging := p.base.catalog.render("paging", map[string]string{"offset": b.raw(offset), "fetch": b.raw(fetch)})
-	return p.base.catalog.render("collection", map[string]string{"base": p.base.compiled.text, "where": p.clause(predicates), "order": o.text, "paging": paging})
+	if counted {
+		return p.base.catalog.render("collection_counted", map[string]string{"base": p.base.compiled.text, "where": p.clause(predicates), "after": p.clause(keyset), "order": o.text, "paging": paging})
+	}
+	return p.base.catalog.render("collection", map[string]string{"base": p.base.compiled.text, "where": p.clause(append(slices.Clip(predicates), keyset...)), "order": o.text, "paging": paging})
+}
+
+// countedRow is the Row a scan reads a counted page through: it shows the
+// page's columns without the trailing count, and each Scan reads the count
+// alongside the consumer's destinations, recording that the row was read.
+type countedRow struct {
+	rows  *sql.Rows
+	cols  []string
+	total int64
+	// read reports whether the current row's Scan ran; the caller resets
+	// it before each row.
+	read bool
+}
+
+// Columns returns the page's columns without the trailing count; they are
+// read from the row set once, on the first call.
+func (c *countedRow) Columns() ([]string, error) {
+	if c.cols == nil {
+		cols, err := c.rows.Columns()
+		if err != nil {
+			return nil, err
+		}
+		if len(cols) == 0 {
+			return nil, fmt.Errorf("query: a counted page has no %s column", totalColumn)
+		}
+		c.cols = cols
+	}
+	// A copy, as sql.Rows.Columns returns one, so a scan that changes it
+	// changes nothing here.
+	return slices.Clone(c.cols[:len(c.cols)-1]), nil
+}
+
+// Scan scans the row into dest and the count into the adapter. dest is
+// copied, never appended to, so the caller's slice is left as it was.
+func (c *countedRow) Scan(dest ...any) error {
+	all := make([]any, len(dest)+1)
+	copy(all, dest)
+	all[len(dest)] = &c.total
+	c.read = true
+	return c.rows.Scan(all...)
 }
 
 // term is one ORDER BY term.
