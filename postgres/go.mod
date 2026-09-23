@@ -4,7 +4,7 @@ go 1.27
 
 require (
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/standards-lab/sqlate v0.3.0
+	github.com/standards-lab/sqlate v0.4.0
 )
 
 require (
@@ -14,7 +14,3 @@ require (
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/text v0.29.0 // indirect
 )
-
-// Transient bridge while this module builds against the base module's
-// unreleased v0.4.0 changes; the v0.4.0 release drops this.
-replace github.com/standards-lab/sqlate => ../
