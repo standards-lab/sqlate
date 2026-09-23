@@ -7,6 +7,8 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.4.0] - 2026-09-23
+
 A collection read's total can no longer disagree with its page: the count is a window in the
 page's own statement. Found by `blobfs`, whose listings promise that agreement.
 
