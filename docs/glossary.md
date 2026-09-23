@@ -68,8 +68,13 @@ text.
   cast to, and `not null` when the column never holds a null. The declared fields are the field
   contract.
 - **Guard** (`query.Guard`): a guarded command bound to its version check.
-- **Row guard** (`query.RowGuard[T]`): a guard whose check reads the whole row, for a command
-  whose own predicate can refuse a row at the expected version.
+- **Returning command** (`query.Returning[T]`): a standard-tier `INSERT INTO` or `UPDATE` that
+  declares the read of its changed row, run as one statement where the dialect returns rows and
+  as the command then its read in one transaction elsewhere.
+- **Read**: the statement a returning command names to read its changed row back; its column list
+  is the returned columns.
+- **Row guard** (`query.RowGuard[T]`): a guard over a returning command, for a command whose own
+  predicate can refuse a row at the expected version; it returns the changed row.
 - **Command**: a statement that mutates rows.
 - **Check**: the statement a guard runs to read a row's current version by key.
 - **Scan function**: the function that reads one row into a `T`. `Scanner[T]` derives one from

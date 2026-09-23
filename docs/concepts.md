@@ -155,6 +155,32 @@ SELECT pg_advisory_xact_lock(hashtext({{name}}))
 of a whole code base is one search for `--| tier: native`, and the linter refuses a standard file
 that uses a form the engine declares native.
 
+## Returning the changed row
+
+A command that changes one row often needs the row back. Some engines return it from the command
+itself (`RETURNING`); others cannot, and the program runs the command and then reads the row. A
+standard file declares both at once by naming the read:
+
+```sql
+--| tier: standard
+--| returning: order_by_id
+UPDATE orders
+SET status = 'shipped', {{> sql.guard_set}}
+WHERE {{> sql.guard_where}} AND status = 'packed'
+```
+
+The read is an ordinary statement of the same directory, `SELECT <columns> FROM …`, whose
+parameters the command also takes. Its column list, stripped of its one qualifier, is what the
+engine returns, so the command's table needs no alias and both forms scan with the same function.
+The dialect decides the form when the file compiles: an engine that returns rows renders the
+command with its clause, and the file stays standard, since the clause is the dialect's text and
+not the file's. On any other engine the command and the read run as one unit in a transaction,
+which holds the changed row until the read has it, so the two forms return the same row.
+
+A guarded command composes with it: the guard reads the row it needs to tell a refusal from a
+version mismatch from the same handle, so on an engine that returns rows a successful guarded
+write is one statement.
+
 ## Overlays
 
 An engine respells a library pattern by publishing a file of the same name with the same
