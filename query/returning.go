@@ -13,7 +13,7 @@ import (
 	"github.com/standards-lab/sqlate"
 )
 
-// Verb is the data-changing statement a returning clause attaches to.
+// Verb is the kind of command a returning clause attaches to.
 type Verb string
 
 const (
@@ -23,22 +23,24 @@ const (
 	Update Verb = "UPDATE"
 )
 
-// Returner is the dialect capability that makes a data-changing statement
-// return its row. body is the statement after include expansion, its
-// parameters still {{…}} slots; columns are the bare column names in scan
-// order. ok=false declines, and the library runs the command and then its
-// read. An implementation declines a Verb it does not know.
+// Returner is the dialect capability that renders a returning command's
+// single-statement form, the command that returns its changed row. body is
+// the command after include expansion, its parameters still {{…}} slots;
+// columns are the read's bare column names in scan order. Returning with
+// ok=false declines, and the command runs the fallback: the command and
+// then its read. An implementation declines a Verb it does not know.
 type Returner interface {
 	Returning(verb Verb, body string, columns []string) (text string, ok bool)
 }
 
-// returnForm is a command's returning declaration, resolved: the read that
-// reads the changed row back, which is also the fallback's second step, the
-// command's verb, the read's bare column names in scan order, and the
-// single-statement form the dialect rendered, nil when it declined or does
-// not implement Returner. renderings caches the single-statement form's
-// expanded text by the lists' lengths, as Statement.renderings does the
-// command's own; nil when the form has no expansion or there is no form.
+// returnForm is a command's resolved returning declaration. read reads the
+// changed row back and is also the fallback's second step; verb is the
+// command's verb; columns are the read's bare column names in scan order;
+// native is the single-statement form the dialect rendered, nil when the
+// dialect declined or does not implement Returner. renderings caches the
+// single-statement form's expanded text by the lists' lengths, as
+// Statement.renderings does the command's own; it is nil when the form has
+// no expansion or there is no form.
 type returnForm struct {
 	read       Statement
 	verb       Verb
@@ -114,11 +116,11 @@ func readColumns(body string) ([]string, error) {
 }
 
 // resolveReturning resolves a command's returning declaration against the
-// statements compiled beside it: the command's verb, the named read and its
-// shape, and, when d implements Returner and accepts, the single-statement
-// form, its parameters rewritten as the command's are. sources holds every
-// statement's body after include expansion and returning declaration, by
-// name.
+// statements compiled beside it. It checks the command's verb and the named
+// read and its shape, and, when d implements Returner and accepts, compiles
+// the single-statement form, its parameters rewritten as the command's are.
+// sources holds, by name, every statement's body after include expansion
+// and its returning declaration.
 func resolveReturning(st *Statement, sources map[string]source, stmts map[string]Statement, d sqlate.Dialect) error {
 	readName, body := sources[st.name].returning, sources[st.name].body
 	if st.tier != TierStandard {
@@ -175,16 +177,16 @@ func resolveReturning(st *Statement, sources map[string]source, stmts map[string
 }
 
 // Returning is a returning command bound to the scan of its read: the
-// handle that runs the command and yields the row as it stands afterward.
+// handle that runs the command and returns the row as it stands afterward.
 // It is a value, built once in a constructor and held.
 type Returning[T any] struct {
 	cmd  Statement
 	read Rows[T]
 }
 
-// Returning binds the statement, a returning command, to scan, the scan of
-// the read its returning declaration names; the read's SELECT list is the
-// scan order on both forms. A statement that declares no returning is a
+// Returning binds the statement, a returning command, to scan, the scan
+// function of the read its returning declaration names; the read's SELECT
+// list is the scan order on both forms. A statement that declares no returning is a
 // defect in the caller's constructor and panics.
 func (st Statement) Returning[T any](scan ScanFunc[T]) Returning[T] {
 	if st.returning == nil {
@@ -197,19 +199,20 @@ func (st Statement) Returning[T any](scan ScanFunc[T]) Returning[T] {
 func (r Returning[T]) Statement() Statement { return r.cmd }
 
 // One runs the command and returns the row as it stands afterward, and
-// whether the command changed it. A command that changed no row reads the
-// row as it is, changed=false; no row at all is sql.ErrNoRows, unmapped. A
-// command that changed more than one row, or whose read finds no row after
-// one changed, is ErrNotOneRow. A command headed "transaction: required" is
-// ErrTransactionRequired outside a *sqlate.Tx, on either form, before any
-// SQL runs.
+// whether the command changed it. When the command changed no row, One
+// reads the row as it is and returns changed=false; no row at all is
+// sql.ErrNoRows, unmapped. A command that changed more than one row, or
+// whose read finds no row after the command changed one, is ErrNotOneRow.
+// A command headed "transaction: required" is ErrTransactionRequired
+// outside a *sqlate.Tx, on either form, before any SQL runs.
 //
-// Where the dialect rendered the single-statement form, it is one query on
-// s, atomic by itself; a second row it returns has already been changed,
-// and only the caller's transaction undoes that. Otherwise the command and
-// then its read run as one unit: inside s when s is a *sqlate.Tx, inside a
+// The single-statement form is one query on s, atomic by itself. When it
+// returns a second row, that row has already changed, and only the
+// caller's transaction can undo the change. The fallback runs the command
+// and then its read as one unit: inside s when s is a *sqlate.Tx; inside a
 // transaction One opens, commits, and rolls back on any error when s is a
-// sqlate.Beginner, and ErrTransactionRequired on any other session.
+// sqlate.Beginner; and on any other session One returns
+// ErrTransactionRequired.
 func (r Returning[T]) One(ctx context.Context, s sqlate.Session, args Args) (T, bool, error) {
 	var zero T
 	if r.cmd.txRequired {
@@ -229,8 +232,8 @@ func (r Returning[T]) One(ctx context.Context, s sqlate.Session, args Args) (T, 
 	return zero, false, ErrTransactionRequired
 }
 
-// single runs the single-statement form: one row is the changed row; no row
-// reads the row as it is with the read.
+// single runs the single-statement form. A returned row is the changed
+// row; when none is returned, the read reads the row as it is.
 func (r Returning[T]) single(ctx context.Context, s sqlate.Session, args Args) (T, bool, error) {
 	var zero T
 	form := r.cmd.returning
@@ -287,9 +290,10 @@ func (r Returning[T]) fallback(ctx context.Context, tx *sqlate.Tx, args Args) (T
 	return row, n == 1, nil
 }
 
-// owned runs the fallback in a transaction of its own, as DB.Transact does:
-// commit on success; on an error roll back and return it, a rollback
-// failure joined onto it; on a panic roll back and re-panic.
+// owned runs the fallback in a transaction of its own, as DB.Transact
+// does: it commits on success; on an error it rolls back and returns the
+// error with a rollback failure joined onto it; on a panic it rolls back
+// and re-panics.
 func (r Returning[T]) owned(ctx context.Context, b sqlate.Beginner, args Args) (T, bool, error) {
 	var zero T
 	tx, err := b.Begin(ctx)

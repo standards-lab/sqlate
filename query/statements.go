@@ -35,12 +35,13 @@ type Statements struct {
 //   - has a header the grammar rejects
 //   - has an include the catalog cannot resolve
 //   - declares returning and is not a standard-tier INSERT INTO or UPDATE,
-//     declares a key or field, or names a read that is missing, declares
+//     or also declares a key or field
+//   - declares returning and names a read that is missing, declares
 //     returning, a key, a field, or a required transaction, takes a
 //     parameter the command does not, or is not SELECT <column>, … FROM …
 //     with every column under one qualifier or none, each named once
-//   - declares returning and its dialect's single-statement form introduces
-//     a {{
+//   - declares returning, and the dialect's single-statement form of it
+//     introduces a {{
 func (c *Catalog) Compile(fsys fs.FS, dir string, d sqlate.Dialect) (*Statements, error) {
 	entries, err := fs.ReadDir(fsys, dir)
 	if err != nil {

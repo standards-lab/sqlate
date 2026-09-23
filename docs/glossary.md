@@ -69,14 +69,18 @@ text.
   contract.
 - **Guard** (`query.Guard`): a guarded command bound to its version check.
 - **Returning command** (`query.Returning[T]`): a standard-tier `INSERT INTO` or `UPDATE` that
-  declares the read of its changed row, run as one statement where the dialect returns rows and
-  as the command then its read in one transaction elsewhere.
-- **Read**: the statement a returning command names to read its changed row back; its column list
-  is the returned columns.
-- **Row guard** (`query.RowGuard[T]`): a guard over a returning command, for a command whose own
-  predicate can refuse a row at the expected version; it returns the changed row.
+  names the read of its changed row. It runs in its single-statement form where the dialect
+  returns rows, and as the fallback elsewhere.
+- **Read**: the statement a returning command names to read its changed row back. Its column list
+  is the list of returned columns.
+- **Single-statement form**: a returning command as the dialect renders it, with the engine's
+  clause (`RETURNING`) appended, so the command itself returns the changed row.
+- **Fallback**: a returning command run as the command and then its read, in one transaction.
+- **Row guard** (`query.RowGuard[T]`): a guard over a returning command whose own predicate can
+  refuse a row at the expected version. It returns the changed row.
 - **Command**: a statement that mutates rows.
-- **Check**: the statement a guard runs to read a row's current version by key.
+- **Check**: the statement a `Guard` runs to read a row's current version by key. A row guard has
+  none: it reads the row with its command's read.
 - **Scan function**: the function that reads one row into a `T`. `Scanner[T]` derives one from
   the entity's struct tags; `Scalar[T]` reads a one-column row.
 

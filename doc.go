@@ -36,9 +36,10 @@
 // renders the nth bind parameter, and how its driver's errors classify. An
 // engine sub-module implements it. Capabilities beyond it are separate
 // interfaces a protocol asserts: [Locker], the named session-scoped lock a
-// concurrent-starter protocol such as migration takes, and query.Returner, the
-// engine's form of a command that returns its changed row. [Beginner] is the
-// session capability a protocol asserts to open its own unit of work.
+// concurrent-starter protocol such as migration takes, and query.Returner,
+// which renders a command that returns its changed row as one statement.
+// [Beginner] is the session capability a protocol asserts to open its own
+// transaction.
 //
 // # Errors
 //

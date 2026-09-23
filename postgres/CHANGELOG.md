@@ -9,15 +9,15 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ### Added
 
-- `Dialect.Returning`, implementing `query.Returner`: an `INSERT` or `UPDATE` returning command
-  compiles with `RETURNING` and its read's columns appended, so the engine returns the changed
-  row from the command itself, one statement. Every other verb declines.
+- `Dialect.Returning`, implementing `query.Returner`: a returning `INSERT` or `UPDATE` compiles
+  with `RETURNING` and its read's columns appended, so the command itself returns the changed
+  row in one statement. The method declines every other verb.
 
 ### Changed
 
 - The live row-guard proof runs on the returning handle, `Returning(scan).Guarded(version,
-  current)`, in place of the removed `GuardedRow`, and on both forms of the command. A new live
-  proof shows both forms return the same row in every outcome.
+  current)`, in place of the removed `GuardedRow`, and covers both forms of the command. A new
+  live proof shows that both forms return the same row in every outcome.
 
 Requires `github.com/standards-lab/sqlate v0.3.0`.
 

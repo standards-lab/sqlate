@@ -99,11 +99,11 @@ func (Dialect) HistoryExists(param string) string {
 	return "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = " + param
 }
 
-// Returning renders a returning command as one statement: the body with
-// RETURNING and the read's columns appended, for query.Insert and
-// query.Update, so the engine returns the changed row from the command
-// itself. The clause starts on a new line, so a body ending in a line
-// comment does not swallow it. Every other verb declines.
+// Returning renders the single-statement form of a returning command for
+// query.Insert and query.Update: the body with RETURNING and the read's
+// columns appended, so the command itself returns the changed row. The
+// clause starts on a new line, so a line comment ending the body does not
+// swallow it. Returning declines every other verb.
 func (Dialect) Returning(verb query.Verb, body string, columns []string) (string, bool) {
 	switch verb {
 	case query.Insert, query.Update:

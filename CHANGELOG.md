@@ -7,29 +7,33 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
-A statement that returns the changed row, declared once: `RETURNING` on an engine that has it,
-the command and then its read in one transaction on one that does not. Promoted from the
-`blobfs` experiment, whose engine carried four statements twice for want of it.
+The returning command, promoted from the `blobfs` experiment, whose engine kept two copies of
+four statements for want of it. A command that returns its changed row is declared once and runs
+with `RETURNING` on an engine that has the clause, or as the command and then its read in one
+transaction on an engine that does not.
 
 ### Added
 
-- The `returning` header key: a standard-tier `INSERT INTO` or `UPDATE` names the statement of
-  its directory that reads the changed row back. `Compile` resolves the pair and refuses one the
-  command cannot keep.
+- The `returning` header key: a standard-tier `INSERT INTO` or `UPDATE` names the statement in
+  its directory that reads the changed row back. `Compile` resolves the pair and refuses an
+  invalid one.
 - `query.Returner` and `query.Verb`: the dialect capability that renders the single-statement
-  form at compile time. A dialect without it, or one that declines, gets the fallback.
-- `Statement.Returning(scan)` and `query.Returning[T]`, whose `One` returns the row as it stands
-  afterward and whether the command changed it; `Statement.Reads` and `ReturningText`.
-- `query.ErrNotOneRow`: a command that changed more than one row, or whose read misses the row
-  one changed.
-- `sqlate.Beginner`, the session capability `*DB` and any type embedding it satisfy.
-- `sqltest.ReturningDialect`, so a unit suite covers the single-statement form.
-- `Statements.Verify` prepares a returning command's single-statement form beside its text.
+  form at compile time. A command whose dialect lacks it, or declines, runs the fallback.
+- `Statement.Returning(scan)`, returning a `query.Returning[T]` whose `One` returns the row as it
+  stands afterward and whether the command changed it. `Statement.Reads` and
+  `Statement.ReturningText` report the read's name and the single-statement form.
+- `query.ErrNotOneRow`: a command that changed more than one row, or whose read does not find
+  the row it changed.
+- `sqlate.Beginner`, the session capability to open a transaction, satisfied by `*DB` and any
+  type embedding it.
+- `sqltest.ReturningDialect`, a stub dialect with `query.Returner`, so a unit suite covers the
+  single-statement form.
+- `Statements.Verify` also prepares each returning command's single-statement form.
 
 ### Changed
 
-- **Breaking:** `RowGuard[T]` is built by `Returning(scan).Guarded(version, current)` and
-  `Run` returns the changed row instead of the new version. `Statement.GuardedRow` is removed.
+- **Breaking:** `Returning(scan).Guarded(version, current)` builds `RowGuard[T]`, and its `Run`
+  returns the changed row instead of the new version. `Statement.GuardedRow` is removed.
 
 ## [v0.2.0] - 2026-09-22
 

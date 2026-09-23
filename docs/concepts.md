@@ -158,8 +158,8 @@ that uses a form the engine declares native.
 ## Returning the changed row
 
 A command that changes one row often needs the row back. Some engines return it from the command
-itself (`RETURNING`); others cannot, and the program runs the command and then reads the row. A
-standard file declares both at once by naming the read:
+itself (`RETURNING`); on others, the program runs the command and then reads the row. A standard
+file covers both cases by naming, in its `returning` declaration, the statement that reads the row:
 
 ```sql
 --| tier: standard
@@ -169,17 +169,19 @@ SET status = 'shipped', {{> sql.guard_set}}
 WHERE {{> sql.guard_where}} AND status = 'packed'
 ```
 
-The read is an ordinary statement of the same directory, `SELECT <columns> FROM …`, whose
-parameters the command also takes. Its column list, stripped of its one qualifier, is what the
-engine returns, so the command's table needs no alias and both forms scan with the same function.
-The dialect decides the form when the file compiles: an engine that returns rows renders the
-command with its clause, and the file stays standard, since the clause is the dialect's text and
-not the file's. On any other engine the command and the read run as one unit in a transaction,
-which holds the changed row until the read has it, so the two forms return the same row.
+The read is an ordinary statement in the same directory, of the form `SELECT <columns> FROM …`,
+and the command takes every parameter the read takes. The read's column list, less its one
+qualifier, is the list the engine returns, so the command's table needs no alias and both forms
+scan with the same function. The dialect chooses the form when the file compiles. On an engine
+that returns rows, the dialect renders the single-statement form, the command with its clause
+appended; the file stays standard tier, because the clause is the dialect's text, not the file's.
+On any other engine, the fallback runs the command and then the read in one transaction, whose
+lock on the changed row keeps another writer out until the read has it, so both forms return the
+same row.
 
-A guarded command composes with it: the guard reads the row it needs to tell a refusal from a
-version mismatch from the same handle, so on an engine that returns rows a successful guarded
-write is one statement.
+A guarded command can also be a returning command. The guard takes the row it needs to tell a
+refusal from a version mismatch from the returning command's handle, so on an engine that returns
+rows, a successful guarded write is one statement.
 
 ## Overlays
 

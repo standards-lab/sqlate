@@ -29,8 +29,8 @@ deferred to `COMMIT` can be classified; `Tx.Rollback` does not. `DB.Transact(ctx
 is the runner: it begins, calls `fn(tx)`, commits on success, and returns `fn`'s result. On
 `fn`'s error it rolls back and returns that error with a rollback failure joined onto it. A
 panic in `fn` rolls back and re-panics, so no transaction leaks to the pool. `Beginner` is the
-interface `*DB` satisfies, and any type embedding it: a protocol handed a session rather than a
-transaction asserts it to open its own unit of work.
+interface of a session that can open a transaction, satisfied by `*DB` and any type embedding
+it. A protocol handed a session rather than a transaction asserts `Beginner` to open its own.
 
 **Pinned connections.** `DB.Conn(ctx)` pins one connection for a protocol that needs session
 scope: a session-level lock, or DDL an engine refuses inside a transaction. The caller closes
@@ -40,8 +40,8 @@ it.
 engine's syntax for the nth bind parameter, and `MapError`, the classification of a driver
 error into the library's sentinels. A sub-module named for the engine implements it. `Locker`
 is a capability a dialect may add: `Lock` and `Unlock` of a named session-level lock on a
-pinned connection; `migrate` asserts it. `query.Returner` is another: the engine's form of a
-command that returns its changed row, which a returning command asserts at compile time.
+pinned connection; `migrate` asserts it. `query.Returner` is another: it renders a returning
+command as one statement, and `Compile` asserts it.
 
 **Errors.** The root package defines the errors a consumer matches on, and every package keeps
 its own sentinels and error types in one file, `errors.go`, so a package's whole taxonomy is
@@ -90,7 +90,7 @@ The keys `query` and `migrate` accept:
 | `transaction` | statements | `required`: the statement refuses to run outside a transaction. |
 | `transaction` | migrations | `none`: the migration runs outside a transaction; `required` or absent keeps one. |
 | `key` | projection bases | The identity column and sort tie-breaker: one declared field, or several separated by commas (`id` or `org, id`), each named once. |
-| `returning` | statements | Optional, standard-tier `INSERT INTO` or `UPDATE` only: the name of the statement in the same directory that reads the changed row back. |
+| `returning` | statements | Optional, on a standard-tier `INSERT INTO` or `UPDATE` only: the name of the statement in the same directory that reads the changed row back. |
 | `field` | projection bases | One per column a request may filter or sort by: `<name> <sql type>`, with an optional trailing `not null`, matched case-insensitively, for a column that never holds a null. |
 
 ## query: authored statements
@@ -130,21 +130,22 @@ the inventory, so a program can report what it compiled against; each `Pattern` 
 header, splices its includes from the catalog, and renders its parameters as the dialect's
 placeholders in order of appearance. A file without a header, with an unknown declaration, with
 a header the grammar rejects, or with an include the catalog cannot resolve is a load error
-naming the file. So is a returning declaration the command cannot keep: a command that is not a
-standard-tier `INSERT INTO` or `UPDATE`, or that declares a key or field; a read that is missing,
-declares `returning`, a key or field, or `transaction: required`, takes a parameter the command
-does not, or is not `SELECT <column>, … FROM …` under one qualifier or none. `MustCompile` panics instead. The result is a `*Statements`, the directory's
-inventory: `Statement(name)` returns the statement named by its file's base name and panics on
-a missing one, `Statements()` lists them in name order, and `Verify` prepares each against a
-session.
+naming the file. So is an invalid returning declaration: a command that is not a standard-tier
+`INSERT INTO` or `UPDATE`, or that declares a key or field; or a read that is missing, declares
+`returning`, a key, a field, or `transaction: required`, takes a parameter the command does not,
+or is not `SELECT <column>, … FROM …` with every column under one qualifier or none and named
+once; and a dialect whose single-statement form introduces a `{{`.
+`MustCompile` panics instead. The result is a `*Statements`, the directory's inventory:
+`Statement(name)` returns the statement named by its file's base name and panics on a missing
+one, `Statements()` lists them in name order, and `Verify` prepares each against a session.
 
 A `Statement` reports what its file declared: `Name`, `Text` (the body as the engine receives
 it, less a trailing semicolon), `Tier`, `Native`, `Port`, `TransactionRequired`, `Key` (the
 declared key, a composite key's parts joined by `", "`), `Keys` (the key's parts in
 header order), `Fields` (each with `Name`, `Type`, and `NotNull`), `Params` (the parameter names
-in position order), `Catalog`, the catalog it compiled against, and, for a returning command, `Reads` (the read's
-name) and `ReturningText` (the single-statement form as the engine receives it, empty where the
-dialect declined).
+in position order), and `Catalog` (the catalog it compiled against). A returning command also
+reports `Reads` (the read's name) and `ReturningText` (the single-statement form as the engine
+receives it, empty where the dialect declined).
 
 ### Parameters and casts
 
@@ -179,18 +180,19 @@ error passes through the session's mapper.
 | `Scan(scan)` | `Rows[T]` | `One` returns the first row (`sql.ErrNoRows` when none); `All` returns every row; `Each` yields rows one at a time as an `iter.Seq2[T, error]`, closing the row set when the loop ends. |
 | `Project(scan)` | `Projection[T]` | `List(ctx, session, directives, page, base...)` reads one page by offset and returns a `Collection[T]`; `Continue(ctx, session, directives, after, size, base...)` reads the `size` rows past a previous page's cursor and returns the same; `One(ctx, session, field, value, base...)` is the base under one equality predicate; `Verify` probes the field contract. A base without a key or field contract, or one with an expanded parameter (`{{name...}}`), panics at binding; a base's other parameters bind from the `base` arguments. |
 | `Guarded(check, version)` | `Guard` | `Run(ctx, session, version, args)` binds the expected version under the named parameter, runs the command, and returns the new version; when the command changed nothing it runs the check: no row is `sql.ErrNoRows`, a row is `ErrVersionMismatch` wrapping the expected and current versions. |
-| `Returning(scan)` | `Returning[T]` | For a returning command. `One(ctx, session, args)` runs the command and returns the row as it stands afterward and whether the command changed it: no row at all is `sql.ErrNoRows`; a command that changed more than one row, or whose read misses the row one changed, is `ErrNotOneRow`. `Guarded(version, current)` returns a `RowGuard[T]`. |
+| `Returning(scan)` | `Returning[T]` | For a returning command. `One(ctx, session, args)` runs the command and returns the row as it stands afterward and whether the command changed it: no row at all is `sql.ErrNoRows`; a command that changed more than one row, or whose read does not find the row it changed, is `ErrNotOneRow`. `Guarded(version, current)` returns a `RowGuard[T]`. |
 | `Returning(scan).Guarded(version, current)` | `RowGuard[T]` | For a guarded command whose own predicate, beyond the key and the version, can refuse a row. `current` reads a row's version. `Run(ctx, session, version, args)` returns the changed row; when the command changed nothing it classifies the row its read found: no row is `sql.ErrNoRows`, a row at another version is `ErrVersionMismatch`, and a row at the expected version is a `*RefusedError[T]` carrying the row, which unwraps to `ErrRefused`. |
 
 A statement headed `transaction: required` refuses to run against `*DB` with
 `ErrTransactionRequired`.
 
 A returning command runs in one of two forms, chosen when it compiles. Where the dialect
-implements `query.Returner` and accepts the command, the engine returns the changed row from
-the command itself, one statement, and the read runs only when nothing changed. Otherwise the
-command and then its read run as one unit: inside the session when it is a `*Tx`, inside a
-transaction `One` opens and commits when it is a `sqlate.Beginner`, and `ErrTransactionRequired`
-on any other session. Both forms return the same row; only the statement count differs.
+implements `query.Returner` and accepts the command, the command runs in its single-statement
+form, which returns the changed row, and the read runs only when nothing changed. Otherwise the
+command runs the fallback: the command and then its read, as one unit. The unit is the session
+itself when it is a `*Tx`, or a transaction `One` opens and commits when the session is a
+`sqlate.Beginner`; on any other session `One` returns `ErrTransactionRequired`. Both forms return
+the same row; only the statement count differs.
 
 ### Struct-tag mapping
 
@@ -292,16 +294,16 @@ check for a bad request is one `errors.Is`:
 
 ### Verification
 
-`Statements.Verify(ctx, session)` prepares every statement, and a returning command's
-single-statement form beside it (a failure names the statement with `(returning)`), so a reference the schema no
-longer satisfies fails at startup with the statement named. `Projection.Verify` prepares a
-probe that names every declared field over the base and compares each with a cast of its
-declared type, so a field the base no longer outputs, a declared type the engine does not know,
-or a type that no longer matches its column fails the same way. A second probe prepares one
-page past a cursor over the key, so the keyset predicate and the paging clause, an engine's
-overlay of either included, are checked at startup too. `query.Verify(ctx,
-session, verifiers...)` runs any number of them and joins their failures; startup and any
-later check call it with the same arguments.
+`Statements.Verify(ctx, session)` prepares every statement, and each returning command's
+single-statement form beside it, so a reference the schema no longer satisfies fails at startup
+with the statement named; a single-statement form's failure adds `(returning)` to the name.
+`Projection.Verify` prepares a probe that names every declared field over the base and compares
+each with a cast of its declared type, so a field the base no longer outputs, a declared type
+the engine does not know, or a type that no longer matches its column fails the same way. A
+second probe prepares one page past a cursor over the key, so the keyset predicate and the
+paging clause, an engine's overlay of either included, are checked at startup too.
+`query.Verify(ctx, session, verifiers...)` runs any number of them and joins their failures;
+startup and any later check call it with the same arguments.
 
 ## migrate: schema versioning
 
@@ -405,7 +407,8 @@ fails (`ErrScript`). It supports prepare, so `Verify` has a harness.
 `Dialect` is the stub dialect: `$N` placeholders and a `MapError` that wraps every error in a
 `*MappedError`, so a test proves with one `errors.As` that an error passed through the
 mapping. `ReturningDialect` embeds it and implements `query.Returner` by appending `RETURNING`,
-so a unit suite covers a returning command's single-statement form as well as its fallback.
+so a unit suite covers a returning command's single-statement form as well as its fallback,
+which `Dialect` runs.
 
 ## sqlint: the conventions linter
 
@@ -533,9 +536,9 @@ standard chain of disjuncts. The engine accepts every other library pattern as w
 program passes `postgres.Patterns()` to `NewCatalog` in place of `query.Patterns()`, and only
 the text of a continued page's predicate changes.
 
-`Returning` implements `query.Returner` by appending `RETURNING` with the read's columns to an
-`INSERT` or `UPDATE`, so a returning command is one statement on PostgreSQL, and a second
-statement, the read, runs only when the command changed nothing.
+`Returning` implements `query.Returner` by appending `RETURNING` and the read's columns to an
+`INSERT` or `UPDATE`. On PostgreSQL a returning command therefore runs as one statement, and the
+read runs as a second only when the command changed nothing.
 
 The module's `sqlint.toml` exports the engine's native forms and the overlay directory. Its
 integration tier, behind the `integration` build tag, is the proofs only an engine can give:

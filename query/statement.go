@@ -74,8 +74,9 @@ func (st Statement) Name() string { return st.name }
 // per list, the text Verify prepares.
 func (st Statement) Text() string { return st.compiled.text }
 
-// Reads is the name of the statement the returning declaration names, the
-// read of the changed row; empty when none is declared.
+// Reads is the name of the read the statement's returning declaration
+// names: the statement that reads the changed row back. It is empty when
+// none is declared.
 func (st Statement) Reads() string {
 	if st.returning == nil {
 		return ""
@@ -87,8 +88,8 @@ func (st Statement) Reads() string {
 // engine receives it: the dialect's text, parameters rewritten to its
 // placeholders, and for an expanded parameter the rendering at one element
 // per list, the text Verify prepares. It is empty when no returning is
-// declared or the dialect declined, where the command runs and then its
-// read.
+// declared or the dialect declined; the command then runs the fallback, the
+// command and then its read.
 func (st Statement) ReturningText() string {
 	if st.returning == nil || st.returning.native == nil {
 		return ""
@@ -127,9 +128,9 @@ func (st Statement) Scan[T any](scan ScanFunc[T]) Rows[T] {
 
 // Project binds the statement, a projection base, to scan: the typed
 // handle for the collection read. A base without a key or field contract,
-// a returning command, or one that takes an expanded parameter, is a defect
-// in the caller's constructor and panics. A base's own non-expanded parameters bind from
-// the base arguments List, Continue, and One take.
+// a returning command, or a base that takes an expanded parameter is a
+// defect in the caller's constructor and panics. A base's own non-expanded
+// parameters bind from the base arguments List, Continue, and One take.
 func (st Statement) Project[T any](scan ScanFunc[T]) Projection[T] {
 	return newProjection(st, scan)
 }

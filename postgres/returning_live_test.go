@@ -1,12 +1,13 @@
 //go:build integration
 
-// Live proof for the returning command against the compose PostgreSQL: the
-// same files compiled twice, once under the dialect, whose RETURNING makes
-// each command one statement, and once under a wrapper that hides the
-// capability, where the command and then its read run in a transaction.
-// Both forms return the row an immediate read returns, in every outcome of
-// a plain and a guarded command, and differ only in the statements the
-// engine receives. `mise run integration`.
+// Live proof for the returning command against the compose PostgreSQL. The
+// same files compile twice: under the dialect, which renders each command's
+// single-statement form with RETURNING, and under a wrapper that hides the
+// query.Returner capability, so each command runs the fallback, the command
+// and then its read in a transaction. In every outcome of a plain and a
+// guarded command, both forms return the row an immediate read returns;
+// they differ only in the statements the engine receives.
+// `mise run integration`.
 package postgres_test
 
 import (
@@ -160,10 +161,10 @@ type form struct {
 // row; a predicate-form retire, then the same retire again, which changes
 // nothing and returns the retired row. Each result equals an immediate read
 // by the read statement, and the forms' rows are equal apart from the id and
-// timestamps. The native form is one query for a changed row and two for an
-// unchanged one; the fallback is a transaction it begins, holding the
-// command and then its read. A column renamed out from under the read fails
-// Verify, naming the single-statement form (returning).
+// timestamps. The single-statement form is one query for a changed row and
+// two for an unchanged one; the fallback is a transaction it begins,
+// holding the command and then its read. A column renamed out from under
+// the read fails Verify, naming the single-statement form (returning).
 func TestLive_ReturningTwoForms(t *testing.T) {
 	ctx := context.Background()
 	db, tr := liveTraced(t)
