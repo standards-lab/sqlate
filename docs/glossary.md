@@ -82,12 +82,13 @@ text.
 - **Check**: the statement a `Guard` runs to read a row's current version by key. A row guard has
   none: it reads the row with its command's read.
 - **Scan function**: the function that reads one row into a `T`. `Scanner[T]` derives one from
-  the entity's struct tags; `Scalar[T]` reads a one-column row.
+  the entity's struct tags; `Scalar[T]` reads a one-column row. It reads the row through
+  `query.Row`, never `*sql.Rows` itself.
 
 ## Execution
 
 - **Directives**: a collection read's request: its sorts, its filters, and whether it counts
-  the total. The page is a separate argument: a `Page` to `List`, or a cursor and a size to
+  the total, which the page's own statement reads. The page is a separate argument: a `Page` to `List`, or a cursor and a size to
   `Continue`.
 - **Collection** (`query.Collection[T]`): one page of a collection read: its items, the total,
   whether a further page exists, and the cursor that continues past it.
