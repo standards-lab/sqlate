@@ -69,12 +69,12 @@ const (
 )
 
 // NoTotal is Collection.Total when the request declined the count, or when
-// the page has no row to carry it past the first page.
+// an empty page other than the first List page has no row to carry it.
 const NoTotal = -1
 
-// totalColumn is the reserved name of the count's column: the last output
-// column of a counted page, read by the library and never shown to a scan.
-// No contract field may take it.
+// totalColumn is the reserved name of the count's column, the last output
+// column of a counted page. The library reads it and never shows it to a
+// scan, and no contract field may take the name.
 const totalColumn = "sqlate_total"
 
 // Collection is one page of a collection read: the items, the total under
@@ -82,12 +82,12 @@ const totalColumn = "sqlate_total"
 // continues from this page's last item, empty when More is false or the
 // ordering cannot be continued by cursor.
 //
-// The count rides on the page's rows, so a page with no row carries none:
-// Total is the count when the page has an item, 0 for an empty first page
-// of List, and NoTotal for an empty later page, an empty Continue page, or
-// a request that declined the count. Whenever Total is not NoTotal on a
-// List page, the page's items end at or before it, and More reports
-// whether they end before it.
+// Each row of a counted page carries the count, so a page with no row
+// carries none. Total is the count when the page has an item, 0 for an
+// empty first page of List, and NoTotal for an empty later page, an empty
+// Continue page, or a request that declined the count. Whenever Total is
+// not NoTotal on a List page, the page's items end at or before it, and
+// More reports whether they end before it.
 type Collection[T any] struct {
 	Items []T
 	Total int
@@ -220,9 +220,9 @@ func (p Projection[T]) list(ctx context.Context, s sqlate.Session, d Directives,
 	}
 	defer func() { _ = rows.Close() }()
 
-	// Under the count, the consumer's scan reads through an adapter that
-	// hides the trailing count column and reads it alongside the row; the
-	// library's own reads below stay on the full-width row.
+	// Under TotalExact, the consumer's scan reads through an adapter that
+	// hides the trailing count column and scans the count with the row; the
+	// library's own reads below read the full row, count column included.
 	var row Row = rows
 	var adapter *countedRow
 	if counted {
@@ -333,8 +333,8 @@ func (p Projection[T]) One(ctx context.Context, s sqlate.Session, field string, 
 // fails at startup. The second is one page past a cursor over the key
 // alone, so the keyset predicate and the paging clause, an engine's own
 // respelling of either included, are prepared at startup too. The third is
-// the same page counted, so the window count's layering is prepared with
-// them.
+// the same page counted, so the window count's two layers are prepared at
+// startup as well.
 func (p Projection[T]) Verify(ctx context.Context, db sqlate.Session) error {
 	cols := make([]string, 0, len(p.base.fields))
 	predicates := make([]string, 0, len(p.base.fields))
@@ -377,11 +377,10 @@ func (p Projection[T]) Verify(ctx context.Context, db sqlate.Session) error {
 	return nil
 }
 
-// binding is one composed read's bind list in placeholder order: the base's
-// own values first, then each request value at the position its placeholder
-// was allocated. The values bind in the page text's order: the base's, the
-// filters', the cursor's, then the paging bounds, so a dialect whose
-// placeholders are positional reads them in order.
+// binding is one composed read's bind list, in the page text's placeholder
+// order: the base's own values, the filters', the cursor's, then the paging
+// bounds. Each request value sits at the position its placeholder was
+// allocated, so a dialect with positional placeholders reads them in order.
 type binding struct {
 	dialect sqlate.Dialect
 	catalog *Catalog
@@ -473,10 +472,10 @@ func (p Projection[T]) clause(predicates []string) string {
 
 // page composes the page text: the base as a derived table under the
 // filters' predicates and the keyset predicate, ordered by o, with offset
-// and fetch bound last. Counted, the filters apply inside the window that
-// counts the rows and the keyset outside it, so a cursor narrows the page
-// and not the total; the keyset's values bind after the filters' either
-// way, since that is their order in the text.
+// and fetch bound last. When counted, the filters apply inside the window
+// that counts the rows and the keyset predicate outside it, so a cursor
+// narrows the page but not the total. Either way the keyset's values bind
+// after the filters', their order in the text.
 func (p Projection[T]) page(b *binding, predicates, keyset []string, o ordering, offset, fetch int, counted bool) string {
 	paging := p.base.catalog.render("paging", map[string]string{"offset": b.raw(offset), "fetch": b.raw(fetch)})
 	if counted {
@@ -515,8 +514,9 @@ func (c *countedRow) Columns() ([]string, error) {
 	return slices.Clone(c.cols[:len(c.cols)-1]), nil
 }
 
-// Scan scans the row into dest and the count into the adapter. dest is
-// copied, never appended to, so the caller's slice is left as it was.
+// Scan scans the row into dest and the count into the adapter, and records
+// that the row was read. It copies dest rather than appending to it, so
+// the caller's slice is left as it was.
 func (c *countedRow) Scan(dest ...any) error {
 	all := make([]any, len(dest)+1)
 	copy(all, dest)

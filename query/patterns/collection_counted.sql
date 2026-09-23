@@ -1,11 +1,11 @@
 --| tier: standard
--- The collection read with its exact total, in one statement so the total
+-- The collection read with its exact total, in one statement, so the total
 -- and the page read one snapshot. The inner layer is the collection read's
--- derived table under the request's filters, each row carrying the count of
--- every row under them as a window; the outer layer re-aliases it as q, so
--- the keyset predicate, the order, and the paging say q.<field> as they do
--- over the plain collection read, and a cursor's position narrows the page
--- without narrowing the count. The count is the last output column, named
+-- derived table under the request's filters; a window gives each row the
+-- count of every row under them. The outer layer re-aliases it as q, so the
+-- keyset predicate, the order, and the paging say q.<field> as they do over
+-- the plain collection read, and a cursor's position narrows the page
+-- without narrowing the count. The count is the last output column,
 -- sqlate_total, which the library reads and a scan never sees. The slots
 -- appear in bind order: the base's parameters, the filters, the keyset
 -- predicate, the paging bounds. Every slot is text the library composed

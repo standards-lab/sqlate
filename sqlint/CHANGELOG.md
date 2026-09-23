@@ -10,7 +10,7 @@ changelog covers this sub-module only; the base module keeps its own.
 ### Fixed
 
 - A field declaration with a misspelled `not null` suffix is a compile finding against its
-  directory, through the base's own check; it was taken as part of the field's type.
+  directory, reported by the base module's own check. It was taken as part of the field's type.
 
 Requires `github.com/standards-lab/sqlate v0.4.0`.
 

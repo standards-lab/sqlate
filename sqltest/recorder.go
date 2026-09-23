@@ -44,12 +44,13 @@ type Response struct {
 	Rows     [][]driver.Value
 }
 
-// WithTotal returns r as a counted collection page returns it: every row
-// gains a trailing count column holding n, the column a query.Projection
-// reads its exact total from and hides from the scan. It is how a unit
-// suite scripts a List or Continue under query.TotalExact without spelling
-// the library's reserved column name. r is left as it was; an empty r
-// still gains the column, as an empty counted page declares it.
+// WithTotal returns r as a counted collection page returns it: with a
+// trailing count column holding n in every row, from which a
+// query.Projection reads its exact total and which it hides from the scan.
+// A unit suite uses it to script a List or Continue under query.TotalExact
+// without spelling the library's reserved column name. WithTotal leaves r
+// unchanged. An empty r still gains the column, as an empty counted page
+// declares it.
 func WithTotal(r Response, n int64) Response {
 	out := r
 	out.Columns = append(slices.Clip(r.Columns), totalColumn)

@@ -88,8 +88,8 @@ text.
 ## Execution
 
 - **Directives**: a collection read's request: its sorts, its filters, and whether it counts
-  the total, which the page's own statement reads. The page is a separate argument: a `Page` to `List`, or a cursor and a size to
-  `Continue`.
+  the total, which the page's own statement reads. The page is a separate argument: a `Page`
+  to `List`, or a cursor and a size to `Continue`.
 - **Collection** (`query.Collection[T]`): one page of a collection read: its items, the total,
   whether a further page exists, and the cursor that continues past it.
 - **Keyed prefix**: the shortest run of a read's sort terms, from the first, that includes every

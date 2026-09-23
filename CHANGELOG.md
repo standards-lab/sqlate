@@ -8,11 +8,12 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 ## [Unreleased]
 
 A collection read's total can no longer disagree with its page: the count is a window in the
-page's own statement. Found by `blobfs`, whose listings promise it.
+page's own statement. Found by `blobfs`, whose listings promise that agreement.
 
 ### Added
 
-- `query.Row`, the row a scan reads: `Columns` and `Scan`. `*sql.Rows` satisfies it.
+- `query.Row`, the interface a scan reads its row through: `Columns` and `Scan`. `*sql.Rows`
+  satisfies it.
 - The library pattern `sql.collection_counted`, the collection read with its window count.
 - `sqltest.WithTotal`, which scripts the counted read's trailing column.
 - `Projection.Verify` prepares a third probe, the counted cursor page.
@@ -29,8 +30,8 @@ page's own statement. Found by `blobfs`, whose listings promise it.
 
 ### Fixed
 
-- A field declaration whose type still contains `not` or `null` once its suffix is cut, a
-  misspelled `not null`, is a load error. It was taken as part of the type, leaving the field
+- A misspelled `not null` suffix, which leaves `not` or `null` in a field declaration's type
+  once the suffix is cut, is a load error. It was taken as part of the type, leaving the field
   nullable.
 
 ## [v0.3.0] - 2026-09-23

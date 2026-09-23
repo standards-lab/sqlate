@@ -237,10 +237,10 @@ reflection cannot reach an unexported field.
   name and scanned into a fresh `T`. A column `T` has no field for is an error, so a `SELECT`
   list that grows past its entity fails; a field with no column stays zero.
 - `Scalar[T]` is the scan function for a single-column row.
-- A `ScanFunc[T]` reads its row through `Row`, the two methods a scan needs: `Columns` and
-  `Scan`. `*sql.Rows` satisfies it, and so does the adapter the collection read hands a scan to
-  keep its total column out of sight, so a scan relies on nothing beyond `Row` and reads the row
-  with one `Scan`.
+- A `ScanFunc[T]` reads its row through `Row`, an interface of the two methods a scan needs:
+  `Columns` and `Scan`. `*sql.Rows` satisfies it, and so does the adapter through which the
+  collection read hides its total column from the scan. A scan therefore relies on nothing
+  beyond `Row` and reads the row with one `Scan`.
 - `ArgsOf(v)` binds a struct's fields as `Args` by their column names; a nil pointer binds
   `NULL`.
 - `Args` is `map[string]any`. A missing name is an `ArgumentError`, a programming error rather
@@ -272,10 +272,10 @@ a `Cursor` a previous page returned; it refuses an empty cursor, since `List` re
 first page. Both return a `Collection[T]`:
 
 - `Items` is the page's rows.
-- `Total` is the count under the filters, read from the same statement as the page, so it
-  never disagrees with the page it came with. A continued page reports the same total a first
-  page does. It is `NoTotal` (-1) when the request declined it, and on an empty page after the
-  first or an empty continued page: no row carries the count, and a second statement could
+- `Total` is the count under the filters. The page's own statement reads it, so it never
+  disagrees with the page. A continued page reports the same total a first page does. `Total`
+  is `NoTotal` (-1) when the request declined the count, and on an empty page after the first
+  or an empty continued page, since no row carries the count and a second statement could
   contradict the page. An empty first page reports 0.
 - `More` reports whether a further page exists. The read fetches one row past the page's size
   to find out, and never scans that row.
@@ -289,17 +289,18 @@ one.
 The library composes the read from its own patterns: the base as a derived table `q`, the
 predicates on `q.<field>`, the sort terms with the key appended as the tie-breaker, and the
 paging clause. Each value binds through `CAST(placeholder AS <declared type>)`, so the engine
-parses request text and a value it cannot read is the request's fault. Under `TotalExact` the
-read adds `COUNT(*) OVER ()` in an inner layer over the filtered base and applies the keyset
-predicate, the order, and the paging in an outer layer, so the count covers every row the
-filters keep, not only those past a cursor. The count is a trailing column, `sqlate_total`, that
-the scan never sees; a base declares no field of that name, and `Project` panics on one. A scan
-that returns without calling `Scan` is an error, since the page's total goes unread. The window
-holds the filtered rows before paging, where the plan under `TotalNone` can stop early along an
-index, so walking a large collection by cursor declines the total after reading it once. The
-composed text
+parses request text and a value it cannot read is the request's fault. The composed text
 depends only on the signature, the directives with the values removed, so the driver's
 prepared-statement cache serves repeated requests.
+
+Under `TotalExact` the read adds `COUNT(*) OVER ()` in an inner layer over the filtered base,
+and applies the keyset predicate, the order, and the paging in an outer layer, so the count
+covers every row the filters keep, not only those past a cursor. The count arrives as a
+trailing column, `sqlate_total`, which the scan never sees; a base may declare no field of that
+name, in any case, and `Project` panics on one. A scan that returns without calling `Scan` is an error,
+since the page's total would go unread. The window reads every filtered row before paging,
+where the plan under `TotalNone` can stop early along an index, so a caller walking a large
+collection by cursor reads the total once and declines it after.
 
 The key makes the ordering total. After the caller's sorts, the read appends every key field
 the sorts do not name, in header order, so a composite key tie-breaks in the order its header
@@ -341,7 +342,8 @@ each with a cast of its declared type, so a field the base no longer outputs, a 
 the engine does not know, or a type that no longer matches its column fails the same way. A
 second probe prepares one page past a cursor over the key, so the keyset predicate and the
 paging clause, an engine's overlay of either included, are checked at startup too. A third
-prepares the same page with its total, the window count beneath the keyset and the paging.
+probe prepares the same page counted, with the window count beneath the keyset predicate and
+the paging.
 `query.Verify(ctx, session, verifiers...)` runs any number of them and joins their failures;
 startup and any later check call it with the same arguments.
 
@@ -448,8 +450,9 @@ fails (`ErrScript`). It supports prepare, so `Verify` has a harness.
 `*MappedError`, so a test proves with one `errors.As` that an error passed through the
 mapping. `ReturningDialect` embeds it and implements `query.Returner` by appending `RETURNING`,
 so a unit suite covers a returning command's single-statement form as well as its fallback,
-which `Dialect` runs. `WithTotal(response, n)` adds the collection read's trailing count to a
-scripted query's rows, so a consumer's suite scripts a counted page without naming the column.
+which `Dialect` runs. `WithTotal(response, n)` adds the collection read's trailing count
+column, holding `n`, to a scripted response, so a consumer's suite scripts a counted page
+without naming the column.
 
 ## sqlint: the conventions linter
 
@@ -585,8 +588,8 @@ The module's `sqlint.toml` exports the engine's native forms and the overlay dir
 integration tier, behind the `integration` build tag, is the proofs only an engine can give:
 non-transactional DDL, dirty state and repair, concurrent starters in one process and across
 processes, the cancelled context, request values parsed by the engine, and both forms of a
-returning command returning the same row. They also prove that the counted total agrees with
-its page while writes commit between the statement and the caller and under concurrent writers,
-where a count read as its own statement does not, and that the counted page scans its base once
-under one window while the uncounted page keeps the key's index order. `mise run acceptance`
-runs them against a compose PostgreSQL and tears it down.
+returning command returning the same row. For the total, they prove that a counted page
+agrees with its total when writes commit between the statement and the caller, where a count
+read as its own statement does not; that it agrees under concurrent writers; and that the
+counted page scans its base once under one window while the uncounted page keeps the key's
+index order. `mise run acceptance` runs them against a compose PostgreSQL and tears it down.

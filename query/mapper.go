@@ -26,8 +26,9 @@ import (
 // matched to fields by name, in the row's order, and scanned into a fresh
 // T. A column T has no field for is an error, so a SELECT list that grows
 // past its entity fails loudly; a field with no column stays zero. It
-// reads the row only through Row: Columns names the columns it matches,
-// and one Scan fills them, so it works over any Row, not only *sql.Rows.
+// reads the row only through Row, matching the names Columns returns and
+// filling them with one Scan, so it works over any Row, not only
+// *sql.Rows.
 func Scanner[T any]() ScanFunc[T] {
 	fields := fieldsOf(reflect.TypeFor[T]())
 	return func(row Row) (T, error) {

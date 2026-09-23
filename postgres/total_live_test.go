@@ -1,13 +1,13 @@
 //go:build integration
 
-// Live proofs for the exact total against the compose PostgreSQL: the count
-// is a window in the page's own statement, so the total and the page read one
-// snapshot and agree even while writes land between the statement and the
-// caller; the old two-statement form, a count and then the page, is shown to
-// disagree under the same writes; the agreement holds under concurrent
-// writers on the pool; and the two total modes plan as the design says, the
-// counted page scanning its base once under one window and the uncounted one
-// keeping the key's index order. `mise run integration`.
+// Live proofs for the exact total against the compose PostgreSQL. The count
+// is a window in the page's own statement, so the total and the page read
+// one snapshot and agree even while writes land between the statement and
+// the caller. A count run as its own statement before the page is shown to
+// disagree under the same writes. The agreement holds under concurrent
+// writers on the pool. The counted page scans its base once under one
+// window, and the uncounted page keeps the key's index order.
+// `mise run integration`.
 package postgres_test
 
 import (
@@ -145,9 +145,9 @@ func countX(t testing.TB, s sqlate.Session, table string) int {
 // racer, and each page is shown to have raced a write (the count now differs
 // from the page's total) and still to agree with its total: a page with More
 // is full, and an offset page's items end at or before the total, before it
-// exactly when More. The control emulates the old design under the same
-// racer, an explicit COUNT(*) statement and then an uncounted page, and the
-// two disagree every round.
+// exactly when More. The control runs the two-statement form under the
+// same racer, an explicit COUNT(*) statement and then an uncounted page,
+// and the two disagree every round.
 func TestLive_TotalAgreesUnderRacingWrites(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)

@@ -258,9 +258,9 @@ OFFSET $4 ROWS FETCH NEXT $5 ROWS ONLY
 
 Request values never enter as text: each is bound through its field's declared type, so a value
 the engine cannot read as that type is a rejected request, not a server error. The total is a
-window count in the same statement, over the filtered base, so it can never disagree with the
-page; a request that declines it gets the read without the inner layer. The single-row read is
-the base under one equality predicate.
+window count over the filtered base in the page's own statement, so it cannot disagree with the
+page; a request that declines the total gets the read without the inner layer. The single-row
+read is the base under one equality predicate.
 
 A page can also continue from a cursor, the previous page's last row, in place of an offset.
 The read then replaces the offset with the keyset predicate, the rows past that row in the sort
