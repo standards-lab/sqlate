@@ -190,6 +190,43 @@ func TestTransact_PanicRollsBackAndRepanics(t *testing.T) {
 	_, _ = db.Transact(context.Background(), func(*sqlate.Tx) (int, error) { panic("boom") })
 }
 
+// appDB is an application's own pool type, a sqlate.Beginner through the
+// *sqlate.DB it embeds.
+type appDB struct{ *sqlate.DB }
+
+func TestTransact_RunsTheUnitOnAnEmbeddingBeginner(t *testing.T) {
+	ctx := context.Background()
+	db, rec := wrap(t, sqltest.Response{Affected: 1})
+	n, err := sqlate.Transact(ctx, appDB{db}, func(tx *sqlate.Tx) (int64, error) {
+		res, err := tx.ExecContext(ctx, "UPDATE t SET a = 1")
+		if err != nil {
+			return 0, err
+		}
+		return res.RowsAffected()
+	}, sqlate.ReadOnly())
+	if err != nil || n != 1 {
+		t.Fatalf("Transact = %d, %v", n, err)
+	}
+	if got, want := rec.Ops(), []sqltest.Op{sqltest.OpBegin, sqltest.OpExec, sqltest.OpCommit}; !slices.Equal(got, want) {
+		t.Errorf("ops = %v, want %v", got, want)
+	}
+	if !rec.Calls()[0].TxOptions.ReadOnly {
+		t.Errorf("begin options = %+v, want the options applied", rec.Calls()[0].TxOptions)
+	}
+
+	unit := errors.New("unit failed")
+	rec.FailRollback = errDriver
+	if _, err := sqlate.Transact(ctx, appDB{db}, func(*sqlate.Tx) (int, error) { return 0, unit }); !errors.Is(err, unit) || !errors.Is(err, errDriver) {
+		t.Errorf("err = %v, want the unit error joined with the rollback error", err)
+	}
+
+	rec.FailBegin = errDriver
+	called := false
+	if _, err := sqlate.Transact(ctx, appDB{db}, func(*sqlate.Tx) (int, error) { called = true; return 0, nil }); !errors.Is(err, sqlate.ErrConnectionFailed) || called {
+		t.Errorf("begin failure = %v, unit called %v; want ErrConnectionFailed and no unit", err, called)
+	}
+}
+
 func TestConn_PinsAConnection(t *testing.T) {
 	db, rec := wrap(t, sqltest.Response{Affected: 0})
 	conn, err := db.Conn(context.Background())

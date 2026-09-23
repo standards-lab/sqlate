@@ -68,13 +68,21 @@ func (t *Tx) Commit() error { return t.MapError(t.tx.Commit()) }
 // Rollback rolls back. sql.ErrTxDone passes through unmapped.
 func (t *Tx) Rollback() error { return t.tx.Rollback() }
 
-// Transact runs fn as one unit of work with a result: begin with opts, fn,
-// commit on success. On fn's error it rolls back and returns that error,
-// with a rollback failure joined onto it. A panic in fn rolls back and
-// re-panics, so no transaction leaks to the pool's reaper.
+// Transact runs fn as one unit of work with a result on the pool: it is
+// the root Transact over d.
 func (d *DB) Transact[T any](ctx context.Context, fn func(*Tx) (T, error), opts ...TxOption) (T, error) {
+	return Transact(ctx, d, fn, opts...)
+}
+
+// Transact runs fn as one unit of work with a result in a transaction b
+// opens: begin with opts, fn, commit on success. On fn's error it rolls back
+// and returns that error, with a rollback failure joined onto it. A panic in
+// fn rolls back and re-panics, so no transaction leaks to the pool's reaper.
+// b is *DB or any type that embeds it, so a protocol handed a session it
+// asserts to Beginner runs its unit the way DB.Transact does.
+func Transact[T any](ctx context.Context, b Beginner, fn func(*Tx) (T, error), opts ...TxOption) (T, error) {
 	var zero T
-	tx, err := d.Begin(ctx, opts...)
+	tx, err := b.Begin(ctx, opts...)
 	if err != nil {
 		return zero, err
 	}

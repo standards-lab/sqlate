@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/migrate"
 	"github.com/standards-lab/sqlate/postgres"
+	"github.com/standards-lab/sqlate/query"
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
@@ -40,6 +42,57 @@ func TestDialect_HistoryExistsQualifiesByCurrentSchema(t *testing.T) {
 	want := "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1"
 	if got := (postgres.Dialect{}).HistoryExists("$1"); got != want {
 		t.Errorf("HistoryExists() = %q, want %q", got, want)
+	}
+}
+
+func TestDialect_ReturningAppendsTheClauseForInsertAndUpdate(t *testing.T) {
+	cols := []string{"id", "status"}
+	for _, tc := range []struct {
+		verb query.Verb
+		body string
+	}{
+		{query.Insert, "INSERT INTO item (id) VALUES ({{id}})"},
+		{query.Update, "UPDATE item SET status = 'x' WHERE id = {{id}}"},
+	} {
+		got, ok := (postgres.Dialect{}).Returning(tc.verb, tc.body, cols)
+		if want := tc.body + "\nRETURNING id, status"; !ok || got != want {
+			t.Errorf("%s: Returning = %q, %v; want %q, true", tc.verb, got, ok, want)
+		}
+	}
+}
+
+func TestDialect_ReturningDeclinesAnUnknownVerb(t *testing.T) {
+	if got, ok := (postgres.Dialect{}).Returning(query.Verb("DELETE"), "DELETE FROM item", []string{"id"}); ok || got != "" {
+		t.Errorf("Returning(DELETE) = %q, %v; want a decline", got, ok)
+	}
+}
+
+// A body ending in a line comment keeps the clause: it starts on a line of
+// its own, outside the comment.
+func TestDialect_ReturningAfterATrailingLineComment(t *testing.T) {
+	body := "UPDATE item SET status = 'x' WHERE id = {{id}} -- the key"
+	got, ok := (postgres.Dialect{}).Returning(query.Update, body, []string{"id"})
+	if !ok || !strings.HasSuffix(got, "-- the key\nRETURNING id") {
+		t.Errorf("Returning = %q, %v; want the clause on its own line after the comment", got, ok)
+	}
+}
+
+var returningFiles = fstest.MapFS{
+	"sql/item_by_id.sql":  {Data: []byte("--| tier: standard\nSELECT i.a, i.b FROM item i WHERE i.id = {{id}}")},
+	"sql/create_item.sql": {Data: []byte("--| tier: standard\n--| returning: item_by_id\nINSERT INTO item (id, a, b) VALUES ({{id}}, {{a}}, {{b}})")},
+}
+
+// Compiled through query, the command's single-statement form carries the
+// read's bare columns and the engine's placeholders.
+func TestDialect_ReturningCompilesThroughQuery(t *testing.T) {
+	stmts := query.MustCatalog(postgres.Patterns()).MustCompile(returningFiles, "sql", postgres.Dialect{})
+	st := stmts.Statement("create_item")
+	want := "INSERT INTO item (id, a, b) VALUES ($1, $2, $3)\nRETURNING a, b"
+	if got := st.ReturningText(); got != want {
+		t.Errorf("ReturningText = %q, want %q", got, want)
+	}
+	if st.Reads() != "item_by_id" {
+		t.Errorf("Reads = %q, want item_by_id", st.Reads())
 	}
 }
 

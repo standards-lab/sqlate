@@ -10,6 +10,12 @@ import (
 // hazard, a transaction-scoped lock outside one, made loud.
 var ErrTransactionRequired = errors.New("query: statement requires a transaction")
 
+// ErrNotOneRow reports a returning command that changed more than one row,
+// or whose read found no row after the command changed one. Either is a
+// defect in the declaration, not request input: the command's WHERE is not
+// a key, or the read does not find the row the command changed.
+var ErrNotOneRow = errors.New("query: a returning command did not yield exactly one row")
+
 // ArgumentError reports a parameter the Args did not include. It is a
 // programming error in the caller, not request input, and matches no
 // request sentinel.

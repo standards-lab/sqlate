@@ -11,17 +11,19 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/migrate"
+	"github.com/standards-lab/sqlate/query"
 )
 
 // Dialect is the PostgreSQL dialect: sqlate.Dialect plus the sqlate.Locker
-// capability and the server-version statement. It has no fields; the zero
-// value is the dialect.
+// and query.Returner capabilities and the server-version statement. It has
+// no fields; the zero value is the dialect.
 type Dialect struct{}
 
 var (
 	_ sqlate.Dialect  = Dialect{}
 	_ sqlate.Locker   = Dialect{}
 	_ migrate.Catalog = Dialect{}
+	_ query.Returner  = Dialect{}
 )
 
 // Name identifies the engine.
@@ -95,6 +97,19 @@ func (Dialect) CreateHistory(table string) string {
 // than in StandardCatalog, whose other engines spell it differently.
 func (Dialect) HistoryExists(param string) string {
 	return "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = " + param
+}
+
+// Returning renders the single-statement form of a returning command for
+// query.Insert and query.Update: the body with RETURNING and the read's
+// columns appended, so the command itself returns the changed row. The
+// clause starts on a new line, so a line comment ending the body does not
+// swallow it. Returning declines every other verb.
+func (Dialect) Returning(verb query.Verb, body string, columns []string) (string, bool) {
+	switch verb {
+	case query.Insert, query.Update:
+		return body + "\nRETURNING " + strings.Join(columns, ", "), true
+	}
+	return "", false
 }
 
 // Lock takes the session-level advisory lock for name on conn, blocking

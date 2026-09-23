@@ -7,6 +7,38 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-09-23
+
+The returning command, promoted from the `blobfs` experiment, whose engine kept two copies of
+four statements for want of it. A command that returns its changed row is declared once and runs
+with `RETURNING` on an engine that has the clause, or as the command and then its read in one
+transaction on an engine that does not.
+
+### Added
+
+- The `returning` header key: a standard-tier `INSERT INTO` or `UPDATE` names the statement in
+  its directory that reads the changed row back. `Compile` resolves the pair and refuses an
+  invalid one, including a read of a table other than the one the command changes.
+- `query.Returner` and `query.Verb`: the dialect capability that renders the single-statement
+  form at compile time. A command whose dialect lacks it, or declines, runs the fallback.
+- `Statement.Returning(scan)`, returning a `query.Returning[T]` whose `One` returns the row as it
+  stands afterward and whether the command changed it. `Statement.Reads` and
+  `Statement.ReturningText` report the read's name and the single-statement form.
+- `query.ErrNotOneRow`: a command that changed more than one row, or whose read does not find
+  the row it changed.
+- `sqlate.Beginner`, the session capability to open a transaction, satisfied by `*DB` and any
+  type embedding it.
+- `sqlate.Transact(ctx, b, fn, opts...)`, the unit-of-work runner over any `Beginner`, with
+  `DB.Transact`'s semantics; `DB.Transact` now delegates to it.
+- `sqltest.ReturningDialect`, a stub dialect with `query.Returner`, so a unit suite covers the
+  single-statement form.
+- `Statements.Verify` also prepares each returning command's single-statement form.
+
+### Changed
+
+- **Breaking:** `Returning(scan).Guarded(version, current)` builds `RowGuard[T]`, and its `Run`
+  returns the changed row instead of the new version. `Statement.GuardedRow` is removed.
+
 ## [v0.2.0] - 2026-09-22
 
 The multi-set migrator promoted from the `blobfs` experiment, and six adjustments that

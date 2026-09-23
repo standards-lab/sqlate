@@ -155,6 +155,49 @@ SELECT pg_advisory_xact_lock(hashtext({{name}}))
 of a whole code base is one search for `--| tier: native`, and the linter refuses a standard file
 that uses a form the engine declares native.
 
+## Returning the changed row
+
+A command that changes one row often needs the row back. Some engines return it from the command
+itself (`RETURNING`); on others, the program runs the command and then reads the row. A standard
+file covers both cases by naming, in its `returning` declaration, the statement that reads the row:
+
+```sql
+--| tier: standard
+--| returning: order_by_id
+UPDATE orders
+SET status = 'shipped', {{> sql.guard_set}}
+WHERE {{> sql.guard_where}} AND status = 'packed'
+```
+
+The read is an ordinary statement in the same directory, of the form `SELECT <columns> FROM …`,
+and the command takes every parameter the read takes. The read's column list, less its one
+qualifier, is the list the engine returns, so the command's table needs no alias and both forms
+scan with the same function. The dialect chooses the form when the file compiles. On an engine
+that returns rows, the dialect renders the single-statement form, the command with its clause
+appended; the file stays standard tier, because the clause is the dialect's text, not the file's.
+On any other engine, the fallback runs the command and then the read in one transaction, whose
+lock on the changed row keeps another writer out until the read has it. The load checks that the
+read reads the command's own table.
+
+Both forms return the same row when the declaration is sound: the read selects exactly the row
+the command changed, from the command's own table. They differ where it is not, or where the
+session cannot hold a unit:
+
+- a command that changes more than one row outside a transaction: the single-statement form's
+  change has committed before it reports `ErrNotOneRow`, while the fallback rolls its own
+  transaction back;
+- a read that does not find the changed row: the single-statement form returns the row the engine
+  returned, the fallback `ErrNotOneRow`;
+- a session that is neither a `*sqlate.Tx` nor a `sqlate.Beginner`: only the single-statement form
+  runs.
+
+The read's parameters are the command's, so a command whose key the engine generates cannot be a
+returning command; the caller supplies the key.
+
+A guarded command can also be a returning command. The guard takes the row it needs to tell a
+refusal from a version mismatch from the returning command's handle, so on an engine that returns
+rows, a successful guarded write is one statement.
+
 ## Overlays
 
 An engine respells a library pattern by publishing a file of the same name with the same

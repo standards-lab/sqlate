@@ -3,7 +3,7 @@
 //
 //   - every statement directory compiles against the pattern sources the
 //     runtime registers (the header grammar, the parameter syntax, the
-//     field contract, includes resolving)
+//     field contract, includes resolving, a returning command's read)
 //   - every pattern directory validates as a catalog source
 //   - a file is named for its operation and not its SQL verb
 //   - the parameter delimiter does not appear inside a comment or a string
