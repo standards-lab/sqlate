@@ -240,6 +240,7 @@ comments included, so the body needs no lexer. A `{{` that forms neither is a lo
 the linter reports it at the line.
 
 ## Alternatives the design rejected
+
 **ORMs** such as gorm, bun, and ent are frameworks: they move the queries out of SQL and into the
 framework's vocabulary.
 
