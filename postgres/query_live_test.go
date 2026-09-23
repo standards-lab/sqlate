@@ -24,7 +24,7 @@ var liveFiles = fstest.MapFS{
 	"sql/view.sql":    {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\n--| field: name text\n--| field: n integer\n--| field: at timestamp\nSELECT id, name, n, at FROM live_q")},
 	"sql/edit.sql":    {Data: []byte("--| tier: standard\nUPDATE live_q SET name = {{name}}, version = version + 1 WHERE id = {{id}} AND version = {{version}}")},
 	"sql/version.sql": {Data: []byte("--| tier: standard\nSELECT version FROM live_q WHERE id = {{id}}")},
-	"sql/publish.sql": {Data: []byte("--| tier: standard\nUPDATE live_q SET name = {{name}}, version = version + 1 WHERE id = {{id}} AND version = {{version}} AND n > 1")},
+	"sql/publish.sql": {Data: []byte("--| tier: standard\n--| returning: row\nUPDATE live_q SET name = {{name}}, version = version + 1 WHERE id = {{id}} AND version = {{version}} AND n > 1")},
 	"sql/row.sql":     {Data: []byte("--| tier: standard\nSELECT id, name, n, at, version FROM live_q WHERE id = {{id}}")},
 	"sql/insert.sql":  {Data: []byte("--| tier: standard\nINSERT INTO live_q (name, n) VALUES ({{name}}, {{n}})")},
 }
@@ -259,49 +259,65 @@ func scanVersioned(rows *sql.Rows) (versioned, error) {
 	return v, err
 }
 
-// Proof: the typed guard's three outcomes against real rows. The publish
-// command carries a predicate of its own beyond the key and the version
-// (n > 1), so a row at the expected version can still refuse the write:
-// no row is sql.ErrNoRows, another version is ErrVersionMismatch with both
-// versions in its text, and the expected version refused by the command's
-// own predicate is a *RefusedError carrying the row the check read.
+// Proof: the typed guard's three outcomes against real rows, on both forms
+// of the returning command: the engine's RETURNING, and the command then its
+// read under a dialect that hides the capability. The publish command
+// carries a predicate of its own beyond the key and the version (n > 1), so
+// a row at the expected version can still refuse the write: no row is
+// sql.ErrNoRows, another version is ErrVersionMismatch with both versions in
+// its text, and the expected version refused by the command's own predicate
+// is a *RefusedError carrying the row the handle read back. A hit returns
+// the changed row at its new version.
 func TestLive_RowGuardThreeWay(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
-	liveQ(t, db)
-	stmts := liveStatements(db)
-	view := stmts.Statement("view").Project(scanRow)
-	publish := stmts.Statement("publish").GuardedRow(stmts.Statement("row").Scan(scanVersioned), "version", func(v versioned) int64 { return v.Version })
-	a, err := view.One(ctx, db, "name", "a") // n = 1: the command's own predicate refuses it
-	if err != nil {
-		t.Fatal(err)
-	}
-	c, err := view.One(ctx, db, "name", "c") // n = 3
-	if err != nil {
-		t.Fatal(err)
-	}
+	for _, form := range []struct {
+		name    string
+		dialect sqlate.Dialect
+	}{
+		{"native", postgres.Dialect{}},
+		{"fallback", struct{ sqlate.Dialect }{postgres.Dialect{}}},
+	} {
+		t.Run(form.name, func(t *testing.T) {
+			liveQ(t, db)
+			stmts := query.MustCatalog(postgres.Patterns()).MustCompile(liveFiles, "sql", form.dialect)
+			if native := stmts.Statement("publish").ReturningText() != ""; native != (form.name == "native") {
+				t.Fatalf("ReturningText = %q under the %s form", stmts.Statement("publish").ReturningText(), form.name)
+			}
+			view := stmts.Statement("view").Project(scanRow)
+			publish := stmts.Statement("publish").Returning(scanVersioned).Guarded("version", func(v versioned) int64 { return v.Version })
+			a, err := view.One(ctx, db, "name", "a") // n = 1: the command's own predicate refuses it
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := view.One(ctx, db, "name", "c") // n = 3
+			if err != nil {
+				t.Fatal(err)
+			}
 
-	if _, err := publish.Run(ctx, db, 1, query.Args{"id": "00000000-0000-0000-0000-000000000000", "name": "x"}); !errors.Is(err, sql.ErrNoRows) {
-		t.Errorf("no row = %v, want sql.ErrNoRows", err)
-	}
-	_, err = publish.Run(ctx, db, 7, query.Args{"id": a.ID, "name": "x"})
-	if !errors.Is(err, query.ErrVersionMismatch) || !strings.Contains(err.Error(), "expected 7, current 1") {
-		t.Errorf("another version = %v, want ErrVersionMismatch expected 7, current 1", err)
-	}
-	_, err = publish.Run(ctx, db, 1, query.Args{"id": a.ID, "name": "x"})
-	var refused *query.RefusedError[versioned]
-	if !errors.As(err, &refused) || !errors.Is(err, query.ErrRefused) || refused.Version != 1 || refused.Row.ID != a.ID || refused.Row.Name != "a" || refused.Row.N != 1 || refused.Row.Version != 1 {
-		t.Errorf("refused at the expected version = %v (%+v), want a RefusedError carrying row a at version 1", err, refused)
-	}
-	v, err := publish.Run(ctx, db, 1, query.Args{"id": c.ID, "name": "C"})
-	if err != nil || v != 2 {
-		t.Fatalf("hit = %d, %v, want 2", v, err)
-	}
-	if got, _ := view.One(ctx, db, "id", c.ID); got.Name != "C" {
-		t.Errorf("the hit did not persist: %+v", got)
-	}
-	if got, _ := view.One(ctx, db, "id", a.ID); got.Name != "a" {
-		t.Errorf("the refused write changed the row: %+v", got)
+			if _, err := publish.Run(ctx, db, 1, query.Args{"id": "00000000-0000-0000-0000-000000000000", "name": "x"}); !errors.Is(err, sql.ErrNoRows) {
+				t.Errorf("no row = %v, want sql.ErrNoRows", err)
+			}
+			_, err = publish.Run(ctx, db, 7, query.Args{"id": a.ID, "name": "x"})
+			if !errors.Is(err, query.ErrVersionMismatch) || !strings.Contains(err.Error(), "expected 7, current 1") {
+				t.Errorf("another version = %v, want ErrVersionMismatch expected 7, current 1", err)
+			}
+			_, err = publish.Run(ctx, db, 1, query.Args{"id": a.ID, "name": "x"})
+			var refused *query.RefusedError[versioned]
+			if !errors.As(err, &refused) || !errors.Is(err, query.ErrRefused) || refused.Version != 1 || refused.Row.ID != a.ID || refused.Row.Name != "a" || refused.Row.N != 1 || refused.Row.Version != 1 {
+				t.Errorf("refused at the expected version = %v (%+v), want a RefusedError carrying row a at version 1", err, refused)
+			}
+			hit, err := publish.Run(ctx, db, 1, query.Args{"id": c.ID, "name": "C"})
+			if err != nil || hit.ID != c.ID || hit.Name != "C" || hit.Version != 2 {
+				t.Fatalf("hit = %+v, %v, want row c named C at version 2", hit, err)
+			}
+			if got, _ := view.One(ctx, db, "id", c.ID); got.Name != "C" {
+				t.Errorf("the hit did not persist: %+v", got)
+			}
+			if got, _ := view.One(ctx, db, "id", a.ID); got.Name != "a" {
+				t.Errorf("the refused write changed the row: %+v", got)
+			}
+		})
 	}
 }
 

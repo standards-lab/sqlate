@@ -5,6 +5,22 @@ documented here. The format follows [Keep a Changelog](https://keepachangelog.co
 and the module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). This
 changelog covers this sub-module only; the base module keeps its own.
 
+## [Unreleased]
+
+### Added
+
+- `Dialect.Returning`, implementing `query.Returner`: an `INSERT` or `UPDATE` returning command
+  compiles with `RETURNING` and its read's columns appended, so the engine returns the changed
+  row from the command itself, one statement. Every other verb declines.
+
+### Changed
+
+- The live row-guard proof runs on the returning handle, `Returning(scan).Guarded(version,
+  current)`, in place of the removed `GuardedRow`, and on both forms of the command. A new live
+  proof shows both forms return the same row in every outcome.
+
+Requires `github.com/standards-lab/sqlate v0.3.0`.
+
 ## [v0.2.0] - 2026-09-22
 
 ### Added

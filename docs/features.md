@@ -533,8 +533,13 @@ standard chain of disjuncts. The engine accepts every other library pattern as w
 program passes `postgres.Patterns()` to `NewCatalog` in place of `query.Patterns()`, and only
 the text of a continued page's predicate changes.
 
+`Returning` implements `query.Returner` by appending `RETURNING` with the read's columns to an
+`INSERT` or `UPDATE`, so a returning command is one statement on PostgreSQL, and a second
+statement, the read, runs only when the command changed nothing.
+
 The module's `sqlint.toml` exports the engine's native forms and the overlay directory. Its
 integration tier, behind the `integration` build tag, is the proofs only an engine can give:
 non-transactional DDL, dirty state and repair, concurrent starters in one process and across
-processes, the cancelled context, and request values parsed by the engine. `mise run acceptance`
-runs them against a compose PostgreSQL and tears it down.
+processes, the cancelled context, request values parsed by the engine, and both forms of a
+returning command returning the same row. `mise run acceptance` runs them against a compose
+PostgreSQL and tears it down.
