@@ -5,6 +5,18 @@ documented here. The format follows [Keep a Changelog](https://keepachangelog.co
 and the module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). This
 changelog covers this sub-module only; the base module keeps its own.
 
+## [Unreleased]
+
+### Added
+
+- The `returning` header key lints: a statement directory compiles against a base that knows
+  it, so a returning command whose read is missing, whose verb is not `INSERT INTO` or
+  `UPDATE`, or whose read is not a plain column list is a compile finding against its
+  directory. `RETURNING` written into a standard file stays a native form.
+
+Requires `github.com/standards-lab/sqlate v0.3.0`; a linter pinned to an earlier base reports
+the key as an unknown declaration.
+
 ## [v0.1.2] - 2026-09-22
 
 ### Fixed

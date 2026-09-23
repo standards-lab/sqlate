@@ -362,3 +362,33 @@ func TestNativeForms_TrippedOnceAndSilentOtherwise(t *testing.T) {
 		t.Errorf("%d findings for %d forms:\n%s", len(findings), len(tripped), strings.Join(findings, "\n"))
 	}
 }
+
+// A returning pair lints clean; each shape the query package refuses is a
+// compile finding against its directory; and RETURNING written into a
+// standard file is still a native form, the declaration notwithstanding.
+func TestLint_ReturningCommands(t *testing.T) {
+	read := "--| tier: standard\nSELECT i.id, i.status FROM item i WHERE i.id = {{id}}"
+	fsys := tree(config)
+	fsys["domain/r/statements/item_by_id.sql"] = &fstest.MapFile{Data: []byte(read)}
+	fsys["domain/r/statements/claim.sql"] = &fstest.MapFile{Data: []byte("--| tier: standard\n--| returning: item_by_id\nUPDATE item\nSET status = 'claimed', {{> sql.guard_set}}\nWHERE {{> sql.guard_where}} AND status = 'open'")}
+	refused := map[string]string{
+		"missing": "--| tier: standard\n--| returning: nowhere\nUPDATE item SET status = 'x' WHERE id = {{id}}",
+		"purge":   "--| tier: standard\n--| returning: item_by_id\nDELETE FROM item WHERE id = {{id}}",
+		"shaped":  "--| tier: standard\n--| returning: counted\nUPDATE item SET status = 'x' WHERE id = {{id}}",
+	}
+	for dir, text := range refused {
+		fsys["domain/"+dir+"/statements/item_by_id.sql"] = &fstest.MapFile{Data: []byte(read)}
+		fsys["domain/"+dir+"/statements/counted.sql"] = &fstest.MapFile{Data: []byte("--| tier: standard\nSELECT COUNT(*) FROM item i WHERE i.id = {{id}}")}
+		fsys["domain/"+dir+"/statements/command.sql"] = &fstest.MapFile{Data: []byte(text)}
+	}
+	fsys["domain/n/statements/item_by_id.sql"] = &fstest.MapFile{Data: []byte(read)}
+	fsys["domain/n/statements/retire.sql"] = &fstest.MapFile{Data: []byte("--| tier: standard\n--| returning: item_by_id\nUPDATE item SET status = 'retired' WHERE id = {{id}} RETURNING id")}
+	findings := lint(fsys, nil)
+	reject(t, findings, "domain/r/")
+	want(t, findings,
+		`domain/missing/statements: query: command.sql: returning read "nowhere" is not a statement of this directory`,
+		`domain/purge/statements: query: command.sql: a returning command is an INSERT INTO or an UPDATE; this one starts "DELETE"`,
+		`domain/shaped/statements: query: command.sql: returning read "counted" selects "COUNT(*)"`,
+		`retire.sql:3: "RETURNING" (returning) in a standard-tier file`,
+	)
+}
