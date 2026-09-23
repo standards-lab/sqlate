@@ -57,6 +57,9 @@ type Statement struct {
 	// renderings caches an expanded statement's text by the lengths of its
 	// lists; nil for a statement with no expansion, whose text is final.
 	renderings *sync.Map
+	// returning is the resolved returning declaration of a command; nil for
+	// a statement that declares none.
+	returning *returnForm
 }
 
 // Catalog is the catalog the statement compiled against.
@@ -70,6 +73,28 @@ func (st Statement) Name() string { return st.name }
 // statement with an expanded parameter it is the rendering at one element
 // per list, the text Verify prepares.
 func (st Statement) Text() string { return st.compiled.text }
+
+// Reads is the name of the statement the returning declaration names, the
+// read of the changed row; empty when none is declared.
+func (st Statement) Reads() string {
+	if st.returning == nil {
+		return ""
+	}
+	return st.returning.read.name
+}
+
+// ReturningText is the single-statement form of a returning command as the
+// engine receives it: the dialect's text, parameters rewritten to its
+// placeholders, and for an expanded parameter the rendering at one element
+// per list, the text Verify prepares. It is empty when no returning is
+// declared or the dialect declined, where the command runs and then its
+// read.
+func (st Statement) ReturningText() string {
+	if st.returning == nil || st.returning.native == nil {
+		return ""
+	}
+	return st.returning.native.text
+}
 
 // Tier is the declared tier.
 func (st Statement) Tier() Tier { return st.tier }
@@ -102,8 +127,8 @@ func (st Statement) Scan[T any](scan ScanFunc[T]) Rows[T] {
 
 // Project binds the statement, a projection base, to scan: the typed
 // handle for the collection read. A base without a key or field contract,
-// or one that takes an expanded parameter, is a defect in the caller's
-// constructor and panics. A base's own non-expanded parameters bind from
+// a returning command, or one that takes an expanded parameter, is a defect
+// in the caller's constructor and panics. A base's own non-expanded parameters bind from
 // the base arguments List, Continue, and One take.
 func (st Statement) Project[T any](scan ScanFunc[T]) Projection[T] {
 	return newProjection(st, scan)
@@ -173,28 +198,36 @@ func (st Statement) query(ctx context.Context, s sqlate.Session, args Args) (*sq
 // flattened into consecutive values; for an expanded statement the text is
 // rendered for the lists' lengths, cached by them.
 func (st Statement) bind(s sqlate.Session, args Args) (string, []any, error) {
+	return st.bindForm(st.compiled, st.renderings, s, args)
+}
+
+// bindForm is bind over one compiled form of the statement and that form's
+// renderings cache: the statement's own, or a returning command's
+// single-statement form, which binds the same parameters under the same
+// transaction requirement.
+func (st Statement) bindForm(c compiled, renderings *sync.Map, s sqlate.Session, args Args) (string, []any, error) {
 	if st.txRequired {
 		if _, ok := s.(*sqlate.Tx); !ok {
 			return "", nil, ErrTransactionRequired
 		}
 	}
-	text := st.compiled.text
+	text := c.text
 	var arity []int
-	if st.compiled.template != nil {
+	if c.template != nil {
 		var key string
 		var err error
-		if arity, key, err = st.compiled.arities(st.name, args); err != nil {
+		if arity, key, err = c.arities(st.name, args); err != nil {
 			return "", nil, err
 		}
-		if cached, ok := st.renderings.Load(key); ok {
+		if cached, ok := renderings.Load(key); ok {
 			text = cached.(string)
 		} else {
-			text = st.compiled.render(st.dialect.Placeholder, func(i int) int { return arity[i] })
-			st.renderings.Store(key, text)
+			text = c.render(st.dialect.Placeholder, func(i int) int { return arity[i] })
+			renderings.Store(key, text)
 		}
 	}
-	values := make([]any, 0, len(st.compiled.params))
-	for i, p := range st.compiled.params {
+	values := make([]any, 0, len(c.params))
+	for i, p := range c.params {
 		v, ok := args[p.name]
 		if !ok {
 			return "", nil, &ArgumentError{Statement: st.name, Name: p.name}

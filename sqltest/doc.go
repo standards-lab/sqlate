@@ -18,4 +18,7 @@
 // [Open] returns the pool and its [Recorder]; [Dialect] is the stub dialect
 // whose MapError wraps every error in a [MappedError], so a test proves
 // with one errors.As that an error passed through MapError.
+// [ReturningDialect] adds the query.Returner capability to it, so a suite
+// covers a returning command's single-statement form as well as its
+// fallback.
 package sqltest

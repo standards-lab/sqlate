@@ -111,6 +111,9 @@ type Projection[T any] struct {
 
 // newProjection is Statement.Project.
 func newProjection[T any](base Statement, scan ScanFunc[T]) Projection[T] {
+	if base.returning != nil {
+		panic(fmt.Sprintf("query: %s: a returning command is not a projection base", base.name))
+	}
 	if len(base.key) == 0 || len(base.fields) == 0 {
 		panic(fmt.Sprintf("query: %s: a projection base declares a key and its fields", base.name))
 	}
