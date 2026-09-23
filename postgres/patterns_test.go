@@ -2,7 +2,6 @@ package postgres_test
 
 import (
 	"context"
-	"database/sql"
 	"database/sql/driver"
 	"slices"
 	"testing"
@@ -36,7 +35,7 @@ func TestPatterns_OverlaysTheKeysetPredicate(t *testing.T) {
 func TestPatterns_CursorContinuesWithARowValueComparison(t *testing.T) {
 	view := query.MustCatalog(postgres.Patterns()).MustCompile(fstest.MapFS{
 		"sql/member.sql": {Data: []byte("--| tier: standard\n--| key: org, id\n--| field: org uuid not null\n--| field: id uuid not null\nSELECT org, id FROM member")},
-	}, "sql", postgres.Dialect{}).Statement("member").Project(func(rows *sql.Rows) (string, error) {
+	}, "sql", postgres.Dialect{}).Statement("member").Project(func(rows query.Row) (string, error) {
 		var org, id string
 		err := rows.Scan(&org, &id)
 		return id, err

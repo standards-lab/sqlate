@@ -2,7 +2,6 @@ package query_test
 
 import (
 	"context"
-	"database/sql"
 	"database/sql/driver"
 	"encoding/base64"
 	"encoding/json"
@@ -24,7 +23,7 @@ type member struct {
 	Name string
 }
 
-func scanMember(rows *sql.Rows) (member, error) {
+func scanMember(rows query.Row) (member, error) {
 	var m member
 	err := rows.Scan(&m.Org, &m.ID, &m.Name)
 	return m, err

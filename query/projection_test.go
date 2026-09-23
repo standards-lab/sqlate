@@ -23,7 +23,7 @@ type person struct {
 	Age  int64
 }
 
-func scanPerson(rows *sql.Rows) (person, error) {
+func scanPerson(rows query.Row) (person, error) {
 	var p person
 	err := rows.Scan(&p.ID, &p.Name, &p.Age)
 	return p, err

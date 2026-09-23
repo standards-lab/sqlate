@@ -31,7 +31,7 @@ type item struct {
 	Version int64
 }
 
-func scanItem(rows *sql.Rows) (item, error) {
+func scanItem(rows query.Row) (item, error) {
 	var i item
 	err := rows.Scan(&i.ID, &i.Status, &i.Version)
 	return i, err

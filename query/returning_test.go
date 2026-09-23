@@ -251,7 +251,7 @@ type orgVersion struct {
 	Version int64
 }
 
-func scanOrgVersion(rows *sql.Rows) (orgVersion, error) {
+func scanOrgVersion(rows query.Row) (orgVersion, error) {
 	var o orgVersion
 	err := rows.Scan(&o.ID, &o.Name, &o.Version)
 	return o, err
@@ -483,7 +483,7 @@ func TestReturningOne_OwnedTransactionFailures(t *testing.T) {
 func TestReturningOne_APanicRollsBackAndRepanics(t *testing.T) {
 	pool, rec := sqltest.Open(t, sqltest.Response{Affected: 1}, orgVersionRows(1))
 	stmts := catalog().MustCompile(returningFiles, "sql", sqltest.Dialect{})
-	r := stmts.Statement("rename").Returning(func(*sql.Rows) (orgVersion, error) { panic("scan") })
+	r := stmts.Statement("rename").Returning(func(query.Row) (orgVersion, error) { panic("scan") })
 	defer func() {
 		if p := recover(); p != "scan" {
 			t.Errorf("recover() = %v, want the scan's panic", p)

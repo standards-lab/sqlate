@@ -35,7 +35,7 @@ type row struct {
 	At       sql.NullTime
 }
 
-func scanRow(rows *sql.Rows) (row, error) {
+func scanRow(rows query.Row) (row, error) {
 	var r row
 	err := rows.Scan(&r.ID, &r.Name, &r.N, &r.At)
 	return r, err
@@ -253,7 +253,7 @@ type versioned struct {
 	Version int64
 }
 
-func scanVersioned(rows *sql.Rows) (versioned, error) {
+func scanVersioned(rows query.Row) (versioned, error) {
 	var v versioned
 	err := rows.Scan(&v.ID, &v.Name, &v.N, &v.At, &v.Version)
 	return v, err
@@ -339,7 +339,7 @@ func TestLive_TypeProbe(t *testing.T) {
 	if err := probes.Verify(ctx, db); err != nil {
 		t.Fatalf("the probe bases themselves do not prepare: %v", err)
 	}
-	none := func(*sql.Rows) (struct{}, error) { return struct{}{}, nil }
+	none := func(query.Row) (struct{}, error) { return struct{}{}, nil }
 	for _, tc := range []struct{ name, state string }{
 		{"misspelled", "42703"},
 		{"mistyped", "42883"},

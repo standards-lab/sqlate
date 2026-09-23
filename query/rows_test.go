@@ -20,7 +20,7 @@ type org struct {
 	Name string
 }
 
-func scanOrg(rows *sql.Rows) (org, error) {
+func scanOrg(rows query.Row) (org, error) {
 	var o org
 	err := rows.Scan(&o.ID, &o.Name)
 	return o, err

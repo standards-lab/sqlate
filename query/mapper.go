@@ -1,7 +1,6 @@
 package query
 
 import (
-	"database/sql"
 	"fmt"
 	"maps"
 	"reflect"
@@ -26,12 +25,14 @@ import (
 // Scanner returns the ScanFunc for T from its tags: each row's columns are
 // matched to fields by name, in the row's order, and scanned into a fresh
 // T. A column T has no field for is an error, so a SELECT list that grows
-// past its entity fails loudly; a field with no column stays zero.
+// past its entity fails loudly; a field with no column stays zero. It
+// reads the row only through Row: Columns names the columns it matches,
+// and one Scan fills them, so it works over any Row, not only *sql.Rows.
 func Scanner[T any]() ScanFunc[T] {
 	fields := fieldsOf(reflect.TypeFor[T]())
-	return func(rows *sql.Rows) (T, error) {
+	return func(row Row) (T, error) {
 		var v T
-		cols, err := rows.Columns()
+		cols, err := row.Columns()
 		if err != nil {
 			return v, err
 		}
@@ -44,7 +45,7 @@ func Scanner[T any]() ScanFunc[T] {
 			}
 			dests[i] = rv.FieldByIndex(idx).Addr().Interface()
 		}
-		if err := rows.Scan(dests...); err != nil {
+		if err := row.Scan(dests...); err != nil {
 			return v, err
 		}
 		return v, nil
