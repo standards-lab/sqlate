@@ -7,6 +7,8 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.3.0] - 2026-09-23
+
 The returning command, promoted from the `blobfs` experiment, whose engine kept two copies of
 four statements for want of it. A command that returns its changed row is declared once and runs
 with `RETURNING` on an engine that has the clause, or as the command and then its read in one
