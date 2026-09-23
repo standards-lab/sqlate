@@ -1,6 +1,7 @@
 package query
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
@@ -53,11 +54,17 @@ var (
 	// leadingComment is a line or block comment at the start of a body,
 	// skipped when reading the statement's leading keyword.
 	leadingComment = regexp.MustCompile(`^(?:\s+|--[^\n]*(?:\n|$)|/\*(?s:.*?)\*/)+`)
-	// commandVerb is the leading keyword a returning command starts with.
-	commandVerb = regexp.MustCompile(`(?i)^(insert\s+into|update)\s`)
+	// commandVerb is the leading keyword a returning command starts with,
+	// and the table it changes: the name after INSERT INTO or UPDATE, schema
+	// qualified or not, as written.
+	commandVerb = regexp.MustCompile(`(?i)^(insert\s+into|update)\s+([^\s(,;]*)`)
 	// readList is the SELECT list of a returning read: everything before its
 	// first FROM, each item then checked on its own.
 	readList = regexp.MustCompile(`(?is)^select\s+(.+?)\s+from\s`)
+	// readFrom is what follows a returning read's first FROM: the table it
+	// reads, schema qualified or not, and the word after it, the table's
+	// alias unless it is a keyword, with or without AS.
+	readFrom = regexp.MustCompile(`(?i)^\s*([^\s(),;]+)(?:\s+(?:as\s+)?([a-z_][a-z0-9_]*))?`)
 	// readColumn is one item of a returning read's SELECT list: a column,
 	// optionally qualified by a table or alias.
 	readColumn = regexp.MustCompile(`^(?:([a-z_][a-z0-9_]*)\.)?([a-z_][a-z0-9_]*)$`)
@@ -68,56 +75,108 @@ func stripLeading(body string) string {
 	return body[len(leadingComment.FindString(body)):]
 }
 
-// commandVerbOf reads the verb of a returning command's body: INSERT INTO or
-// UPDATE, matched case-insensitively. Anything else, DELETE or a leading WITH
-// among them, is an error naming what the body starts with.
-func commandVerbOf(body string) (Verb, error) {
+// commandVerbOf reads the verb of a returning command's body, INSERT INTO or
+// UPDATE, matched case-insensitively, and the table it changes, as written.
+// Anything else, DELETE or a leading WITH among them, is an error naming what
+// the body starts with.
+func commandVerbOf(body string) (Verb, string, error) {
 	rest := stripLeading(body)
 	m := commandVerb.FindStringSubmatch(rest)
 	if m == nil {
-		first, _, _ := strings.Cut(rest, " ")
-		first, _, _ = strings.Cut(first, "\n")
-		return "", fmt.Errorf("a returning command is an INSERT INTO or an UPDATE; this one starts %q", first)
+		first := ""
+		if f := strings.Fields(rest); len(f) > 0 {
+			first = f[0]
+		}
+		return "", "", fmt.Errorf("a returning command is an INSERT INTO or an UPDATE; this one starts %q", first)
+	}
+	if m[2] == "" {
+		return "", "", fmt.Errorf("a returning command names the table it changes after %s", strings.ToUpper(strings.Join(strings.Fields(m[1]), " ")))
 	}
 	if strings.EqualFold(m[1], "update") {
-		return Update, nil
+		return Update, m[2], nil
 	}
-	return Insert, nil
+	return Insert, m[2], nil
 }
 
-// readColumns reads the returned columns of a returning read's body: the
-// body is SELECT <c>, <c>, … FROM …, each <c> a column or table.column, every
-// item under the same qualifier or none, no name twice. The columns are the
-// bare names, in the list's order.
-func readColumns(body string) ([]string, error) {
-	m := readList.FindStringSubmatch(stripLeading(body))
+// fromKeywords are the words that may follow a read's FROM table and are
+// not its alias.
+var fromKeywords = []string{
+	"where", "join", "inner", "left", "right", "full", "cross", "natural",
+	"group", "order", "having", "limit", "offset", "fetch", "for", "window",
+	"union", "intersect", "except", "on", "using",
+}
+
+// readShape is what a returning read's body declares: the returned columns
+// in scan order, the qualifier every item carries (empty for none), and
+// the table after its first FROM with its alias (empty for none).
+type readShape struct {
+	columns   []string
+	qualifier string
+	table     string
+	alias     string
+}
+
+// readShapeOf reads the shape of a returning read's body: the body is
+// SELECT <c>, <c>, … FROM <table> …, each <c> a lowercase column or
+// table.column, every item under the same qualifier or none, no name twice.
+// The columns are the bare names, in the list's order.
+func readShapeOf(body string) (readShape, error) {
+	var shape readShape
+	text := stripLeading(body)
+	m := readList.FindStringSubmatchIndex(text)
 	if m == nil {
-		return nil, errors.New("is not SELECT <column>, … FROM …")
+		return shape, errors.New("is not SELECT <column>, … FROM …")
 	}
-	var columns []string
-	qualifier := ""
-	for i, item := range strings.Split(m[1], ",") {
+	for i, item := range strings.Split(text[m[2]:m[3]], ",") {
 		item = strings.TrimSpace(item)
 		c := readColumn.FindStringSubmatch(item)
 		if c == nil {
-			return nil, fmt.Errorf("selects %q; each item is a column or table.column", item)
+			if readColumn.MatchString(strings.ToLower(item)) {
+				return shape, fmt.Errorf("selects %q; each item is a lowercase column or table.column", item)
+			}
+			return shape, fmt.Errorf("selects %q; each item is a column or table.column", item)
 		}
 		if i == 0 {
-			qualifier = c[1]
-		} else if c[1] != qualifier {
-			return nil, fmt.Errorf("selects %q; every item has the same qualifier or none", item)
+			shape.qualifier = c[1]
+		} else if c[1] != shape.qualifier {
+			return shape, fmt.Errorf("selects %q; every item has the same qualifier or none", item)
 		}
-		if slices.Contains(columns, c[2]) {
-			return nil, fmt.Errorf("selects %q twice", c[2])
+		if slices.Contains(shape.columns, c[2]) {
+			return shape, fmt.Errorf("selects %q twice", c[2])
 		}
-		columns = append(columns, c[2])
+		shape.columns = append(shape.columns, c[2])
 	}
-	return columns, nil
+	f := readFrom.FindStringSubmatch(text[m[1]:])
+	if f == nil {
+		return shape, errors.New("reads no table after FROM; a returning read reads one table")
+	}
+	shape.table = f[1]
+	if !slices.Contains(fromKeywords, strings.ToLower(f[2])) {
+		shape.alias = f[2]
+	}
+	return shape, nil
+}
+
+// readsTarget checks that a returning read reads the table its command
+// changes: the read's FROM table is the command's target, compared as
+// written, and a qualifier on its columns is that table's alias or its name.
+func readsTarget(readName string, shape readShape, target string) error {
+	if shape.table != target {
+		return fmt.Errorf("returning read %q reads %q; the command changes %q", readName, shape.table, target)
+	}
+	if q := shape.qualifier; q != "" {
+		bare := shape.table[strings.LastIndex(shape.table, ".")+1:]
+		if q != shape.alias && q != shape.table && q != bare {
+			return fmt.Errorf("returning read %q qualifies its columns %q; it reads %q as %q", readName, q, shape.table, cmp.Or(shape.alias, shape.table))
+		}
+	}
+	return nil
 }
 
 // resolveReturning resolves a command's returning declaration against the
 // statements compiled beside it. It checks the command's verb and the named
-// read and its shape, and, when d implements Returner and accepts, compiles
+// read and its shape, that the read reads the table the command changes,
+// and, when d implements Returner and accepts, compiles
 // the single-statement form, its parameters rewritten as the command's are.
 // sources holds, by name, every statement's body after include expansion
 // and its returning declaration.
@@ -129,7 +188,7 @@ func resolveReturning(st *Statement, sources map[string]source, stmts map[string
 	if len(st.key) > 0 || len(st.fields) > 0 {
 		return errors.New("a returning command is not a projection base; it declares no key or field")
 	}
-	verb, err := commandVerbOf(body)
+	verb, target, err := commandVerbOf(body)
 	if err != nil {
 		return err
 	}
@@ -152,10 +211,14 @@ func resolveReturning(st *Statement, sources map[string]source, stmts map[string
 			return fmt.Errorf("returning read %q takes parameter %q the command does not", readName, p)
 		}
 	}
-	columns, err := readColumns(sources[readName].body)
+	shape, err := readShapeOf(sources[readName].body)
 	if err != nil {
 		return fmt.Errorf("returning read %q %w", readName, err)
 	}
+	if err := readsTarget(readName, shape, target); err != nil {
+		return err
+	}
+	columns := shape.columns
 	form := &returnForm{read: read, verb: verb, columns: columns}
 	if r, ok := d.(Returner); ok {
 		if text, ok := r.Returning(verb, body, slices.Clone(columns)); ok {
@@ -211,8 +274,19 @@ func (r Returning[T]) Statement() Statement { return r.cmd }
 // caller's transaction can undo the change. The fallback runs the command
 // and then its read as one unit: inside s when s is a *sqlate.Tx; inside a
 // transaction One opens, commits, and rolls back on any error when s is a
-// sqlate.Beginner; and on any other session One returns
-// ErrTransactionRequired.
+// sqlate.Beginner, as sqlate.Transact runs a unit; and on any other session
+// One returns ErrTransactionRequired.
+//
+// The two forms return the same row for a sound declaration: a read that
+// selects exactly the row the command changed, from the command's own
+// table, which the load checks as far as the table. They differ when the
+// command changes more than one row outside a transaction (the
+// single-statement form's change has committed before ErrNotOneRow; the
+// fallback's own transaction rolls back), when the read does not find the
+// changed row (the single-statement form returns the RETURNING row; the
+// fallback returns ErrNotOneRow), and on a session that is neither a
+// *sqlate.Tx nor a sqlate.Beginner, where only the single-statement form
+// runs.
 func (r Returning[T]) One(ctx context.Context, s sqlate.Session, args Args) (T, bool, error) {
 	var zero T
 	if r.cmd.txRequired {
@@ -227,7 +301,11 @@ func (r Returning[T]) One(ctx context.Context, s sqlate.Session, args Args) (T, 
 	case *sqlate.Tx:
 		return r.fallback(ctx, s, args)
 	case sqlate.Beginner:
-		return r.owned(ctx, s, args)
+		out, err := sqlate.Transact(ctx, s, func(tx *sqlate.Tx) (changedRow[T], error) {
+			row, changed, err := r.fallback(ctx, tx, args)
+			return changedRow[T]{row: row, changed: changed}, err
+		})
+		return out.row, out.changed, err
 	}
 	return zero, false, ErrTransactionRequired
 }
@@ -250,7 +328,9 @@ func (r Returning[T]) single(ctx context.Context, s sqlate.Session, args Args) (
 		if err := rows.Err(); err != nil {
 			return zero, false, mapErr(s, err)
 		}
-		// Closed before the read, which may share the connection.
+		// Next returning false has closed the row set unless the driver
+		// reports a further result set; Close releases it before the read,
+		// which may share the connection.
 		if err := rows.Close(); err != nil {
 			return zero, false, mapErr(s, err)
 		}
@@ -290,33 +370,11 @@ func (r Returning[T]) fallback(ctx context.Context, tx *sqlate.Tx, args Args) (T
 	return row, n == 1, nil
 }
 
-// owned runs the fallback in a transaction of its own, as DB.Transact
-// does: it commits on success; on an error it rolls back and returns the
-// error with a rollback failure joined onto it; on a panic it rolls back
-// and re-panics.
-func (r Returning[T]) owned(ctx context.Context, b sqlate.Beginner, args Args) (T, bool, error) {
-	var zero T
-	tx, err := b.Begin(ctx)
-	if err != nil {
-		return zero, false, err
-	}
-	defer func() {
-		if p := recover(); p != nil {
-			_ = tx.Rollback()
-			panic(p)
-		}
-	}()
-	row, changed, err := r.fallback(ctx, tx, args)
-	if err != nil {
-		if rbErr := tx.Rollback(); rbErr != nil {
-			err = errors.Join(err, fmt.Errorf("rollback: %w", rbErr))
-		}
-		return zero, false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return zero, false, err
-	}
-	return row, changed, nil
+// changedRow is the fallback's outcome carried out of the transaction One
+// opens: the row and whether the command changed it.
+type changedRow[T any] struct {
+	row     T
+	changed bool
 }
 
 // Guarded binds the handle, a command whose WHERE names the key and the

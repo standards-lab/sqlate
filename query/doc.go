@@ -1,8 +1,9 @@
 // Package query runs authored SQL files: Statements compiled from an fs.FS
 // against a Catalog give a program its statements by name, each file's
 // "--|" header declaring its tier, the engine feature a native file uses,
-// whether it needs a transaction, and, for a projection base, its key and
-// field contract. The catalog is the registered pattern sources (the
+// whether it needs a transaction, for a projection base its key and field
+// contract, and, for an INSERT INTO or UPDATE, the read that returns its
+// changed row. The catalog is the registered pattern sources (the
 // library's own Patterns(), an application's, an engine's overlay), built
 // once, where the program starts; a statement includes a pattern with
 // {{> ns.name}}. Parameters, written
@@ -12,7 +13,10 @@
 // runners are generic over a consumer-written scan function and
 // take a Session, so a handle runs against the pool or inside a
 // transaction alike; every error is mapped through the dialect at the
-// runner boundary. Verify prepares every statement against the live schema.
+// runner boundary. A returning command's handle, Statement.Returning, runs
+// the command and returns the row as it stands afterward: in one statement
+// when the dialect implements Returner, otherwise the command and then its
+// read as one unit. Verify prepares every statement against the live schema.
 // Statement text is build-time only: files under embed, never request
 // input.
 package query

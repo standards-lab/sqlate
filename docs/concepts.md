@@ -176,8 +176,23 @@ scan with the same function. The dialect chooses the form when the file compiles
 that returns rows, the dialect renders the single-statement form, the command with its clause
 appended; the file stays standard tier, because the clause is the dialect's text, not the file's.
 On any other engine, the fallback runs the command and then the read in one transaction, whose
-lock on the changed row keeps another writer out until the read has it, so both forms return the
-same row.
+lock on the changed row keeps another writer out until the read has it. The load checks that the
+read reads the command's own table.
+
+Both forms return the same row when the declaration is sound: the read selects exactly the row
+the command changed, from the command's own table. They differ where it is not, or where the
+session cannot hold a unit:
+
+- a command that changes more than one row outside a transaction: the single-statement form's
+  change has committed before it reports `ErrNotOneRow`, while the fallback rolls its own
+  transaction back;
+- a read that does not find the changed row: the single-statement form returns the row the engine
+  returned, the fallback `ErrNotOneRow`;
+- a session that is neither a `*sqlate.Tx` nor a `sqlate.Beginner`: only the single-statement form
+  runs.
+
+The read's parameters are the command's, so a command whose key the engine generates cannot be a
+returning command; the caller supplies the key.
 
 A guarded command can also be a returning command. The guard takes the row it needs to tell a
 refusal from a version mismatch from the returning command's handle, so on an engine that returns

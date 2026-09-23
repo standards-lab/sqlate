@@ -159,6 +159,13 @@ func TestReturning_RejectsBrokenDeclarations(t *testing.T) {
 		"read half qualified":   {"--| tier: standard\n--| returning: row\n" + update, "--| tier: standard\nSELECT t.id, name FROM t", "same qualifier"},
 		"read repeats a column": {"--| tier: standard\n--| returning: row\n" + update, "--| tier: standard\nSELECT a.id, a.id FROM a", `selects "id" twice`},
 		"read without from":     {"--| tier: standard\n--| returning: row\n" + update, "--| tier: standard\nSELECT 1", "is not SELECT"},
+		"verb after a tab":      {"--| tier: standard\n--| returning: row\nMERGE\tINTO t USING u ON true", read, `starts "MERGE"`},
+		"read upper case":       {"--| tier: standard\n--| returning: row\n" + update, "--| tier: standard\nSELECT ID, name FROM t", `selects "ID"; each item is a lowercase column`},
+		"read another table":    {"--| tier: standard\n--| returning: row\n" + update, "--| tier: standard\nSELECT id, name FROM users WHERE id = {{id}}", `returning read "row" reads "users"; the command changes "t"`},
+		"read another schema":   {"--| tier: standard\n--| returning: row\nUPDATE s.t SET name = {{name}} WHERE id = {{id}}", read, `reads "t"; the command changes "s.t"`},
+		"read a subquery":       {"--| tier: standard\n--| returning: row\n" + update, "--| tier: standard\nSELECT id, name FROM (SELECT id, name FROM t) q", "reads no table after FROM"},
+		"read other qualifier":  {"--| tier: standard\n--| returning: row\n" + update, "--| tier: standard\nSELECT y.id, y.name FROM t x JOIN t y ON x.id = y.id", `qualifies its columns "y"; it reads "t" as "x"`},
+		"insert reads another":  {"--| tier: standard\n--| returning: row\nINSERT INTO docs(id, name) VALUES ({{id}}, {{name}})", read, `reads "t"; the command changes "docs"`},
 	}
 	for name, c := range cases {
 		fsys := fstest.MapFS{
@@ -168,6 +175,34 @@ func TestReturning_RejectsBrokenDeclarations(t *testing.T) {
 		_, err := catalog().Compile(fsys, "sql", sqltest.ReturningDialect{})
 		if err == nil || !strings.Contains(err.Error(), ".sql") || !strings.Contains(err.Error(), c.want) {
 			t.Errorf("%s: err = %v, want a load error naming the file and %q", name, err, c.want)
+		}
+	}
+}
+
+func TestReturning_AcceptsAReadOfTheCommandsTable(t *testing.T) {
+	cases := map[string]struct{ command, read string }{
+		"bare table":              {"UPDATE t SET name = {{name}} WHERE id = {{id}}", "SELECT id, name FROM t WHERE id = {{id}}"},
+		"alias":                   {"UPDATE t SET name = {{name}} WHERE id = {{id}}", "SELECT x.id, x.name FROM t x WHERE x.id = {{id}}"},
+		"alias with as":           {"update t set name = {{name}} where id = {{id}}", "select x.id, x.name from t as x where x.id = {{id}}"},
+		"qualified by the table":  {"UPDATE t SET name = {{name}} WHERE id = {{id}}", "SELECT t.id, t.name FROM t\nWHERE t.id = {{id}}"},
+		"schema qualified":        {"UPDATE s.t SET name = {{name}} WHERE id = {{id}}", "SELECT t.id, t.name FROM s.t WHERE t.id = {{id}}"},
+		"schema with an alias":    {"UPDATE s.t SET name = {{name}} WHERE id = {{id}}", "SELECT x.id, x.name FROM s.t AS x WHERE x.id = {{id}}"},
+		"insert, no space":        {"INSERT INTO t(id, name) VALUES ({{id}}, {{name}})", "SELECT id, name FROM t WHERE id = {{id}}"},
+		"a keyword, not an alias": {"UPDATE t SET name = {{name}} WHERE id = {{id}}", "SELECT id, name FROM t JOIN u ON u.id = t.id WHERE t.id = {{id}}"},
+		"alone":                   {"UPDATE t SET name = {{name}} WHERE id = {{id}}", "SELECT id, name FROM t"},
+	}
+	for name, c := range cases {
+		fsys := fstest.MapFS{
+			"sql/s.sql":   {Data: []byte("--| tier: standard\n--| returning: row\n" + c.command)},
+			"sql/row.sql": {Data: []byte("--| tier: standard\n" + c.read)},
+		}
+		stmts, err := catalog().Compile(fsys, "sql", sqltest.ReturningDialect{})
+		if err != nil {
+			t.Errorf("%s: Compile = %v", name, err)
+			continue
+		}
+		if got := stmts.Statement("s").ReturningText(); !strings.HasSuffix(got, "RETURNING id, name") {
+			t.Errorf("%s: ReturningText() = %q", name, got)
 		}
 	}
 }
@@ -489,7 +524,11 @@ func TestReturningOne_BindsExpandedParametersOnBothForms(t *testing.T) {
 	}
 	ctx := context.Background()
 	for _, f := range forms {
-		r := catalog().MustCompile(fsys, "sql", f.dialect).Statement("tag").Returning(scanOrgVersion)
+		tag := catalog().MustCompile(fsys, "sql", f.dialect).Statement("tag")
+		if f.native && !strings.HasSuffix(tag.ReturningText(), "AND kind IN ($3)\nRETURNING id, name, version") {
+			t.Errorf("ReturningText() = %q, want the rendering at one element per list", tag.ReturningText())
+		}
+		r := tag.Returning(scanOrgVersion)
 		for _, kinds := range [][]string{{"a", "b"}, {"a", "b", "c"}, {"a", "b"}} {
 			script := []sqltest.Response{{Affected: 1}, orgVersionRows(1)}
 			if f.native {

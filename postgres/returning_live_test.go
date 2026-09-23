@@ -5,8 +5,9 @@
 // single-statement form with RETURNING, and under a wrapper that hides the
 // query.Returner capability, so each command runs the fallback, the command
 // and then its read in a transaction. In every outcome of a plain and a
-// guarded command, both forms return the row an immediate read returns;
-// they differ only in the statements the engine receives.
+// guarded command, both forms return the row an immediate read returns,
+// on the pool and inside a caller's transaction; they differ only in the
+// statements the engine receives.
 // `mise run integration`.
 package postgres_test
 
@@ -14,6 +15,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"slices"
 	"strings"
@@ -372,5 +374,110 @@ func TestLive_ReturningTwoForms(t *testing.T) {
 	t.Logf("native Verify after the rename: %v", err)
 	if err := forms[1].stmts.Verify(ctx, db); err == nil || strings.Contains(err.Error(), "(returning)") || !strings.Contains(err.Error(), "item_by_id") {
 		t.Errorf("fallback Verify after the rename = %v, want item_by_id named and no (returning) form", err)
+	}
+}
+
+// txFS is the proof's statements over their own table, so the scenarios
+// inside a caller's transaction share no rows with the two-forms proof.
+var txFS = fstest.MapFS{
+	"sql/tx_item_by_id.sql": {Data: []byte("--| tier: standard\nSELECT i.id, i.status, i.size, i.version, i.created_at, i.updated_at FROM tx_item i WHERE i.id = {{id}}")},
+	"sql/tx_create.sql":     {Data: []byte("--| tier: standard\n--| returning: tx_item_by_id\nINSERT INTO tx_item (id, status, size) VALUES ({{id}}, {{status}}, {{size}})")},
+	"sql/tx_claim.sql":      {Data: []byte("--| tier: standard\n--| returning: tx_item_by_id\nUPDATE tx_item\nSET status = 'claimed', {{> sql.guard_set}}\nWHERE {{> sql.guard_where}} AND status = 'open'")},
+	"sql/tx_retire.sql":     {Data: []byte("--| tier: standard\n--| returning: tx_item_by_id\nUPDATE tx_item\nSET status = 'retired', version = version + 1\nWHERE id = {{id}} AND status <> 'retired'")},
+}
+
+// Proof: both forms run inside a caller's transaction, on the one
+// connection it holds. In one db.Transact per form: an insert; a guarded
+// claim that succeeds, then meets another version; a retire, then the same
+// retire again, which changes nothing. On the single-statement form an
+// unchanged outcome is the command returning no row and then the read on
+// the same connection, which the driver refuses while the command's row set
+// is still open. The fallback begins no transaction of its own: the engine
+// receives one BEGIN, the caller's, and one COMMIT.
+func TestLive_ReturningInsideACallersTransaction(t *testing.T) {
+	ctx := context.Background()
+	db, tr := liveTraced(t)
+	_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS tx_item")
+	if _, err := db.ExecContext(ctx, `CREATE TABLE tx_item (
+		id text PRIMARY KEY,
+		status text NOT NULL,
+		size integer NOT NULL,
+		version bigint NOT NULL DEFAULT 1,
+		created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS tx_item") })
+
+	catalog := query.MustCatalog(postgres.Patterns())
+	version := func(it item) int64 { return it.Version }
+	for _, f := range []struct {
+		name string
+		d    sqlate.Dialect
+		// sent is what the engine receives for the unit, by leading keyword.
+		sent []string
+	}{
+		{"native", postgres.Dialect{}, []string{
+			"BEGIN",
+			"INSERT",           // create: changed
+			"UPDATE",           // claim: changed
+			"UPDATE", "SELECT", // claim again: unchanged, then the read
+			"UPDATE",           // retire: changed
+			"UPDATE", "SELECT", // retire again: unchanged, then the read
+			"COMMIT",
+		}},
+		{"fallback", struct{ sqlate.Dialect }{postgres.Dialect{}}, []string{
+			"BEGIN",
+			"INSERT", "SELECT",
+			"UPDATE", "SELECT",
+			"UPDATE", "SELECT",
+			"UPDATE", "SELECT",
+			"UPDATE", "SELECT",
+			"COMMIT",
+		}},
+	} {
+		stmts := catalog.MustCompile(txFS, "sql", f.d)
+		if (stmts.Statement("tx_retire").ReturningText() != "") != (f.name == "native") {
+			t.Fatalf("%s: ReturningText %q", f.name, stmts.Statement("tx_retire").ReturningText())
+		}
+		create := stmts.Statement("tx_create").Returning(scanItem)
+		claim := stmts.Statement("tx_claim").Returning(scanItem).Guarded("version", version)
+		retire := stmts.Statement("tx_retire").Returning(scanItem)
+		id := f.name + "-a"
+		args := query.Args{"id": id}
+
+		tr.take()
+		final, err := db.Transact(ctx, func(tx *sqlate.Tx) (item, error) {
+			row, changed, err := create.One(ctx, tx, query.Args{"id": id, "status": "open", "size": 3})
+			if err != nil || !changed || row.Version != 1 {
+				return row, fmt.Errorf("create: %+v, changed %v: %w", row, changed, err)
+			}
+			if row, err = claim.Run(ctx, tx, 1, args); err != nil || row.Status != "claimed" || row.Version != 2 {
+				return row, fmt.Errorf("claim: %+v: %w", row, err)
+			}
+			if _, err = claim.Run(ctx, tx, 1, args); !errors.Is(err, query.ErrVersionMismatch) {
+				return row, fmt.Errorf("claim again: %w, want ErrVersionMismatch", err)
+			}
+			if row, changed, err = retire.One(ctx, tx, args); err != nil || !changed || row.Version != 3 {
+				return row, fmt.Errorf("retire: %+v, changed %v: %w", row, changed, err)
+			}
+			if row, changed, err = retire.One(ctx, tx, args); err != nil || changed || row.Status != "retired" || row.Version != 3 {
+				return row, fmt.Errorf("retire again: %+v, changed %v: %w", row, changed, err)
+			}
+			return row, nil
+		})
+		sent := tr.take()
+		if err != nil {
+			t.Errorf("%s: Transact: %v", f.name, err)
+			continue
+		}
+		if !slices.Equal(sent, f.sent) {
+			t.Errorf("%s: engine %v, want %v", f.name, sent, f.sent)
+		}
+		t.Logf("%s: final %q version %d; engine %v", f.name, final.Status, final.Version, sent)
+		read, err := stmts.Statement("tx_item_by_id").Scan(scanItem).One(ctx, db, args)
+		if err != nil || read != final {
+			t.Errorf("%s: after commit %+v (%v), want the unit's last row %+v", f.name, read, err, final)
+		}
 	}
 }

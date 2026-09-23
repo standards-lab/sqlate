@@ -31,6 +31,9 @@ is the runner: it begins, calls `fn(tx)`, commits on success, and returns `fn`'s
 panic in `fn` rolls back and re-panics, so no transaction leaks to the pool. `Beginner` is the
 interface of a session that can open a transaction, satisfied by `*DB` and any type embedding
 it. A protocol handed a session rather than a transaction asserts `Beginner` to open its own.
+`sqlate.Transact(ctx, b, fn, opts...)` is the same runner over any `Beginner`, so a protocol, or
+an application's own pool type embedding `*DB`, runs its unit exactly as `DB.Transact` does;
+`DB.Transact` is `Transact` over the `*DB`.
 
 **Pinned connections.** `DB.Conn(ctx)` pins one connection for a protocol that needs session
 scope: a session-level lock, or DDL an engine refuses inside a transaction. The caller closes
@@ -133,8 +136,13 @@ a header the grammar rejects, or with an include the catalog cannot resolve is a
 naming the file. So is an invalid returning declaration: a command that is not a standard-tier
 `INSERT INTO` or `UPDATE`, or that declares a key or field; or a read that is missing, declares
 `returning`, a key, a field, or `transaction: required`, takes a parameter the command does not,
-or is not `SELECT <column>, … FROM …` with every column under one qualifier or none and named
-once; and a dialect whose single-statement form introduces a `{{`.
+is not `SELECT <column>, … FROM …` with every column lowercase, under one qualifier or none, and
+named once, or reads a table other than the one the command changes; and a dialect whose
+single-statement form introduces a `{{`. The read's table is the first after its `FROM`, with its
+optional alias (`FROM t`, `FROM t x`, `FROM t AS x`, `FROM s.t`); it must be the name after the
+command's `INSERT INTO` or `UPDATE`, a schema-qualified name compared as written, and a qualifier
+on the read's columns must be that table's alias or name
+(`returning read "doc_row" reads "users"; the command changes "docs"`).
 `MustCompile` panics instead. The result is a `*Statements`, the directory's inventory:
 `Statement(name)` returns the statement named by its file's base name and panics on a missing
 one, `Statements()` lists them in name order, and `Verify` prepares each against a session.
@@ -191,8 +199,25 @@ implements `query.Returner` and accepts the command, the command runs in its sin
 form, which returns the changed row, and the read runs only when nothing changed. Otherwise the
 command runs the fallback: the command and then its read, as one unit. The unit is the session
 itself when it is a `*Tx`, or a transaction `One` opens and commits when the session is a
-`sqlate.Beginner`; on any other session `One` returns `ErrTransactionRequired`. Both forms return
-the same row; only the statement count differs.
+`sqlate.Beginner`; on any other session `One` returns `ErrTransactionRequired`.
+
+For a sound declaration, a read that selects exactly the row the command changed from the
+command's own table, both forms return the same row, and only the statement count differs. The
+load checks the table; the read's `WHERE` is the author's. The forms differ in three cases:
+
+- The command changes more than one row on a session that is not a transaction. The
+  single-statement form has already committed the change when it returns `ErrNotOneRow`; the
+  fallback's own transaction rolls it back. Inside a caller's `*Tx`, the caller decides.
+- The read does not find the row the command changed, for a filter the command does not share.
+  The single-statement form returns the row `RETURNING` gave; the fallback returns
+  `ErrNotOneRow`.
+- The session is neither a `*sqlate.Tx` nor a `sqlate.Beginner`. Only the single-statement form
+  runs; the fallback returns `ErrTransactionRequired`.
+
+A command whose key the engine generates, an `INSERT` that leaves an identity column or a
+sequence default to the engine, cannot be a returning command: the read's parameters must be the
+command's, so the read has no way to name the row the engine keyed. The caller supplies the key,
+minted in the program, and the read finds the row by it.
 
 ### Struct-tag mapping
 

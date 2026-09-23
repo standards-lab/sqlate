@@ -16,7 +16,7 @@ transaction on an engine that does not.
 
 - The `returning` header key: a standard-tier `INSERT INTO` or `UPDATE` names the statement in
   its directory that reads the changed row back. `Compile` resolves the pair and refuses an
-  invalid one.
+  invalid one, including a read of a table other than the one the command changes.
 - `query.Returner` and `query.Verb`: the dialect capability that renders the single-statement
   form at compile time. A command whose dialect lacks it, or declines, runs the fallback.
 - `Statement.Returning(scan)`, returning a `query.Returning[T]` whose `One` returns the row as it
@@ -26,6 +26,8 @@ transaction on an engine that does not.
   the row it changed.
 - `sqlate.Beginner`, the session capability to open a transaction, satisfied by `*DB` and any
   type embedding it.
+- `sqlate.Transact(ctx, b, fn, opts...)`, the unit-of-work runner over any `Beginner`, with
+  `DB.Transact`'s semantics; `DB.Transact` now delegates to it.
 - `sqltest.ReturningDialect`, a stub dialect with `query.Returner`, so a unit suite covers the
   single-statement form.
 - `Statements.Verify` also prepares each returning command's single-statement form.
