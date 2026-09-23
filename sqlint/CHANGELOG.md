@@ -5,6 +5,15 @@ documented here. The format follows [Keep a Changelog](https://keepachangelog.co
 and the module adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). This
 changelog covers this sub-module only; the base module keeps its own.
 
+## [Unreleased]
+
+### Fixed
+
+- A field declaration with a misspelled `not null` suffix is a compile finding against its
+  directory, through the base's own check; it was taken as part of the field's type.
+
+Requires `github.com/standards-lab/sqlate v0.4.0`.
+
 ## [v0.2.0] - 2026-09-23
 
 ### Added

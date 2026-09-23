@@ -392,3 +392,11 @@ func TestLint_ReturningCommands(t *testing.T) {
 		`retire.sql:3: "RETURNING" (returning) in a standard-tier file`,
 	)
 }
+
+// A field declaration whose not null suffix is misspelled is a compile
+// finding against its directory: the type would otherwise absorb the typo.
+func TestLint_MisspelledNotNull(t *testing.T) {
+	fsys := tree(config)
+	fsys["domain/f/statements/sized.sql"] = &fstest.MapFile{Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid not null\n--| field: size bigint nott null\nSELECT id, size FROM t")}
+	want(t, lint(fsys, nil), `domain/f/statements: query: sized.sql: field declaration "size bigint nott null": the type contains "not" or "null"`)
+}
