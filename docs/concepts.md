@@ -238,3 +238,31 @@ CREATE INDEX CONCURRENTLY team_code_ix ON team (code)
 `{{` means a parameter or an include wherever it appears in a body, inside string literals and
 comments included, so the body needs no lexer. A `{{` that forms neither is a load error, and
 the linter reports it at the line.
+
+## Alternatives the design rejected
+
+**ORMs** such as gorm, bun, and ent are frameworks: they move the queries out of SQL and into the
+framework's vocabulary.
+
+**Runtime query builders** such as goqu, squirrel, bob, and jet are framework-sized runtime
+dependencies, each with its own dialect model and none with a split between standard and native SQL.
+bob and jet generate against a live schema and still keep the builder at runtime.
+
+**SQL-to-Go generators** such as sqlc are the strongest alternative: no runtime footprint, native
+`.sql` files, and schema verification at generate time. sqlc supports only the engines its tooling
+parses, it adds a build-time dependency with a C parser behind it, and it needs a second authoring
+convention wherever a query must be composed at run time. sqlate performs the one sqlc check a
+runtime library seems unable to replace, schema verification, at startup: `Verify` prepares every
+statement against the schema.
+
+**A Go vocabulary of statement types** that renders SQL keeps queries out of SQL, the problem sqlate
+exists to solve. sqlate took its typed request errors, its directives, and its generic scan and
+query functions from such a vocabulary, and left the renderer behind.
+
+**Runtime text templating** over `.sql` files, with `text/template` or similar, makes interpolating
+text into SQL an ordinary operation with no SQL-aware escaping, so injection safety rests on
+discipline instead of structure. It also defeats editor support, lint support, and the verification
+that prepares the final text. sqlate resolves includes at compile time against published patterns,
+composes request-time reads from library patterns only, and binds every value as a parameter.
+
+**PRQL** is analytical only, has no Go binding, and adds a second language above SQL.

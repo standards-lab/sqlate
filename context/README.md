@@ -27,3 +27,7 @@ to be built.
 A second engine is a second sub-module, named for the engine. It carries its own dialect and
 `sqlint.toml`, plus an overlay for each library pattern it does not accept as written in
 standard SQL.
+
+## Notes
+
+- `dollar-quoting.md` — the `sqlint` linter's planned handling of PostgreSQL dollar-quoted strings.
