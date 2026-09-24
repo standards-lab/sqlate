@@ -108,6 +108,40 @@ func TestLive_NonTransactionalDDL(t *testing.T) {
 	}
 }
 
+// Proof: forcing a set from an empty history to its head writes the whole
+// prefix, so the history reads back as current and Verify, Status, and a
+// later Down all accept it.
+func TestLive_ForceFromEmptyWritesThePrefix(t *testing.T) {
+	ctx := context.Background()
+	db := live(t)
+	scratch(t, db, "live_force_history", "live_force_a", "live_force_b")
+	set := []migrate.Migration{
+		{Version: 1, Name: "a", Up: "CREATE TABLE live_force_a (x int)", Down: "DROP TABLE live_force_a", Transactional: true},
+		{Version: 2, Name: "b", Up: "CREATE TABLE live_force_b (x int)", Down: "DROP TABLE live_force_b", Transactional: true},
+	}
+	m := migrator(t, db, "live_force_history", set, migrate.Options{})
+	if err := m.Up(ctx); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	if err := m.Force(ctx, 0); err != nil {
+		t.Fatalf("Force(0): %v", err)
+	}
+	if err := m.Force(ctx, 2); err != nil {
+		t.Fatalf("Force(2): %v", err)
+	}
+	if err := m.Verify(ctx); err != nil {
+		t.Errorf("Verify after Force(0), Force(2) = %v, want current", err)
+	}
+	st, err := m.Status(ctx)
+	if err != nil || st[0].Version != 2 || len(st[0].Pending) != 0 {
+		t.Errorf("Status = %+v, %v, want version 2 with nothing pending", st, err)
+	}
+	if err := m.Down(ctx, 2); err != nil {
+		t.Errorf("Down(2) after the force = %v", err)
+	}
+}
+
 // Proof: dirty state and force, with the orphan PostgreSQL leaves behind. A
 // unique index built CONCURRENTLY over duplicate rows fails after the
 // catalog entry exists, so the index remains INVALID: the history row is

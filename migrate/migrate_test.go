@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"database/sql/driver"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 
@@ -316,6 +317,34 @@ func TestForce_ResetsTheHistoryWithoutTouchingTheSchema(t *testing.T) {
 		t.Errorf("insert = %+v", calls[4])
 	}
 	assertOps(t, rec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery)
+}
+
+// Forcing above an empty or shorter history writes the set's whole prefix
+// through the version, not the version's row alone, so the history the
+// prefix check reads back is one the set carries.
+func TestForce_WritesThePrefixThroughTheVersion(t *testing.T) {
+	m, rec := newMigrator(t, migrate.Options{},
+		locked, created,
+		sqltest.Response{},            // delete above 2
+		sqltest.Response{},            // set 1 clean → 0 rows
+		sqltest.Response{},            // insert 1
+		sqltest.Response{Affected: 1}, // set 2 clean → present
+		unlocked,
+	)
+	if err := m.Force(context.Background(), 2); err != nil {
+		t.Fatalf("Force: %v", err)
+	}
+	calls := rec.Calls()
+	if calls[3].SQL != "UPDATE schema_version SET dirty = $1 WHERE version = $2" || fmt.Sprint(calls[3].Args[1]) != "1" {
+		t.Errorf("clean 1 = %+v", calls[3])
+	}
+	if calls[4].SQL != "INSERT INTO schema_version (version, name, dirty) VALUES ($1, $2, $3)" || calls[4].Args[1] != "a" {
+		t.Errorf("insert 1 = %+v", calls[4])
+	}
+	if calls[5].SQL != "UPDATE schema_version SET dirty = $1 WHERE version = $2" || fmt.Sprint(calls[5].Args[1]) != "2" {
+		t.Errorf("clean 2 = %+v", calls[5])
+	}
+	assertOps(t, rec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery)
 }
 
 func TestForce_ZeroEmptiesAndUnknownVersionIsRefused(t *testing.T) {
