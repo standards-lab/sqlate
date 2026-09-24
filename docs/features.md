@@ -386,7 +386,7 @@ set acts on that set. `Up`, `Verify`, `Reset`, and `Status` cover every set.
 | `Up(ctx)` | every | Applies every pending migration, sets in declared order. |
 | `Down(ctx, n)` | top | Reverts the n most recently applied; a migration without down text is `ErrNoDown`. |
 | `Steps(ctx, n)` | top | Applies the next n when positive, reverts the last -n when negative; fewer remaining is not an error. |
-| `Force(ctx, version)` | top | Sets the history to the version as an operator override, clearing a dirty row; nothing runs against the schema. |
+| `Force(ctx, version)` | top | Sets the history to the version as an operator override: every migration through it recorded clean, those above it removed, a dirty row cleared; nothing runs against the schema. |
 | `Reset(ctx)` | every | Reverts every set in reverse declared order and drops each set's history table once that set is reverted, so a later `Up` replays every set from zero. |
 | `Verify(ctx)` | every | Checks, without the lock, that each history is a clean, complete prefix of its set, and returns the first fault. |
 | `Status(ctx)` | every | Reads, without the lock, a `SetStatus` per set: `Name`, `Table`, `Version` (the highest applied), `Latest`, `Pending`, and `Dirty`. |
