@@ -7,6 +7,17 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.4.1] - 2026-09-24
+
+### Fixed
+
+- `migrate`: `Layer.Force` and `Migrator.Force` to a version above an empty or shorter history
+  wrote that version's row alone, a history the set's prefix check refuses, so every later
+  `Status`, `Verify`, `Up`, or `Down` on the set failed with `ErrUnknownVersion`. Force now marks
+  every migration through the version clean, inserting the rows that are absent, so the history
+  is the set's prefix. It surfaced once a set held more than one migration and an operator forced
+  it from 0 back to its head. Found by `go-web-service`.
+
 ## [v0.4.0] - 2026-09-23
 
 A collection read's total can no longer disagree with its page: the count is a window in the
@@ -152,7 +163,10 @@ experiment's library packages.
 - `sqltest`, the scripted `database/sql` driver every consumer's unit tier runs over: `Open`,
   `Recorder`, `Response`, and the stub `Dialect`.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.4.1...HEAD
+[v0.4.1]: https://github.com/standards-lab/sqlate/compare/v0.4.0...v0.4.1
+[v0.4.0]: https://github.com/standards-lab/sqlate/compare/v0.3.0...v0.4.0
+[v0.3.0]: https://github.com/standards-lab/sqlate/compare/v0.2.0...v0.3.0
 [v0.2.0]: https://github.com/standards-lab/sqlate/compare/v0.1.1...v0.2.0
 [v0.1.1]: https://github.com/standards-lab/sqlate/compare/v0.1.0...v0.1.1
 [v0.1.0]: https://github.com/standards-lab/sqlate/releases/tag/v0.1.0

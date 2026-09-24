@@ -121,18 +121,20 @@ func (l Layer) Down(ctx context.Context, n int) error {
 }
 
 // Force sets the set's history to version as an operator override: rows
-// above it are deleted, its row is inserted if absent and marked clean, and
-// version 0 empties the history. Nothing runs against the schema itself,
-// and no set's history is checked first, since Force is the repair for a
-// dirty one.
+// above it are deleted, and every migration up to and including it has its
+// row marked clean, inserted where absent, so the history is the set's
+// prefix through version however far below it the history stood. Version 0
+// empties the history. Nothing runs against the schema itself, and no
+// set's history is checked first, since Force is the repair for a dirty
+// one.
 func (l Layer) Force(ctx context.Context, version int) error {
 	lay := l.m.layers[l.i]
-	var name string
+	var through []Migration
 	if version != 0 {
 		found := false
-		for _, mig := range lay.migrations {
+		for i, mig := range lay.migrations {
 			if mig.Version == version {
-				name, found = mig.Name, true
+				through, found = lay.migrations[:i+1], true
 				break
 			}
 		}
@@ -147,19 +149,20 @@ func (l Layer) Force(ctx context.Context, version int) error {
 		if _, err := conn.ExecContext(ctx, lay.sql.delAbove, version); err != nil {
 			return &SetError{Set: lay.name, Err: l.m.db.MapError(err)}
 		}
-		if version == 0 {
-			return nil
-		}
-		res, err := conn.ExecContext(ctx, lay.sql.setDirty, false, version)
-		if err != nil {
-			return &SetError{Set: lay.name, Err: l.m.db.MapError(err)}
-		}
-		if n, _ := res.RowsAffected(); n == 0 {
-			if _, err := conn.ExecContext(ctx, lay.sql.insert, version, name, false); err != nil {
+		for _, mig := range through {
+			res, err := conn.ExecContext(ctx, lay.sql.setDirty, false, mig.Version)
+			if err != nil {
 				return &SetError{Set: lay.name, Err: l.m.db.MapError(err)}
 			}
+			if n, _ := res.RowsAffected(); n == 0 {
+				if _, err := conn.ExecContext(ctx, lay.sql.insert, mig.Version, mig.Name, false); err != nil {
+					return &SetError{Set: lay.name, Err: l.m.db.MapError(err)}
+				}
+			}
 		}
-		l.m.log("migration forced", "set", lay.name, "version", version)
+		if version != 0 {
+			l.m.log("migration forced", "set", lay.name, "version", version)
+		}
 		return nil
 	})
 }
