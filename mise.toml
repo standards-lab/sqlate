@@ -37,6 +37,26 @@ cd "$MISE_PROJECT_ROOT"
 env -u GOWORK go run github.com/standards-lab/sqlate/sqlint/cmd/sqlint .
 '''
 
+# Currency: report what trails its latest, and the convenience that upgrades it.
+[tasks.currency]
+description = "Report every requirement, Go version, tool, action pin, and image tag behind its latest; writes nothing"
+run = "scripts/currency.sh"
+
+[tasks.upgrade]
+description = "Upgrade every module's direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
+run = '''
+set -eu
+export GOWORK=off
+for mod in $GO_MODULES; do
+  cd "$MISE_PROJECT_ROOT/$mod"
+  direct=$(go mod edit -json | jq -r '.Require[]? | select(.Indirect | not) | .Path')
+  [ -z "$direct" ] || go get $(printf '%s@latest ' $direct)
+  go mod tidy
+done
+cd "$MISE_PROJECT_ROOT"
+mise upgrade --bump --local
+'''
+
 # Maintenance.
 [tasks.tidy]
 description = "Run go mod tidy across all modules"
