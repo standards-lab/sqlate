@@ -123,7 +123,7 @@ The repository is a Go workspace of three modules. Tasks run through
 ```sh
 mise run check         # build, vet, format, fix, tidy, unit tier, lint, sqlint; writes nothing
 mise run currency      # report requirements, Go, tools, actions, and images behind their latest
-mise run upgrade       # upgrade requirements and tools to their latest
+mise run upgrade       # upgrade every module's go directive and requirements, and the tools, to their latest
 mise run acceptance    # the integration tier against a compose PostgreSQL, torn down after
 ```
 
