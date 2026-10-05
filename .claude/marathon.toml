@@ -1,8 +1,19 @@
-# Project kind: this repository holds production Go source.
+# Project kind: this repository holds production Go source, checked by `mise run check`.
 [project]
 kind = "code"
+check = "mise run check"
 
-# Remote platform and the command that publishes a finished branch.
+# Remote platform, the commands that publish and merge a finished branch, and the CI wait.
 [remote]
 platform = "github"
 publish = "gh pr create"
+merge = "gh pr checks --watch && gh pr merge --merge --delete-branch"
+ci = '''
+sha=$(git rev-parse HEAD)
+for _ in $(seq 30); do
+  runs=$(gh run list --commit "$sha" --event push --json databaseId --jq '.[].databaseId')
+  [ -n "$runs" ] && break || sleep 10
+done
+[ -n "$runs" ] || exit 1
+for run in $runs; do gh run watch --exit-status "$run" || exit 1; done
+'''
