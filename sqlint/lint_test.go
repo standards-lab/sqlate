@@ -206,13 +206,65 @@ func TestLint_ReportsResolutionFailures(t *testing.T) {
 func TestLint_NilConfigIsDefaultsAndFindingString(t *testing.T) {
 	fsys := tree(config)
 	delete(fsys, "sqlint.toml")
-	findings := sqlint.Lint(fsys, nil, nil)
-	if len(findings) == 0 {
-		t.Fatal("no findings under the defaults")
+	defaults, err := sqlint.Load(fsys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, want := sqlint.Lint(fsys, nil, nil), sqlint.Lint(fsys, defaults, nil)
+	if len(want) == 0 || !slices.Equal(got, want) {
+		t.Errorf("nil configuration: %v\nwant the defaults': %v", got, want)
 	}
 	f := sqlint.Finding{Path: "a/b.sql", Line: 3, Message: "m"}
 	if f.String() != "a/b.sql:3: m" || (sqlint.Finding{Path: "a/b.sql", Message: "m"}).String() != "a/b.sql: m" {
 		t.Errorf("String = %q", f.String())
+	}
+}
+
+// A role's dirs entry matches a directory segment by segment, each segment
+// a path.Match pattern, with "**" standing for any run of segments,
+// including none.
+func TestLint_RoleGlobsMatchBySegment(t *testing.T) {
+	cases := []struct {
+		glob, dir string
+		want      bool
+	}{
+		{"**/statements", "domain/a/statements", true},
+		{"**/statements", "statements", true},
+		{"**/statements", "domain/a/statements/x", false},
+		{"domain/*/statements", "domain/a/statements", true},
+		{"domain/*/statements", "domain/a/b/statements", false},
+		{"query/patterns", "query/patterns", true},
+		{"admin/**", "admin/database/migrations", true},
+		{"admin/**", "domain", false},
+	}
+	for _, c := range cases {
+		fsys := fstest.MapFS{
+			"sqlint.toml":               {Data: []byte("[statements]\ndirs = [\"" + c.glob + "\"]\n")},
+			c.dir + "/insert_thing.sql": {Data: []byte("--| tier: standard\nINSERT INTO t VALUES (1)")},
+		}
+		finding := c.dir + "/insert_thing.sql: named for its SQL verb; name a statement for its operation"
+		if got := slices.Contains(lint(fsys, nil), finding); got != c.want {
+			t.Errorf("dirs %q over %s: linted as statements = %v, want %v", c.glob, c.dir, got, c.want)
+		}
+	}
+}
+
+// A source whose first segment holds a dot is a module path, resolved
+// through the resolver; anything else is a directory of the tree.
+func TestLint_ModulePathsAreTheDottedOnes(t *testing.T) {
+	for value, module := range map[string]bool{
+		"github.com/x/y": true,
+		"example.org":    true,
+		"a.b/c":          true,
+		"query":          false,
+		"admin/database": false,
+	} {
+		findings := lint(tree(source(`app = "`+value+`"`)), nil)
+		resolved := slices.Contains(findings, "sqlint.toml: sources.app: no module resolution for "+value)
+		opened := slices.Contains(findings, "sqlint.toml: sources.app: open "+value+": file does not exist")
+		if resolved != module || opened == module {
+			t.Errorf("%q: resolved as a module %v, opened as a directory %v; want module %v in:\n%s", value, resolved, opened, module, strings.Join(findings, "\n"))
+		}
 	}
 }
 

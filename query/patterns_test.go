@@ -128,8 +128,8 @@ func TestNewCatalog_RejectsWhatItCannotCompose(t *testing.T) {
 			t.Errorf("%s: err = %v", want, err)
 		}
 	}
-	if len(query.MustCatalog(query.Patterns(), query.Publish("app", app, "p")).Namespaces()) != 2 {
-		t.Error("two namespaces did not register")
+	if got := query.MustCatalog(query.Patterns(), query.Publish("app", app, "p")).Namespaces(); !slices.Equal(got, []string{"app", "sql"}) {
+		t.Errorf("Namespaces() = %v, want both in name order", got)
 	}
 }
 
@@ -143,15 +143,16 @@ func TestCompile_IncludesAcrossNamespacesAndAliases(t *testing.T) {
 		"sql/create.sql": {Data: []byte("--| tier: native\n--| native: postgres — RETURNING\nINSERT INTO t (a) VALUES ({{a}}) {{> lib.identity}}")},
 		"sql/edit.sql":   {Data: []byte("--| tier: standard\nUPDATE t SET a = {{a}}, {{> sql.guard_set}} WHERE {{> sql.guard_where}}")},
 	}
-	stmts := query.MustCatalog(query.Patterns(), app.As("lib")).MustCompile(files, "sql", sqltest.Dialect{})
+	c := query.MustCatalog(query.Patterns(), app.As("lib"))
+	stmts := c.MustCompile(files, "sql", sqltest.Dialect{})
 	if got := stmts.Statement("create").Text(); got != "INSERT INTO t (a) VALUES ($1) RETURNING id, version" {
 		t.Errorf("create = %q", got)
 	}
 	if got := stmts.Statement("edit").Params(); !slices.Equal(got, []string{"a", "id", "version"}) {
 		t.Errorf("edit params = %v", got)
 	}
-	if stmts.Statement("edit").Catalog() == nil {
-		t.Error("Catalog() returned nil")
+	if stmts.Statement("edit").Catalog() != c {
+		t.Error("Catalog() is not the catalog the statement compiled against")
 	}
 }
 
@@ -165,4 +166,70 @@ func TestCompile_RefusesANativePatternInAStandardStatement(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `native pattern "app.identity" in a standard-tier statement`) {
 		t.Errorf("err = %v", err)
 	}
+}
+
+// A pattern file that NewCatalog cannot read is a catalog error naming the
+// file and its namespace: no tier, a tier it does not know, a native
+// declaration on the wrong tier, or an include inside a pattern.
+func TestNewCatalog_RejectsMalformedPatterns(t *testing.T) {
+	cases := map[string]string{
+		"no tier":                 "SELECT {{a}}",
+		"tier \"loose\"":          "--| tier: loose\nSELECT 1",
+		"native pattern declares": "--| tier: native\nSELECT 1",
+		"no native declaration":   "--| tier: standard\n--| native: postgres\nSELECT 1",
+		"includes no pattern":     "--| tier: standard\n{{> sql.where}}",
+	}
+	for want, text := range cases {
+		_, err := query.NewCatalog(query.Publish("t", fstest.MapFS{"f/x.sql": {Data: []byte(text)}}, "f"))
+		if err == nil || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "x.sql (t)") {
+			t.Errorf("%s: err = %v", want, err)
+		}
+	}
+}
+
+// The inventory lists every registered pattern ordered by namespace, then
+// name, each with its tier, native note, slots in body order, and body.
+func TestCatalog_PatternsReportsTheInventoryInOrder(t *testing.T) {
+	c := query.MustCatalog(
+		query.Publish("zeta", fstest.MapFS{"p/b.sql": {Data: []byte("--| tier: standard\nWHERE {{second}} = {{first}}")}}, "p"),
+		query.Publish("alpha", fstest.MapFS{
+			"p/z.sql": {Data: []byte("--| tier: native\n--| native: postgres — RETURNING\nRETURNING id")},
+			"p/a.sql": {Data: []byte("--| tier: standard\nLIMIT {{n}}\n")},
+		}, "p"),
+	)
+	want := []query.Pattern{
+		{Namespace: "alpha", Name: "a", Tier: query.TierStandard, Slots: []string{"n"}, Text: "LIMIT {{n}}"},
+		{Namespace: "alpha", Name: "z", Tier: query.TierNative, Native: "postgres — RETURNING", Slots: []string{}, Text: "RETURNING id"},
+		{Namespace: "zeta", Name: "b", Tier: query.TierStandard, Slots: []string{"second", "first"}, Text: "WHERE {{second}} = {{first}}"},
+	}
+	got := c.Patterns()
+	if len(got) != len(want) {
+		t.Fatalf("inventory = %+v", got)
+	}
+	for i := range want {
+		g, w := got[i], want[i]
+		if g.Namespace != w.Namespace || g.Name != w.Name || g.Tier != w.Tier || g.Native != w.Native || g.Text != w.Text ||
+			!slices.Equal(g.Slots, w.Slots) || len(g.Alternate) != 0 {
+			t.Errorf("pattern %d = %+v, want %+v", i, g, w)
+		}
+	}
+}
+
+// A projection composes its reads from the library's patterns, so a catalog
+// without them cannot serve one: the read is a defect in the program's
+// wiring and panics, naming what is missing.
+func TestProjection_PanicsWithoutTheLibrarysPatterns(t *testing.T) {
+	app := query.Publish("app", fstest.MapFS{"p/x.sql": {Data: []byte("--| tier: standard\nSELECT 1")}}, "p")
+	db, rec := session(t)
+	defer func() {
+		r, _ := recover().(string)
+		if !strings.Contains(r, "needs the library's patterns") {
+			t.Errorf("recover() = %q, want a panic naming the missing library patterns", r)
+		}
+		if len(rec.Calls()) != 0 {
+			t.Errorf("the read reached the driver: %v", rec.Ops())
+		}
+	}()
+	view := query.MustCatalog(app).MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement("person_view").Project(scanPerson)
+	_, _ = view.List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 5})
 }

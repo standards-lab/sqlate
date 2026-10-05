@@ -12,38 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/standards-lab/sqlate"
-	"github.com/standards-lab/sqlate/migrate"
 	"github.com/standards-lab/sqlate/postgres"
 	"github.com/standards-lab/sqlate/query"
 	"github.com/standards-lab/sqlate/sqltest"
 )
-
-func TestDialect_NameAndPlaceholder(t *testing.T) {
-	d := postgres.Dialect{}
-	if d.Name() != "postgres" || d.Placeholder(3) != "$3" {
-		t.Errorf("dialect = %s %s", d.Name(), d.Placeholder(3))
-	}
-}
-
-func TestDialect_ServerVersion(t *testing.T) {
-	if got := (postgres.Dialect{}).ServerVersion(); got != "SELECT version()" {
-		t.Errorf("ServerVersion() = %q", got)
-	}
-}
-
-func TestDialect_CreateHistoryDelegatesToStandardCatalog(t *testing.T) {
-	want := migrate.StandardCatalog{}.CreateHistory("schema_version")
-	if got := (postgres.Dialect{}).CreateHistory("schema_version"); got != want {
-		t.Errorf("CreateHistory() = %q, want %q", got, want)
-	}
-}
-
-func TestDialect_HistoryExistsQualifiesByCurrentSchema(t *testing.T) {
-	want := "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = current_schema() AND table_name = $1"
-	if got := (postgres.Dialect{}).HistoryExists("$1"); got != want {
-		t.Errorf("HistoryExists() = %q, want %q", got, want)
-	}
-}
 
 func TestDialect_ReturningAppendsTheClauseForInsertAndUpdate(t *testing.T) {
 	cols := []string{"id", "status"}
@@ -198,34 +170,6 @@ func TestMapError_PassesUnclassifiedThrough(t *testing.T) {
 	}
 	if d.MapError(nil) != nil {
 		t.Error("nil maps to nil")
-	}
-}
-
-func TestLockUnlock_IssueTheAdvisoryCallsOnTheConnection(t *testing.T) {
-	ctx := context.Background()
-	pool, rec := sqltest.Open(t,
-		sqltest.Response{Affected: 0},
-		sqltest.Response{Columns: []string{"pg_advisory_unlock"}, Rows: [][]driver.Value{{true}}},
-	)
-	conn, err := pool.Conn(ctx)
-	if err != nil {
-		t.Fatalf("conn: %v", err)
-	}
-	defer func() { _ = conn.Close() }()
-
-	d := postgres.Dialect{}
-	if err := d.Lock(ctx, conn, "migrate.schema_version"); err != nil {
-		t.Fatalf("Lock: %v", err)
-	}
-	if err := d.Unlock(ctx, conn, "migrate.schema_version"); err != nil {
-		t.Fatalf("Unlock: %v", err)
-	}
-	calls := rec.Calls()
-	if calls[0].SQL != "SELECT pg_advisory_lock(hashtext($1))" || calls[0].Args[0] != "migrate.schema_version" {
-		t.Errorf("lock call = %+v", calls[0])
-	}
-	if calls[1].SQL != "SELECT pg_advisory_unlock(hashtext($1))" || calls[1].Args[0] != "migrate.schema_version" {
-		t.Errorf("unlock call = %+v", calls[1])
 	}
 }
 

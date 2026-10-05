@@ -317,20 +317,16 @@ func TestProject_RequiresAContractAndNoExpandedParameter(t *testing.T) {
 }
 
 func TestProject_RefusesTheReservedTotalName(t *testing.T) {
-	for _, name := range []string{"sqlate_total"} {
-		stmts := catalog().MustCompile(fstest.MapFS{
-			"sql/v.sql": {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\n--| field: " + name + " integer\nSELECT id, 1 AS " + name + " FROM t")},
-		}, "sql", sqltest.Dialect{})
-		func() {
-			defer func() {
-				r := recover()
-				if msg, _ := r.(string); !strings.Contains(msg, "v: field \""+name+"\" is the name the library reserves") {
-					t.Errorf("Project with a field %s: recover = %v", name, r)
-				}
-			}()
-			stmts.Statement("v").Project(query.Scalar[string])
-		}()
-	}
+	stmts := catalog().MustCompile(fstest.MapFS{
+		"sql/v.sql": {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\n--| field: sqlate_total integer\nSELECT id, 1 AS sqlate_total FROM t")},
+	}, "sql", sqltest.Dialect{})
+	defer func() {
+		r := recover()
+		if msg, _ := r.(string); !strings.Contains(msg, `v: field "sqlate_total" is the name the library reserves`) {
+			t.Errorf("Project with a field sqlate_total: recover = %v", r)
+		}
+	}()
+	stmts.Statement("v").Project(query.Scalar[string])
 }
 
 // tenantView is the projection over a base that binds one parameter of its

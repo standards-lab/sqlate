@@ -3,7 +3,6 @@ package postgres_test
 import (
 	"context"
 	"database/sql/driver"
-	"slices"
 	"testing"
 	"testing/fstest"
 
@@ -13,20 +12,22 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// The overlay parses, declares the library keyset pattern's alternate slots,
-// and replaces the pattern in the catalog.
-func TestPatterns_OverlaysTheKeysetPredicate(t *testing.T) {
-	c, err := query.NewCatalog(postgres.Patterns())
-	if err != nil {
-		t.Fatal(err)
+// The engine's patterns are the library's with the keyset predicate alone
+// respelled: every other pattern is accepted as written.
+func TestPatterns_RespellOnlyTheKeysetPredicate(t *testing.T) {
+	library := query.MustCatalog(query.Patterns()).Patterns()
+	engine := query.MustCatalog(postgres.Patterns()).Patterns()
+	if len(engine) != len(library) {
+		t.Fatalf("the engine's inventory has %d patterns, the library's %d", len(engine), len(library))
 	}
-	i := slices.IndexFunc(c.Patterns(), func(p query.Pattern) bool { return p.Namespace == query.Namespace && p.Name == "keyset" })
-	if i < 0 {
-		t.Fatal("no sql.keyset in the inventory")
-	}
-	p := c.Patterns()[i]
-	if !slices.Equal(p.Slots, []string{"columns", "op", "values"}) || p.Tier != query.TierNative {
-		t.Errorf("sql.keyset = %+v", p)
+	for i, lib := range library {
+		pg := engine[i]
+		if pg.Namespace != lib.Namespace || pg.Name != lib.Name {
+			t.Fatalf("pattern %d: %s.%s, want %s.%s", i, pg.Namespace, pg.Name, lib.Namespace, lib.Name)
+		}
+		if respelled := pg.Text != lib.Text; respelled != (lib.Name == "keyset") {
+			t.Errorf("%s.%s respelled = %v: %q", pg.Namespace, pg.Name, respelled, pg.Text)
+		}
 	}
 }
 

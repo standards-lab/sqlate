@@ -59,8 +59,8 @@ func TestDB_EveryMethodMaps(t *testing.T) {
 	if db.MapError(nil) != nil {
 		t.Error("MapError(nil) != nil")
 	}
-	if db.Dialect().Name() != "test" {
-		t.Error("Dialect not returned")
+	if db.Dialect() != (sqltest.Dialect{}) {
+		t.Errorf("Dialect() = %v, want the dialect it was wrapped with", db.Dialect())
 	}
 }
 
@@ -227,18 +227,25 @@ func TestTransact_RunsTheUnitOnAnEmbeddingBeginner(t *testing.T) {
 	}
 }
 
-func TestConn_PinsAConnection(t *testing.T) {
-	db, rec := wrap(t, sqltest.Response{Affected: 0})
-	conn, err := db.Conn(context.Background())
+func TestConn_RunsOnThePoolAndWrapsAFailureAsConnectionFailed(t *testing.T) {
+	ctx := context.Background()
+	pool, rec := sqltest.Open(t, sqltest.Response{Affected: 0})
+	db := sqlate.Wrap(pool, sqltest.Dialect{})
+	conn, err := db.Conn(ctx)
 	if err != nil {
 		t.Fatalf("Conn: %v", err)
 	}
-	defer func() { _ = conn.Close() }()
-	if _, err := conn.ExecContext(context.Background(), "SELECT pg_advisory_lock(1)"); err != nil {
+	if _, err := conn.ExecContext(ctx, "SELECT pg_advisory_lock(1)"); err != nil {
 		t.Fatalf("exec on conn: %v", err)
 	}
-	if got := rec.SQL(sqltest.OpExec); len(got) != 1 {
+	_ = conn.Close()
+	if got := rec.SQL(sqltest.OpExec); !slices.Equal(got, []string{"SELECT pg_advisory_lock(1)"}) {
 		t.Errorf("exec recorded %v", got)
+	}
+
+	_ = pool.Close()
+	if _, err := db.Conn(ctx); !errors.Is(err, sqlate.ErrConnectionFailed) {
+		t.Errorf("Conn on a closed pool = %v, want ErrConnectionFailed", err)
 	}
 }
 

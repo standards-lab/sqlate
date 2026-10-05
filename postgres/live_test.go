@@ -12,6 +12,7 @@ import (
 	"database/sql"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -44,4 +45,22 @@ func sqlState(err error) string {
 		return pgErr.Code
 	}
 	return ""
+}
+
+// Proof: the server-version statement runs on the engine and reads its
+// version.
+func TestLive_ServerVersion(t *testing.T) {
+	db := live(t)
+	rows, err := db.QueryContext(context.Background(), postgres.Dialect{}.ServerVersion())
+	if err != nil {
+		t.Fatalf("ServerVersion: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var version string
+	if !rows.Next() || rows.Scan(&version) != nil {
+		t.Fatalf("ServerVersion read no row: %v", rows.Err())
+	}
+	if !strings.HasPrefix(version, "PostgreSQL ") {
+		t.Errorf("ServerVersion read %q, want the engine's version string", version)
+	}
 }

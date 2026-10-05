@@ -3,10 +3,10 @@ package query_test
 import (
 	"context"
 	"database/sql/driver"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"math"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -238,40 +238,40 @@ func TestContinue_RefusesAnOrderingItCannotContinue(t *testing.T) {
 
 func TestContinue_RefusesTextItDidNotIssue(t *testing.T) {
 	issued := issue(t, nil)
-	raw, err := base64.RawURLEncoding.DecodeString(string(issued))
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The body still decodes and still names this base, this prefix, and this
-	// direction; only a value changed, which the check prefix catches.
-	tampered := strings.Replace(string(raw[4:]), `"b"`, `"z"`, 1)
-	if tampered == string(raw[4:]) || !json.Valid([]byte(tampered)) {
-		t.Fatalf("the cursor body did not tamper into another valid body: %q", raw[4:])
-	}
-	corrupt := query.Cursor(base64.RawURLEncoding.EncodeToString(append(raw[:4:4], tampered...)))
 
 	// A type change under the same base, prefix, and direction: the keyed
-	// fields' declared types are hashed with the body, not carried in it.
+	// fields' declared types are bound into the cursor, not only carried in it.
 	retyped := catalog().MustCompile(fstest.MapFS{
 		"sql/member.sql": {Data: []byte("--| tier: standard\n--| key: org, id\n--| field: org uuid not null\n--| field: id text not null\n--| field: name text\n" + memberBase)},
 	}, "sql", sqltest.Dialect{}).Statement("member").Project(scanMember)
 
-	cases := map[string]struct {
-		p     query.Projection[member]
-		after query.Cursor
-	}{
-		"not base64":     {memberView(t), "!! not base64 !!"},
-		"too short":      {memberView(t), query.Cursor(base64.RawURLEncoding.EncodeToString([]byte{1, 2}))},
-		"not json":       {memberView(t), query.Cursor(base64.RawURLEncoding.EncodeToString([]byte("abcd not json")))},
-		"tampered value": {memberView(t), corrupt},
-		"retyped field":  {retyped, issued},
+	type refusal struct {
+		p       query.Projection[member]
+		after   query.Cursor
+		reasons []query.CursorReason
+	}
+	malformed := []query.CursorReason{query.CursorMalformed}
+	cases := map[string]refusal{
+		"not URL-safe text": {memberView(t), "!! not a cursor !!", malformed},
+		"too short":         {memberView(t), "AQI", malformed},
+		"retyped field":     {retyped, issued, malformed},
+	}
+	// The cursor is opaque, so every single-character change to the text it
+	// issued is text it did not issue: refused as malformed, or as naming
+	// another base, ordering, or filters when the change reads as one. The
+	// last character is left out: it may carry bits that encode nothing.
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
+	for i := range len(issued) - 1 {
+		swap := alphabet[(strings.IndexByte(alphabet, issued[i])+1)%len(alphabet)]
+		changed := issued[:i] + query.Cursor(swap) + issued[i+1:]
+		cases["changed at "+strconv.Itoa(i)] = refusal{memberView(t), changed, []query.CursorReason{query.CursorMalformed, query.CursorMismatch}}
 	}
 	for name, c := range cases {
 		db, rec := session(t)
 		_, err := c.p.Continue(context.Background(), db, query.Directives{}, c.after, 2)
 		var cursor *query.CursorError
-		if !errors.As(err, &cursor) || cursor.Reason != query.CursorMalformed {
-			t.Errorf("%s: err = %v, want malformed", name, err)
+		if !errors.As(err, &cursor) || !slices.Contains(c.reasons, cursor.Reason) || !errors.Is(err, query.ErrDirectives) {
+			t.Errorf("%s: err = %v, want a refusal as %v", name, err, c.reasons)
 		}
 		if len(rec.Calls()) != 0 {
 			t.Errorf("%s: the refused cursor reached the driver: %v", name, rec.Ops())
