@@ -1,6 +1,8 @@
 [tools]
-go = "1.27"
-golangci-lint = "2.13.2"
+go = "1.27.1"
+golangci-lint = "2.14.0"
+jq = "1.8.2"
+"aqua:google/go-containerregistry" = "0.22.1"
 
 # Space-separated list of module directories, kept in sync with the go.work
 # use-list and the ci.yml matrix. "." is the base module; postgres and sqlint
