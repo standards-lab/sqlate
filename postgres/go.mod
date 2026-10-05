@@ -3,8 +3,8 @@ module github.com/standards-lab/sqlate/postgres
 go 1.27
 
 require (
-	github.com/jackc/pgx/v5 v5.10.0
-	github.com/standards-lab/sqlate v0.4.0
+	github.com/jackc/pgx/v5 v5.11.0
+	github.com/standards-lab/sqlate v0.4.1
 )
 
 require (
