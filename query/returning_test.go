@@ -224,9 +224,15 @@ func TestVerify_PreparesTheSingleStatementFormAndNamesItsFailure(t *testing.T) {
 	if err := query.Verify(context.Background(), db, stmts); err != nil {
 		t.Fatalf("Verify = %v", err)
 	}
-	prepared := rec.SQL(sqltest.OpPrepare)
-	if len(prepared) != 6 || !slices.Contains(prepared, stmts.Statement("rename").ReturningText()) || !slices.Contains(prepared, stmts.Statement("rename").Text()) {
-		t.Errorf("prepared %q, want the four statements and both single-statement forms", prepared)
+	var want []string
+	for _, st := range stmts.Statements() {
+		want = append(want, st.Text())
+		if r := st.ReturningText(); r != "" {
+			want = append(want, r)
+		}
+	}
+	if prepared := rec.SQL(sqltest.OpPrepare); !slices.Equal(slices.Sorted(slices.Values(prepared)), slices.Sorted(slices.Values(want))) {
+		t.Errorf("prepared %q, want every statement and every single-statement form once: %q", prepared, want)
 	}
 	boom := errors.New(`column "version" does not exist`)
 	rec.FailPrepare = func(q string) error {

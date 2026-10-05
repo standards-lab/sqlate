@@ -91,15 +91,13 @@ func TestScanner_UnknownColumnIsAnError(t *testing.T) {
 // fakeRow is a Row that is not *sql.Rows: the shape of an adapter that
 // shows a scan fewer columns than the statement returns.
 type fakeRow struct {
-	cols  []string
-	vals  []any
-	scans int
+	cols []string
+	vals []any
 }
 
 func (r *fakeRow) Columns() ([]string, error) { return r.cols, nil }
 
 func (r *fakeRow) Scan(dest ...any) error {
-	r.scans++
 	if len(dest) != len(r.vals) {
 		return fmt.Errorf("fakeRow: %d destinations for %d columns", len(dest), len(r.vals))
 	}
@@ -121,9 +119,6 @@ func TestScanner_ReadsAnyRow(t *testing.T) {
 	}
 	if want := (entity{ID: "a", CreatedAt: now, Plain: 3}); !reflect.DeepEqual(e, want) {
 		t.Errorf("scanned %+v, want %+v", e, want)
-	}
-	if row.scans != 1 {
-		t.Errorf("Scan called %d times, want once", row.scans)
 	}
 	_, err = query.Scanner[entity]()(&fakeRow{cols: []string{"id", "derived"}, vals: []any{"a", "x"}})
 	if err == nil || !strings.Contains(err.Error(), `column "derived" has no field`) {

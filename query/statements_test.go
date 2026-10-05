@@ -174,8 +174,12 @@ func TestVerify_PreparesEveryStatementAndJoinsFailures(t *testing.T) {
 	if _, ok := errors.AsType[*sqltest.MappedError](err); !ok {
 		t.Error("the prepare failure did not cross the mapping boundary")
 	}
-	if got := rec.SQL(sqltest.OpPrepare); len(got) != 3 {
-		t.Errorf("prepared %d statements, want 3", len(got))
+	var texts []string
+	for _, st := range stmts.Statements() {
+		texts = append(texts, st.Text())
+	}
+	if got := rec.SQL(sqltest.OpPrepare); !slices.Equal(slices.Sorted(slices.Values(got)), slices.Sorted(slices.Values(texts))) {
+		t.Errorf("prepared %q, want every statement's text once: %q", got, texts)
 	}
 	rec.FailPrepare = nil
 	if err := query.Verify(context.Background(), db, stmts); err != nil {

@@ -185,7 +185,9 @@ func TestOpen_ScriptedErrorSkipsTheShapeCheck(t *testing.T) {
 func TestWithTotal_AppendsTheCountToEveryRowAndLeavesTheResponse(t *testing.T) {
 	r := sqltest.Response{Columns: []string{"id"}, Rows: [][]driver.Value{{"a"}, {"b"}}}
 	got := sqltest.WithTotal(r, 7)
-	if len(got.Columns) != 2 || got.Columns[0] != "id" || got.Columns[1] != "sqlate_total" {
+	// The trailing column's name is the one query reads, which query's own
+	// suite proves by reading a total through WithTotal.
+	if len(got.Columns) != 2 || got.Columns[0] != "id" {
 		t.Errorf("columns = %v", got.Columns)
 	}
 	for i, row := range got.Rows {
