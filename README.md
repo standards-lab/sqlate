@@ -121,8 +121,9 @@ The repository is a Go workspace of three modules. Tasks run through
 [mise](https://mise.jdx.dev):
 
 ```sh
-mise run test          # the unit tier, every module, nothing installed
-mise run lint          # golangci-lint, then sqlint over the repository
+mise run check         # build, vet, format, fix, tidy, unit tier, lint, sqlint; writes nothing
+mise run currency      # report requirements, Go, tools, actions, and images behind their latest
+mise run upgrade       # upgrade requirements and tools to their latest
 mise run acceptance    # the integration tier against a compose PostgreSQL, torn down after
 ```
 

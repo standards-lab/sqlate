@@ -31,7 +31,7 @@ here. A change that alters documented behavior updates the guide in the same eff
   integration tier, `mise run integration`, runs the `postgres` proofs against the compose
   stack and is not part of CI; `mise run acceptance` is the one-shot run.
 - **Releases, CI, tasks** follow the organization's engineering conventions, the Go Elemental
-  principles in the architecture repository: `v*`, `postgres/v*`, and `sqlint/v*` tags, a per-module CI matrix, mise
-  tasks over the modules.
+  principles in the architecture repository: `v*`, `postgres/v*`, and `sqlint/v*` tags, one CI job running `mise run check`,
+  mise tasks over the modules.
 - **Public repo.** Modules resolve through the public Go proxy; CI has no private-module
   configuration.
