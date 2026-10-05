@@ -1,0 +1,10 @@
+# golangci-lint v2 configuration, run per module by `mise run check`.
+version: "2"
+
+linters:
+  # The standard set (errcheck, govet, ineffassign, staticcheck, unused),
+  # plus testpackage, which keeps tests black-box. testpackage keeps its
+  # default skip regexp, so white-box tests live in *_internal_test.go.
+  default: standard
+  enable:
+    - testpackage

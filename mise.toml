@@ -11,6 +11,32 @@ jq = "1.8.2"
 GO_MODULES = ". postgres sqlint"
 SQLATE_DSN = "postgres://app:app@127.0.0.1:5433/app?sslmode=disable"
 
+# The one check: read-only and deterministic, stopping at the first failure.
+[tasks.check]
+description = "Build, vet, format, fix, tidy, test, and lint every module, then sqlint the repository; writes nothing"
+run = '''
+set -eu
+export GOWORK=off
+for mod in $GO_MODULES; do
+  echo "check: $mod"
+  cd "$MISE_PROJECT_ROOT/$mod"
+  go build ./...
+  go vet ./...
+  unformatted=$(gofmt -l .)
+  if [ -n "$unformatted" ]; then echo "gofmt: unformatted files:"; echo "$unformatted"; exit 1; fi
+  go fix -diff ./...
+  go mod tidy -diff
+  go test -race ./...
+  golangci-lint run ./...
+done
+# sqlint resolves the modules sqlint.toml names with go list -m, which the
+# base module reaches only through the committed go.work, so it runs with
+# the workspace on.
+echo "check: sqlint"
+cd "$MISE_PROJECT_ROOT"
+env -u GOWORK go run github.com/standards-lab/sqlate/sqlint/cmd/sqlint .
+'''
+
 # Maintenance.
 [tasks.tidy]
 description = "Run go mod tidy across all modules"
