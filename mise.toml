@@ -42,12 +42,15 @@ description = "Report every requirement, Go version, tool, action pin, and image
 run = "scripts/currency.sh"
 
 [tasks.upgrade]
-description = "Upgrade every module's direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
+description = "Upgrade every module's go directive and direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
 run = '''
 set -eu
 export GOWORK=off
+# The go directive follows the current Go minor, with no toolchain line.
+go_minor=$(mise latest go | cut -d. -f1,2)
 for mod in $GO_MODULES; do
   cd "$MISE_PROJECT_ROOT/$mod"
+  go mod edit -go="$go_minor" -toolchain=none
   direct=$(go mod edit -json | jq -r '.Require[]? | select(.Indirect | not) | .Path')
   [ -z "$direct" ] || go get $(printf '%s@latest ' $direct)
   go mod tidy
