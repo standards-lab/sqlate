@@ -187,8 +187,8 @@ func TestNewCatalog_RejectsMalformedPatterns(t *testing.T) {
 	}
 }
 
-// The inventory lists every registered pattern in namespace, then name,
-// order, each with its tier, native note, slots in body order, and body.
+// The inventory lists every registered pattern ordered by namespace, then
+// name, each with its tier, native note, slots in body order, and body.
 func TestCatalog_PatternsReportsTheInventoryInOrder(t *testing.T) {
 	c := query.MustCatalog(
 		query.Publish("zeta", fstest.MapFS{"p/b.sql": {Data: []byte("--| tier: standard\nWHERE {{second}} = {{first}}")}}, "p"),
