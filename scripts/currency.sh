@@ -42,13 +42,15 @@ for uses in $(grep -ho 'uses: *[^ ]*@[^ ]*' .github/workflows/*.yml | sed 's/use
 done
 
 # Compose and CI service images pinned below the highest semver tag that
-# carries the pinned tag's variant suffix (18.6-alpine -> -alpine).
+# carries the pinned tag's variant suffix (18.6-alpine -> -alpine). A tag
+# needs at least one dot to count: some images also publish bare build
+# numbers (Grafana's 98813352) that would otherwise sort above every release.
 for ref in $(grep -ho '^ *image: *[^ ]*' compose.yml compose/*.yml .github/workflows/*.yml 2>/dev/null |
 	sed 's/^ *image: *//' | tr -d "\"'" | sort -u); do
 	image=${ref%:*}
 	pin=${ref##*:}
 	suffix=${pin#"${pin%%[!0-9.]*}"}
-	pattern="^[0-9]+(\.[0-9]+)*${suffix//./\\.}\$"
+	pattern="^[0-9]+(\.[0-9]+)+${suffix//./\\.}\$"
 	latest=$(crane ls "$image" | grep -E "$pattern" | sed "s/${suffix}\$//" | sort -V | tail -n1)
 	latest="$latest$suffix"
 	[ "$pin" = "$latest" ] || report "images: $image $pin -> $latest"
