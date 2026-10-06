@@ -19,6 +19,15 @@
 // enters a build only through this import; cmd/sqlint is its command, and
 // a harness calls the package.
 //
+// The package exports:
+//
+//   - [Load], which reads [File] into a [Config]
+//   - [Config], the parsed configuration, with its [Role] per role, its
+//     [Source] per namespace, and its [Export] for a consumer
+//   - [Lint], which walks a filesystem and returns every [Finding]
+//   - [Resolver], which turns a module path into its filesystem, and
+//     [GoList], the one go list backs
+//
 // # Configuration
 //
 // sqlint.toml at the module root configures the linter, one file per module,
@@ -34,17 +43,8 @@
 // a directory of the tree, or a module path resolved through the
 // [Resolver] to the version go.mod pins. A producer, a module or a
 // directory that contains its own sqlint.toml, declares in its [export] table
-// what a consumer reads: the directory its patterns publish, the overlay
-// directory an engine supplies, and the native forms an engine names, each
-// a regular expression under the name a finding reports. A bare directory
+// what a consumer reads, as [Export] states it. A bare directory
 // is the pattern files themselves, the module's own. Absent the file, the
 // roles are the conventions as they stand, every check on, and no source
 // is registered.
-//
-// # Running
-//
-// [Lint] walks a filesystem under a [Config] and returns every [Finding]:
-// the file, the line when the check has one, and the message. Errors in
-// the configuration's own syntax are [Load]'s; a source or engine that
-// does not resolve is a finding against sqlint.toml.
 package sqlint

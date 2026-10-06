@@ -4,55 +4,36 @@
 // capability. It designs for the cases a mature library has met: dirty
 // state after a failed non-transactional migration (recorded, reported,
 // cleared only by Force), engines without transactional DDL (a migration
-// headed "-- transaction: none" runs outside a transaction and contains
+// headed "--| transaction: none" runs outside a transaction and contains
 // exactly one statement by convention), and concurrent starters (the lock;
 // a dialect without one fails unless the consumer opts into an unlocked
-// run). Files packages the NNNN_name.{up,down}.sql layout as a helper,
-// never the contract.
+// run). The NNNN_name.{up,down}.sql file layout is a helper, never the
+// contract.
 //
-// # Sets
-//
-// A Set is one migration layer as a library ships it or a program declares
-// it: a name, the history table its migrations are recorded in, and its
-// migrations in version order. A Migrator runs one or more sets, declared
-// bottom-first, each over its own history table: a set's migrations may
-// reference the objects of the sets declared before it, never the objects
-// of the sets declared after it. A set that leaves Set.Table empty uses
-// DefaultTable, so at most one set per migrator may leave it empty. A
-// program installed under an earlier single-set migrator adopts sets
+// A program installed under an earlier single-set migrator adopts sets
 // without migrating its history: the default table and the history's
 // columns are the same.
 //
-// # The run model
+// Force is the operator repair for a dirty set. The repair is: fix the
+// failed migration's objects by hand, Force to the version that is
+// applied, then Up.
 //
-// Every run that writes takes one lock, pins one connection, and creates
-// and reads every set's history table before any set's first migration
-// runs. A dirty row or a history that does not match its set refuses the
-// run there, naming the set, with nothing run against the schema. The read
-// happens inside the lock, so no starter can change a history between the
-// check and the run. Options.Unlocked skips the lock; its intended shape
-// is a caller that holds a lock of its own around every run, and
-// concurrent starters without one are unsafe.
+// The package exports:
 //
-// # Verbs
-//
-// A Migrator method that names no set acts on the top set, the last one
-// declared: Version, Migrations, Steps, Down, and Force. Up, Verify,
-// Reset, and Status cover every set, in declared order, and Reset reverts
-// in reverse declared order and drops each set's history table once that
-// set is reverted.
-//
-// Layer is a handle on one named set, from Migrator.Layers or
-// Migrator.Layer, and its verbs act on that set alone under the migrator's
-// ordering rules: a revert is ErrAboveApplied while a layer above still
-// has applied migrations, and an apply is ErrBelowPending while a layer
-// below still has pending ones. Reverting more migrations than a set has
-// applied is not an error, so Down with the set's whole length reverts
-// everything it has applied.
-//
-// Force is the operator repair for a dirty set. It sets a set's history to
-// a version without running anything against the schema, and it is the one
-// verb that checks no set's history first, since the set it repairs is the
-// dirty one. The repair is: fix the failed migration's objects by hand,
-// Force to the version that is applied, then Up.
+//   - [Migrator], which runs one or more sets, built by [New] with its
+//     [Options]
+//   - [Set], one migration layer, with [DefaultTable], the history table a
+//     set without one uses
+//   - [Migration], one schema step, and [Files], which reads the file
+//     layout into a set's migrations
+//   - [Layer], a handle on one of a migrator's sets
+//   - [Version], a history's head, and [SetStatus], one set's state
+//   - [Catalog], the engine-specific half of the history protocol, and
+//     [StandardCatalog], the one a dialect without its own gets
+//   - [SetError], an error naming its set, over the details [DirtyError],
+//     [PendingError], and [UnknownVersionError] and their classes
+//     [ErrDirty], [ErrPending], and [ErrUnknownVersion]
+//   - [ErrNoLocker], [ErrNoDown], [ErrVersionNotFound], [ErrAboveApplied],
+//     and [ErrBelowPending], the refusals of a run, a revert, a force, and
+//     the layer ordering
 package migrate

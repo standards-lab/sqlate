@@ -2,6 +2,9 @@
 [project]
 kind = "code"
 check = "mise run check"
+# The read-only, development-time command that reports every pin trailing its latest release;
+# it reads the network, so CI never runs it.
+currency = "mise run currency"
 
 # Remote platform, the commands that publish and merge a finished branch, and the CI wait.
 [remote]
