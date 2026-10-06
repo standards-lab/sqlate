@@ -108,7 +108,7 @@ func (st Statement) Native() string { return st.native }
 // engine, for a native statement; empty when none is declared.
 func (st Statement) Port() string { return st.port }
 
-// TransactionRequired reports the "-- transaction: required" header.
+// TransactionRequired reports the "--| transaction: required" header.
 func (st Statement) TransactionRequired() bool { return st.txRequired }
 
 // Params returns the parameter names in position order.
