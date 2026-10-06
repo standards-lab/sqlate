@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// ErrTransactionRequired reports a statement headed "-- transaction:
+// ErrTransactionRequired reports a statement headed "--| transaction:
 // required" run on a session that is not a transaction: the one silent
 // hazard, a transaction-scoped lock outside one, made loud.
 var ErrTransactionRequired = errors.New("query: statement requires a transaction")
