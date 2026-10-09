@@ -58,7 +58,7 @@ type auditable struct {
 }
 
 func TestScanner_MatchesColumnsToTagsInRowOrder(t *testing.T) {
-	now := time.Now()
+	now := time.Now().UTC() // a scan returns times in UTC
 	db, rec := session(t, sqltest.Response{
 		Columns: []string{"name", "id", "nickname", "parent_id", "created_at", "plain"},
 		Rows:    [][]driver.Value{{"Acme", "a", "ac", nil, now, int64(7)}},
@@ -108,7 +108,7 @@ func (r *fakeRow) Scan(dest ...any) error {
 }
 
 func TestScanner_ReadsAnyRow(t *testing.T) {
-	now := time.Now()
+	now := time.Now().UTC() // a scan returns times in UTC
 	row := &fakeRow{
 		cols: []string{"plain", "id", "created_at"},
 		vals: []any{int64(3), "a", now},
@@ -156,7 +156,7 @@ func TestArgsOf_BindsByColumnName(t *testing.T) {
 }
 
 func TestEmbedded_FieldsAreColumnsInBothDirections(t *testing.T) {
-	now := time.Now()
+	now := time.Now().UTC() // a scan returns times in UTC
 	db, rec := session(t, sqltest.Response{
 		Columns: []string{"name", "id", "created_at"},
 		Rows:    [][]driver.Value{{"Acme", "a", now}},
@@ -181,7 +181,7 @@ func TestEmbedded_FieldsAreColumnsInBothDirections(t *testing.T) {
 }
 
 func TestEmbedded_OuterFieldShadowsTheEmbeddedOne(t *testing.T) {
-	now := time.Now()
+	now := time.Now().UTC() // a scan returns times in UTC
 	db, _ := session(t, sqltest.Response{
 		Columns: []string{"id", "created_at"},
 		Rows:    [][]driver.Value{{"outer", now}},

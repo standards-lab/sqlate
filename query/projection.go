@@ -729,7 +729,9 @@ func cursorValue(v any) (string, error) {
 	case bool:
 		return strconv.FormatBool(v), nil
 	case time.Time:
-		return v.Format(time.RFC3339Nano), nil
+		// In UTC, so the cursor's text is the same on every host whatever
+		// location the driver gave the value; the CAST reads the offset.
+		return v.UTC().Format(time.RFC3339Nano), nil
 	default:
 		return fmt.Sprint(v), nil
 	}

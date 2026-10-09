@@ -10,10 +10,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/postgres"
@@ -434,4 +437,82 @@ func TestLive_NotNullNamesTheColumn(t *testing.T) {
 		t.Errorf("duplicate key = %v, want a ConstraintError naming live_q_pkey", err)
 	}
 	t.Logf("unique: %v", err)
+}
+
+// Proof: a timestamp with time zone read through Scanner and Scalar is in
+// time.UTC on a host whose zone is not. pgx delivers the column in
+// time.Local, so the proof runs in a child process with TZ=Europe/London:
+// in summer London's wall clock is an hour ahead and the driver's value
+// prints as BST, while in winter it prints as GMT and only a comparison of
+// whole values tells it from UTC. The child first checks that the driver's
+// own value is not in UTC, so the proof cannot pass vacuously.
+func TestLive_ScanReturnsTimesInUTC(t *testing.T) {
+	if os.Getenv("SQLATE_HELPER") != "london" {
+		live(t) // skip before re-executing when the engine is absent
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(exe, "-test.run=^TestLive_ScanReturnsTimesInUTC$", "-test.v")
+		cmd.Env = append(os.Environ(), "SQLATE_HELPER=london", "TZ=Europe/London")
+		out, err := cmd.CombinedOutput()
+		if err != nil || !strings.Contains(string(out), "--- PASS: TestLive_ScanReturnsTimesInUTC") {
+			t.Fatalf("child under TZ=Europe/London: %v\n%s", err, out)
+		}
+		return
+	}
+	if zone, _ := time.Date(2026, 7, 1, 0, 0, 0, 0, time.Local).Zone(); zone != "BST" {
+		t.Fatalf("time.Local in the child is %q in summer, want BST: TZ=Europe/London did not take", zone)
+	}
+	ctx := context.Background()
+	db := live(t)
+	_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS live_utc")
+	if _, err := db.ExecContext(ctx, "CREATE TABLE live_utc (n integer PRIMARY KEY, at timestamp with time zone NOT NULL)"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS live_utc") })
+	if _, err := db.ExecContext(ctx, "INSERT INTO live_utc (n, at) VALUES (1, '2026-07-01 08:00:00+00'), (2, '2026-01-15 12:30:00.5+00')"); err != nil {
+		t.Fatal(err)
+	}
+	want := map[int64]time.Time{
+		1: time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC),
+		2: time.Date(2026, 1, 15, 12, 30, 0, 500_000_000, time.UTC),
+	}
+
+	rows, err := db.QueryContext(ctx, "SELECT at FROM live_utc WHERE n = 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var raw time.Time
+	if !rows.Next() || rows.Scan(&raw) != nil {
+		t.Fatalf("the driver read no row: %v", rows.Err())
+	}
+	_ = rows.Close()
+	if raw.Location() == time.UTC || !raw.Equal(want[1]) {
+		t.Fatalf("the driver read %v (%v); want the same instant outside UTC, or this proof proves nothing", raw, raw.Location())
+	}
+
+	stmts := query.MustCatalog(postgres.Patterns()).MustCompile(fstest.MapFS{
+		"sql/all.sql": {Data: []byte("--| tier: standard\nSELECT n, at FROM live_utc ORDER BY n")},
+		"sql/at.sql":  {Data: []byte("--| tier: standard\nSELECT at FROM live_utc WHERE n = {{n}}")},
+	}, "sql", db.Dialect())
+	type stamped struct {
+		N  int64     `db:"n"`
+		At time.Time `db:"at"`
+	}
+	all, err := stmts.Statement("all").Scan(query.Scanner[stamped]()).All(ctx, db, nil)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("Scanner: %v, %v", all, err)
+	}
+	for _, s := range all {
+		if s.At != want[s.N] {
+			t.Errorf("Scanner read row %d's at as %v (%v), want %v", s.N, s.At, s.At.Location(), want[s.N])
+		}
+	}
+	for n, w := range want {
+		got, err := stmts.Statement("at").Scan(query.Scalar[time.Time]).One(ctx, db, query.Args{"n": n})
+		if err != nil || got != w {
+			t.Errorf("Scalar read row %d's at as %v (%v), %v; want %v", n, got, got.Location(), err, w)
+		}
+	}
 }

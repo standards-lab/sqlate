@@ -24,11 +24,15 @@ type Row interface {
 // the Row is a *sql.Rows, nor advance or close it.
 type ScanFunc[T any] func(Row) (T, error)
 
-// Scalar is the ScanFunc for a single-column row.
+// Scalar is the ScanFunc for a single-column row. A time comes back in
+// time.UTC whatever the driver's location, as Scanner's do.
 func Scalar[T any](row Row) (T, error) {
 	var v T
-	err := row.Scan(&v)
-	return v, err
+	if err := row.Scan(&v); err != nil {
+		return v, err
+	}
+	inUTC(&v)
+	return v, nil
 }
 
 // Rows is a statement bound to a scan function: the typed handle a program

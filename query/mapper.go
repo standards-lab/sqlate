@@ -28,7 +28,9 @@ import (
 // past its entity fails loudly; a field with no column stays zero. It
 // reads the row only through Row, matching the names Columns returns and
 // filling them with one Scan, so it works over any Row, not only
-// *sql.Rows.
+// *sql.Rows. A time field comes back in time.UTC whatever the driver's
+// location: a time.Time, a *time.Time, and a valid sql.NullTime or
+// sql.Null[time.Time], through embedded structs alike.
 func Scanner[T any]() ScanFunc[T] {
 	fields := fieldsOf(reflect.TypeFor[T]())
 	return func(row Row) (T, error) {
@@ -48,6 +50,9 @@ func Scanner[T any]() ScanFunc[T] {
 		}
 		if err := row.Scan(dests...); err != nil {
 			return v, err
+		}
+		for _, d := range dests {
+			inUTC(d)
 		}
 		return v, nil
 	}
