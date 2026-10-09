@@ -1,5 +1,5 @@
 [tools]
-go = "1.27.1"
+go = "1.27.2"
 golangci-lint = "2.14.0"
 jq = "1.8.2"
 "aqua:google/go-containerregistry" = "0.22.1"
