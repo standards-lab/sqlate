@@ -16,9 +16,9 @@ records instants.
 
 - `migrate.HistoryUpgrader`, the `Catalog` capability that brings a history table an earlier
   release created to the current shape. Each locked run (`Up`, `Steps`, `Down`, `Reset`,
-  `Force`) runs its check after creating the table and before reading it, inside the lock. It
-  alters the table only when the check reports it outdated, so a current table is never
-  rewritten.
+  `Force`) runs the upgrader's check after creating the table and before reading it, inside the
+  lock. It alters the table only when the check reports it outdated, so a current table is
+  never rewritten.
 
 ### Changed
 

@@ -29,8 +29,9 @@ import (
 // reads the row only through Row, matching the names Columns returns and
 // filling them with one Scan, so it works over any Row, not only
 // *sql.Rows. A time field comes back in time.UTC, whatever time.Local is
-// and whatever location the driver gave it: a time.Time, a *time.Time, and a valid sql.NullTime or
-// sql.Null[time.Time], through embedded structs alike.
+// and whatever location the driver gave it: a time.Time, a *time.Time, and
+// a valid sql.NullTime or sql.Null[time.Time], through embedded structs
+// alike.
 func Scanner[T any]() ScanFunc[T] {
 	fields := fieldsOf(reflect.TypeFor[T]())
 	return func(row Row) (T, error) {

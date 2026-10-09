@@ -11,9 +11,10 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ### Changed
 
-- **Breaking:** The `sqlate` requirement is v0.5.0, whose Scanner and Scalar return every time
-  in `time.UTC`, so a module that requires the linter, a `tool` directive included, builds
-  against it. The linter's findings are unchanged.
+- **Breaking:** The `sqlate` requirement is v0.5.0, whose `query.Scanner` and `query.Scalar`
+  return every `time.Time` in `time.UTC`, whatever `time.Local` is. A module that requires the
+  linter, through a `tool` directive included, builds against that release. The linter's
+  findings are unchanged.
 
 Requires `github.com/standards-lab/sqlate v0.5.0`.
 

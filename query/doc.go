@@ -14,8 +14,9 @@
 // The handles are generic over a consumer-written scan function and take a
 // sqlate.Session, so a handle runs against the pool or inside a transaction
 // alike; every error is mapped through the dialect at the runner boundary.
-// Every time.Time the library's own scans, Scanner and Scalar, return is in
-// time.UTC, whatever time.Local is and whatever location the driver gave it.
+// Every time.Time that Scanner and Scalar, the library's own scans, return
+// is in time.UTC, whatever time.Local is and whatever location the driver
+// gave it.
 // Statement text is build-time only: files under embed, never request
 // input.
 //
