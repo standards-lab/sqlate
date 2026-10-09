@@ -70,22 +70,38 @@ for uses in $actions; do
 	[ "$pin" = "$latest" ] || report ".github/workflows: $action $pin -> $latest"
 done
 
-# Compose and CI service images pinned below the highest semver tag that
-# carries the pinned tag's variant suffix (18.6-alpine -> -alpine). A tag
-# needs at least one dot to count: some images also publish bare build
-# numbers (Grafana's 98813352) that would otherwise sort above every release.
-# A workflow names each image on an image: line, even one it starts with
-# docker run.
+# latest_tag prints the highest semver tag of an image that carries the given
+# pin's variant suffix (18.6-alpine -> -alpine). A tag needs at least one dot
+# to count: some images also publish bare build numbers (Grafana's 98813352)
+# that would otherwise sort above every release.
+latest_tag() {
+	local image=$1 pin=$2 suffix pattern latest
+	suffix=${pin#"${pin%%[!0-9.]*}"}
+	pattern="^[0-9]+(\.[0-9]+)+${suffix//./\\.}\$"
+	latest=$(crane ls "$image" | grep -E "$pattern" | sed "s/${suffix}\$//" | sort -V | tail -n1) || return
+	echo "$latest$suffix"
+}
+
+# Compose and CI images pinned on an image: line below their latest. A
+# compose service that builds from compose/<service>/Dockerfile has no image:
+# line; its pin is the Dockerfile's FROM line, scanned below.
 images=$(matches '^ *image: *[^ ]*' compose.yml compose/*.yml "${workflows[@]}" |
 	sed 's/^ *image: *//' | tr -d "\"'" | sort -u)
 for ref in $images; do
 	image=${ref%:*}
 	pin=${ref##*:}
-	suffix=${pin#"${pin%%[!0-9.]*}"}
-	pattern="^[0-9]+(\.[0-9]+)+${suffix//./\\.}\$"
-	latest=$(crane ls "$image" | grep -E "$pattern" | sed "s/${suffix}\$//" | sort -V | tail -n1)
-	latest="$latest$suffix"
+	latest=$(latest_tag "$image" "$pin")
 	[ "$pin" = "$latest" ] || report "images: $image $pin -> $latest"
+done
+
+# Compose services' Dockerfiles pinned on their FROM line below the latest.
+for dockerfile in compose/*/Dockerfile; do
+	[ -e "$dockerfile" ] || continue
+	ref=$(sed -n 's/^FROM  *\([^ ]*\).*/\1/p' "$dockerfile" | head -n1)
+	image=${ref%:*}
+	pin=${ref##*:}
+	latest=$(latest_tag "$image" "$pin")
+	[ "$pin" = "$latest" ] || report "$dockerfile: $image $pin -> $latest"
 done
 
 exit "$stale"

@@ -7,6 +7,35 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-10-09
+
+Times the library returns no longer depend on the host's zone, and the migration history
+records instants.
+
+### Added
+
+- `migrate.HistoryUpgrader`, the `Catalog` capability that brings a history table an earlier
+  release created to the current shape. Each locked run (`Up`, `Steps`, `Down`, `Reset`,
+  `Force`) runs the upgrader's check after creating the table and before reading it, inside the
+  lock. It alters the table only when the check reports it outdated, so a current table is
+  never rewritten.
+
+### Changed
+
+- **Breaking:** every `time.Time` that `query.Scanner` and `query.Scalar` return is in
+  `time.UTC`, whatever `time.Local` is and whatever location the driver gave it. This
+  covers a `time.Time`, a `*time.Time`, and a valid `sql.NullTime` or `sql.Null[time.Time]`,
+  including one reached through an embedded struct. The instant is unchanged and a zero time
+  stays zero, but a caller that compared locations or formatted the value without a zone now
+  sees UTC. A hand-written `ScanFunc` is unaffected.
+- A cursor carries a keyed time as UTC text, so the same row issues the same cursor on every
+  host. A cursor issued before this release, with a local offset, still reads back as the same
+  instant.
+- The history's `applied_at` is documented as the instant a row was written: a
+  time-zone-aware type where the engine has one. `StandardCatalog` keeps `timestamp`, which
+  MySQL and MariaDB store as an instant. The `postgres` dialect creates `timestamp with time
+  zone` and, as a `HistoryUpgrader`, alters an existing table in place on the next run.
+
 ## [v0.4.1] - 2026-09-24
 
 ### Fixed
@@ -163,7 +192,8 @@ experiment's library packages.
 - `sqltest`, the scripted `database/sql` driver every consumer's unit tier runs over: `Open`,
   `Recorder`, `Response`, and the stub `Dialect`.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.5.0...HEAD
+[v0.5.0]: https://github.com/standards-lab/sqlate/compare/v0.4.1...v0.5.0
 [v0.4.1]: https://github.com/standards-lab/sqlate/compare/v0.4.0...v0.4.1
 [v0.4.0]: https://github.com/standards-lab/sqlate/compare/v0.3.0...v0.4.0
 [v0.3.0]: https://github.com/standards-lab/sqlate/compare/v0.2.0...v0.3.0

@@ -1,7 +1,7 @@
 //go:build integration
 
 // The live-engine acceptance proofs run against the PostgreSQL named by
-// SQLATE_DSN (the compose stack: `mise run db-up`, then
+// SQLATE_DSN (the compose stack: `mise run db:up`, then
 // `mise run integration`) and skip when it is unset. They are not
 // part of the unit tier: each is a proof the engine alone can give,
 // demonstrated in the session that establishes the claim.
@@ -24,9 +24,24 @@ import (
 // live opens a session over the live database, or skips.
 func live(t testing.TB) *sqlate.DB {
 	t.Helper()
+	return liveIn(t, "")
+}
+
+// liveIn is live with every session's TimeZone set to zone, or the
+// server's default when zone is empty: a runtime parameter pgx sends at
+// connect.
+func liveIn(t testing.TB, zone string) *sqlate.DB {
+	t.Helper()
 	dsn := os.Getenv("SQLATE_DSN")
 	if dsn == "" {
 		t.Skip("SQLATE_DSN not set")
+	}
+	if zone != "" {
+		sep := "?"
+		if strings.Contains(dsn, "?") {
+			sep = "&"
+		}
+		dsn += sep + "timezone=" + zone
 	}
 	pool, err := sql.Open("pgx", dsn)
 	if err != nil {

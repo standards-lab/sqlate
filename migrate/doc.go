@@ -28,7 +28,8 @@
 //     layout into a set's migrations
 //   - [Layer], a handle on one of a migrator's sets
 //   - [Version], a history's head, and [SetStatus], one set's state
-//   - [Catalog], the engine-specific half of the history protocol, and
+//   - [Catalog], the engine-specific half of the history protocol, with
+//     [HistoryUpgrader], its capability to upgrade an earlier table, and
 //     [StandardCatalog], the one a dialect without its own gets
 //   - [SetError], an error naming its set, over the details [DirtyError],
 //     [PendingError], and [UnknownVersionError] and their classes

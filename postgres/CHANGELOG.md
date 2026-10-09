@@ -7,6 +7,29 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-10-09
+
+### Added
+
+- `Dialect.HistoryOutdated` and `Dialect.UpgradeHistory`, implementing
+  `migrate.HistoryUpgrader`. A history table created by an earlier release has `applied_at`
+  as `timestamp` without time zone. On the next locked run, the column is altered in place to
+  `timestamp with time zone`, reading each stored wall clock as UTC and restating the default.
+  A table already current is checked and left alone. A row written under a session zone other
+  than UTC shifts by that zone's offset, since the stored value carries no zone.
+
+### Changed
+
+- **Breaking:** `Dialect.CreateHistory` creates `applied_at` as `timestamp with time zone`
+  instead of `migrate.StandardCatalog`'s `timestamp`, so each row records an instant whatever
+  zone the session runs in.
+- **Breaking:** The `sqlate` requirement is v0.5.0, whose `query.Scanner` and `query.Scalar`
+  return every `time.Time` in `time.UTC`, whatever `time.Local` is.
+- Live proofs added. A `timestamp with time zone` read through `query.Scanner` and
+  `query.Scalar` with `time.Local` in Europe/London is in `time.UTC`. An old-style history
+  table is upgraded once, under a session in `Asia/Tokyo`, keeping each row's instant. A new
+  history is created time-zone-aware.
+
 ## [v0.4.0] - 2026-09-23
 
 ### Changed
@@ -73,7 +96,8 @@ The first release of the PostgreSQL dialect, against `github.com/standards-lab/s
 - The integration tier: the migrate and query proofs against a live engine, behind the
   `integration` build tag.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/postgres/v0.4.0...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/postgres/v0.5.0...HEAD
+[v0.5.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.4.0...postgres/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.3.0...postgres/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.2.0...postgres/v0.3.0
 [v0.2.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.1.1...postgres/v0.2.0
