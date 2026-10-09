@@ -8,7 +8,9 @@ jq = "1.8.2"
 # use-list. "." is the base module; postgres and sqlint are the sub-modules.
 [env]
 GO_MODULES = ". postgres sqlint"
-SQLATE_DSN = "postgres://app:app@127.0.0.1:5433/app?sslmode=disable"
+# The compose stack's PostgreSQL, whose port follows POSTGRES_PORT as
+# compose.yml's does.
+SQLATE_DSN = "postgres://app:app@127.0.0.1:{{ get_env(name='POSTGRES_PORT', default='5433') }}/app?sslmode=disable"
 
 # The one check: read-only and deterministic, stopping at the first failure.
 [tasks.check]
@@ -134,7 +136,7 @@ mise run integration
 # The development stack: compose.yml's PostgreSQL, whose data lives in a named
 # volume that db:down keeps and db:reset drops.
 [tasks."db:up"]
-description = "Start the compose PostgreSQL and wait until it is healthy"
+description = "Build and start the compose PostgreSQL and wait until it is healthy"
 run = "docker compose up -d --wait --build"
 
 [tasks."db:down"]
