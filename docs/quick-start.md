@@ -49,11 +49,11 @@ go = "1.27"
 [env]
 SQLATE_DSN = "postgres://app:app@127.0.0.1:5433/app?sslmode=disable"
 
-[tasks.db-up]
+[tasks."db:up"]
 description = "Start PostgreSQL and wait until it is healthy"
-run = "docker compose up -d --wait"
+run = "docker compose up -d --wait --build"
 
-[tasks.db-down]
+[tasks."db:down"]
 description = "Stop PostgreSQL and drop its volume"
 run = "docker compose down -v"
 
@@ -76,31 +76,40 @@ mise trust && mise install
 
 ## 2. Start PostgreSQL
 
-`compose.yml` runs PostgreSQL 18 on port 5433 with the user, password, and database the
-connection string names, and a health check the `db-up` task waits on.
+`compose/postgres/Dockerfile` builds PostgreSQL 18 with the user, password, and database the
+connection string names, and a health check the `db:up` task waits on. Its `FROM` line is the
+image's one pin.
+
+`compose/postgres/Dockerfile`:
+
+```dockerfile
+FROM postgres:18.6-alpine
+
+ENV POSTGRES_USER=app \
+    POSTGRES_PASSWORD=app \
+    POSTGRES_DB=app
+
+HEALTHCHECK --start-period=60s --start-interval=1s --interval=10s --timeout=3s --retries=3 \
+    CMD ["pg_isready", "--host=127.0.0.1", "--username=app", "--dbname=app"]
+```
+
+`compose.yml` builds it and publishes it on port 5433:
 
 `compose.yml`:
 
 ```yaml
+name: teams
+
 services:
   postgres:
-    image: postgres:18-alpine
-    container_name: teams-postgres
-    environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: app
-      POSTGRES_DB: app
+    build:
+      context: compose/postgres
     ports:
       - "127.0.0.1:5433:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d app"]
-      interval: 2s
-      timeout: 3s
-      retries: 15
 ```
 
 ```sh
-mise run db-up
+mise run db:up
 ```
 
 ## 3. Write the migration
@@ -1056,14 +1065,17 @@ a program can map it to the field it reports. The bad filter value unwraps to
 ## 12. Clean up
 
 ```sh
-mise run db-down
+mise run db:down
 ```
 
-The program's last step reverted the migration, and `db-down` drops the volume. The finished
+The program's last step reverted the migration, and `db:down` drops the volume. The finished
 tree:
 
 ```
 teams/
+├── compose/
+│   └── postgres/
+│       └── Dockerfile
 ├── compose.yml
 ├── database.go
 ├── go.mod
