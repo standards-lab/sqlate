@@ -1,6 +1,7 @@
 # sqlate's development stack: the PostgreSQL the integration tier runs
 # against. Each service builds from compose/<service>/Dockerfile, which pins
-# its image and carries its configuration and health check.
+# its image and carries its configuration and health check. The named volume
+# keeps the data across `mise run db:down`; `mise run db:reset` drops it.
 name: sqlate
 
 include:

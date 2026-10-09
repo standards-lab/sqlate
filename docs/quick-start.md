@@ -53,7 +53,7 @@ SQLATE_DSN = "postgres://app:app@127.0.0.1:5433/app?sslmode=disable"
 description = "Start PostgreSQL and wait until it is healthy"
 run = "docker compose up -d --wait --build"
 
-[tasks."db:down"]
+[tasks."db:reset"]
 description = "Stop PostgreSQL and drop its volume"
 run = "docker compose down -v"
 
@@ -89,8 +89,8 @@ ENV POSTGRES_USER=app \
     POSTGRES_PASSWORD=app \
     POSTGRES_DB=app
 
-HEALTHCHECK --start-period=60s --start-interval=1s --interval=10s --timeout=3s --retries=3 \
-    CMD ["pg_isready", "--host=127.0.0.1", "--username=app", "--dbname=app"]
+HEALTHCHECK --start-period=30s --start-interval=1s --interval=5s --timeout=3s --retries=5 \
+    CMD ["pg_isready", "-h", "127.0.0.1", "-U", "app", "-d", "app"]
 ```
 
 `compose.yml` builds it and publishes it on port 5433:
@@ -1065,10 +1065,10 @@ a program can map it to the field it reports. The bad filter value unwraps to
 ## 12. Clean up
 
 ```sh
-mise run db:down
+mise run db:reset
 ```
 
-The program's last step reverted the migration, and `db:down` drops the volume. The finished
+The program's last step reverted the migration, and `db:reset` drops the volume. The finished
 tree:
 
 ```

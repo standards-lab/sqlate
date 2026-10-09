@@ -123,10 +123,10 @@ description = "Run the integration tier against the PostgreSQL named by SQLATE_D
 run = "cd postgres && go test -race -tags integration -count=1 ./..."
 
 [tasks.acceptance]
-description = "The one-shot engine proof: db:up, integration, then db:reset regardless of the result"
+description = "The one-shot engine proof: db:up, integration, then db:reset regardless of the result, printing the stack's log on failure"
 run = '''
 set -e
-trap 'rc=$?; [ $rc -eq 0 ] || docker compose logs postgres; mise run db:reset; exit $rc' EXIT
+trap 'rc=$?; [ $rc -eq 0 ] || docker compose logs; mise run db:reset; exit $rc' EXIT
 mise run db:up
 mise run integration
 '''
