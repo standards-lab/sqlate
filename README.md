@@ -124,11 +124,11 @@ The repository is a Go workspace of three modules. Tasks run through
 mise run check         # build, vet, format, fix, tidy, unit tier, lint, sqlint; writes nothing
 mise run currency      # report requirements, Go, tools, actions, and images behind their latest
 mise run upgrade       # upgrade every module's go directive and requirements, and the tools, to their latest
-mise run db:up         # the compose stack: PostgreSQL, built and healthy
-mise run db:down       # stop the stack, keeping its data
-mise run db:reset      # stop the stack and drop its data
-mise run integration   # the integration tier against the stack
-mise run acceptance    # db:up and integration, then db:reset
+mise run db:up         # build and start the compose PostgreSQL and wait until it is healthy
+mise run db:down       # stop PostgreSQL, keeping its data
+mise run db:reset      # stop PostgreSQL and drop its data
+mise run integration   # run the integration tier against the running PostgreSQL
+mise run acceptance    # run db:up and integration, then db:reset whatever the result
 ```
 
 `compose.yml` runs PostgreSQL on port 5433; `POSTGRES_PORT` moves it. The service builds from
