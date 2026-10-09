@@ -143,8 +143,8 @@ func (l Layer) Force(ctx context.Context, version int) error {
 		}
 	}
 	return l.m.locked(ctx, func(ctx context.Context, conn *sql.Conn) error {
-		if _, err := conn.ExecContext(ctx, lay.sql.create); err != nil {
-			return &SetError{Set: lay.name, Err: l.m.db.MapError(err)}
+		if err := l.m.ensureHistory(ctx, conn, lay); err != nil {
+			return &SetError{Set: lay.name, Err: err}
 		}
 		if _, err := conn.ExecContext(ctx, lay.sql.delAbove, version); err != nil {
 			return &SetError{Set: lay.name, Err: l.m.db.MapError(err)}

@@ -51,7 +51,13 @@
 //
 // # Migration history
 //
-// [Dialect.CreateHistory] delegates to migrate.StandardCatalog unchanged.
+// [Dialect.CreateHistory] is migrate.StandardCatalog's DDL with applied_at
+// as timestamp with time zone, so a row records an instant whatever zone
+// the session runs in. As a migrate.HistoryUpgrader, the dialect converts a
+// history table created before v0.5.0, whose applied_at is a timestamp
+// without time zone, on the next locked run: [Dialect.HistoryOutdated]
+// finds the old type and [Dialect.UpgradeHistory] alters the column in
+// place, reading each stored wall clock as UTC.
 // [Dialect.HistoryExists] qualifies the check by the session's current
 // schema, closing a defect in the standard form: information_schema.tables
 // spans every schema on the search path, so a same-named table in an

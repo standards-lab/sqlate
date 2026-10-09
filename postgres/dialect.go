@@ -83,10 +83,37 @@ func (Dialect) MapError(err error) error {
 // layer discovers by type assertion.
 func (Dialect) ServerVersion() string { return "SELECT version()" }
 
-// CreateHistory returns migrate.StandardCatalog's DDL unchanged: its CREATE
-// TABLE IF NOT EXISTS with text and boolean columns already suits the engine.
+// CreateHistory returns migrate.StandardCatalog's DDL with applied_at as
+// timestamp with time zone, so each row records an instant rather than a
+// wall clock read in the session's zone. Its CREATE TABLE IF NOT EXISTS with
+// text and boolean columns otherwise suits the engine as it is.
 func (Dialect) CreateHistory(table string) string {
-	return migrate.StandardCatalog{}.CreateHistory(table)
+	return "CREATE TABLE IF NOT EXISTS " + table + " (" +
+		"version integer PRIMARY KEY, " +
+		"name text NOT NULL, " +
+		"applied_at timestamp with time zone NOT NULL DEFAULT CURRENT_TIMESTAMP, " +
+		"dirty boolean NOT NULL DEFAULT FALSE)"
+}
+
+// HistoryOutdated reports a history table in the session's current schema
+// whose applied_at is a timestamp without time zone, the type the dialect
+// created before v0.5.0, implementing migrate.HistoryUpgrader.
+func (Dialect) HistoryOutdated(param string) string {
+	return "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = " + param +
+		" AND column_name = 'applied_at' AND data_type = 'timestamp without time zone'"
+}
+
+// UpgradeHistory converts an outdated table's applied_at to timestamp with
+// time zone in place, reading each stored wall clock as UTC, and restates
+// its default. A wall clock written under a session zone other than UTC
+// shifts by that zone's offset: the stored value carries no zone to say
+// otherwise. The migrator runs it only after HistoryOutdated reports the
+// table, since a second conversion of an aware column would read its
+// instants through the session's zone.
+func (Dialect) UpgradeHistory(table string) string {
+	return "ALTER TABLE " + table +
+		" ALTER COLUMN applied_at TYPE timestamp with time zone USING applied_at AT TIME ZONE 'UTC'," +
+		" ALTER COLUMN applied_at SET DEFAULT CURRENT_TIMESTAMP"
 }
 
 // HistoryExists returns the existence check restricted to the session's

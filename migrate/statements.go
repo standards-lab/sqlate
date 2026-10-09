@@ -11,7 +11,10 @@ type Catalog interface {
 	//
 	//   - version (integer, primary key)
 	//   - name (text, not null)
-	//   - applied_at (timestamp, not null, defaulting to the current time)
+	//   - applied_at (the instant the row was written, not null,
+	//     defaulting to the current time; a time-zone-aware type where the
+	//     engine has one, so the instant does not depend on the session's
+	//     zone)
 	//   - dirty (boolean, not null, defaulting to false)
 	CreateHistory(table string) string
 	// HistoryExists returns the query that yields one row whose first
@@ -20,12 +23,38 @@ type Catalog interface {
 	HistoryExists(param string) string
 }
 
+// HistoryUpgrader is the Catalog capability that brings a history table an
+// earlier release created to the shape CreateHistory creates now. A dialect
+// provides it by implementing the two methods alongside Catalog's. Each
+// locked run (Up, Steps, Down, Reset, Force) runs HistoryOutdated after
+// CreateHistory, inside the lock and before it reads the history, and runs
+// UpgradeHistory only when the query reports the table outdated, so a
+// current table is read and never rewritten, and the upgrade is idempotent
+// however the engine's DDL behaves on a second run.
+type HistoryUpgrader interface {
+	// HistoryOutdated returns the query that yields one row whose first
+	// column is nonzero when the history table has an earlier release's
+	// shape. The table name is the query's one argument, bound at param,
+	// the dialect's placeholder.
+	HistoryOutdated(param string) string
+	// UpgradeHistory returns the DDL that converts table to the current
+	// shape in place, keeping every row and the instant each records.
+	UpgradeHistory(table string) string
+}
+
 // StandardCatalog is the Catalog for engines that accept CREATE TABLE IF NOT
 // EXISTS with text and boolean columns and expose information_schema:
 // MySQL and MariaDB as they ship, and PostgreSQL as a fallback for a dialect
 // that does not implement its own (see HistoryExists's limitation). SQL
 // Server (no IF NOT EXISTS, no boolean), Oracle (no information_schema),
 // and SQLite (sqlite_master) provide their own.
+//
+// Its applied_at is a plain timestamp, the one spelling all its engines
+// accept. On MySQL and MariaDB a timestamp is stored as an instant, so the
+// column is time-zone-aware there; on PostgreSQL it is a wall clock without
+// zone, which is one more reason the postgres dialect implements its own
+// Catalog, with timestamp with time zone. StandardCatalog has no
+// HistoryUpgrader, since there is nothing for its engines to upgrade.
 type StandardCatalog struct{}
 
 var _ Catalog = StandardCatalog{}
@@ -50,17 +79,24 @@ func (StandardCatalog) HistoryExists(param string) string {
 
 // statements are the texts one set's layer runs against its history table,
 // rendered once with the dialect's placeholders: the catalog pair from the
-// Catalog, the rest standard DML, and drop, the DDL Reset runs to remove
-// the set's own history table once that set is reverted. Booleans bind as
-// parameters, never as literals.
+// Catalog, the outdated check and its upgrade from a HistoryUpgrader (both
+// empty for a catalog without one), the rest standard DML, and drop, the
+// DDL Reset runs to remove the set's own history table once that set is
+// reverted. Booleans bind as parameters, never as literals.
 type statements struct {
-	create, exists, all, head, insert, setDirty, del, delAbove, drop string
+	create, exists, outdated, upgrade, all, head, insert, setDirty, del, delAbove, drop string
 }
 
 // history renders the statements for the history table t over
 // catalog c, with p as the dialect's placeholder.
 func history(t string, p func(int) string, c Catalog) statements {
+	var outdated, upgrade string
+	if u, ok := c.(HistoryUpgrader); ok {
+		outdated, upgrade = u.HistoryOutdated(p(1)), u.UpgradeHistory(t)
+	}
 	return statements{
+		outdated: outdated,
+		upgrade:  upgrade,
 		create:   c.CreateHistory(t),
 		exists:   c.HistoryExists(p(1)),
 		all:      "SELECT version, name, dirty FROM " + t + " ORDER BY version",

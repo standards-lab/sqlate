@@ -440,6 +440,78 @@ func TestNew_TakesTheCatalogFromTheDialect(t *testing.T) {
 	}
 }
 
+// upgradingDialect is a dialect whose Catalog is also a HistoryUpgrader:
+// StandardCatalog's pair with an outdated check and its upgrade.
+type upgradingDialect struct {
+	lockingDialect
+	migrate.StandardCatalog
+}
+
+func (upgradingDialect) HistoryOutdated(param string) string {
+	return "SELECT outdated(" + param + ")"
+}
+
+func (upgradingDialect) UpgradeHistory(table string) string {
+	return "ALTER TABLE " + table + " UPGRADE"
+}
+
+func TestHistory_UpgradesAnOutdatedTableOnlyWhenTheCatalogSaysSo(t *testing.T) {
+	ctx := context.Background()
+	outdated := func(yes bool) sqltest.Response {
+		r := exists(yes)
+		r.Columns = []string{"outdated"}
+		return r
+	}
+	open := func(responses ...sqltest.Response) (*migrate.Migrator, *sqltest.Recorder) {
+		pool, rec := sqltest.Open(t, responses...)
+		m, err := migrate.New(sqlate.Wrap(pool, upgradingDialect{}), []migrate.Set{{Name: "app", Migrations: set}}, migrate.Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return m, rec
+	}
+	current := history([]driver.Value{int64(1), "a", false}, []driver.Value{int64(2), "b", false})
+
+	// An outdated table is upgraded after it is created and before the
+	// history is read, inside the lock.
+	m, rec := open(locked, created, outdated(true), sqltest.Response{}, current, unlocked)
+	if err := m.Up(ctx); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	assertOps(t, rec, sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery, sqltest.OpExec, sqltest.OpQuery, sqltest.OpQuery)
+	calls := rec.Calls()
+	if calls[2].SQL != "SELECT outdated($1)" || calls[2].Args[0] != migrate.DefaultTable {
+		t.Errorf("outdated check = %q %v", calls[2].SQL, calls[2].Args)
+	}
+	if calls[3].SQL != "ALTER TABLE "+migrate.DefaultTable+" UPGRADE" {
+		t.Errorf("upgrade = %q", calls[3].SQL)
+	}
+
+	// A current table is checked and left alone, so a second run does not
+	// upgrade it again.
+	m, rec = open(locked, created, outdated(false), current, unlocked)
+	if err := m.Up(ctx); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	assertOps(t, rec, sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery)
+
+	// Force, which creates its own set's table, upgrades it the same way.
+	m, rec = open(locked, created, outdated(true), sqltest.Response{}, sqltest.Response{}, unlocked)
+	if err := m.Force(ctx, 0); err != nil {
+		t.Fatalf("Force: %v", err)
+	}
+	if got := rec.SQL(sqltest.OpExec); len(got) < 3 || got[2] != "ALTER TABLE "+migrate.DefaultTable+" UPGRADE" {
+		t.Errorf("Force execs = %q, want the upgrade after the create", got)
+	}
+
+	// A failing upgrade fails the run, naming the set.
+	m, _ = open(locked, created, outdated(true), sqltest.Response{Err: errDriver}, unlocked)
+	var setErr *migrate.SetError
+	if err := m.Up(ctx); !errors.As(err, &setErr) || setErr.Set != "app" || !errors.Is(err, errDriver) {
+		t.Errorf("Up over a failing upgrade = %v, want a SetError wrapping the driver's", err)
+	}
+}
+
 func TestLocked_DialectWithoutLockerFailsUnlessUnlocked(t *testing.T) {
 	pool, rec := sqltest.Open(t, created, history(), sqltest.Response{}, sqltest.Response{})
 	db := sqlate.Wrap(pool, sqltest.Dialect{}) // the stub dialect has no Locker

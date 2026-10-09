@@ -7,8 +7,10 @@
 package postgres_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"os/exec"
 	"slices"
@@ -1001,5 +1003,79 @@ func TestLive_HistoryExistsIsSchemaQualified(t *testing.T) {
 	}
 	if n := count(t, db, "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'live_decoy' AND table_name = $1 AND column_name = 'version'", history); n != 0 {
 		t.Error("the decoy gained the history's columns")
+	}
+}
+
+// Proof: a history table created before v0.5.0, its applied_at a timestamp
+// without time zone, is altered in place on the next Up. The column becomes
+// timestamp with time zone, each stored wall clock is read as UTC whatever
+// the session's zone (Asia/Tokyo here, nine hours from UTC, so a conversion
+// through the session's zone would move the instant), the default still
+// stamps new rows, and a second Up finds the table current and leaves it
+// alone.
+func TestLive_HistoryUpgradeKeepsEachInstant(t *testing.T) {
+	ctx := context.Background()
+	db := liveIn(t, "Asia/Tokyo")
+	const history = "live_upgrade_history"
+	scratch(t, db, history)
+	if _, err := db.ExecContext(ctx, "CREATE TABLE "+history+" (version integer PRIMARY KEY, name text NOT NULL, applied_at timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP, dirty boolean NOT NULL DEFAULT FALSE)"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(ctx, "INSERT INTO "+history+" (version, name, applied_at, dirty) VALUES (1, 'one', '2026-01-15 12:30:00.5', FALSE)"); err != nil {
+		t.Fatal(err)
+	}
+	typeOf := "SELECT data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 AND column_name = 'applied_at'"
+	if got := text(t, db, typeOf, history); got != "timestamp without time zone" {
+		t.Fatalf("old-style applied_at is %q; the proof starts from the wrong shape", got)
+	}
+
+	var logged bytes.Buffer
+	set := []migrate.Migration{
+		{Version: 1, Name: "one", Up: "SELECT 1", Transactional: true},
+		{Version: 2, Name: "two", Up: "SELECT 2", Transactional: true},
+	}
+	m := migrator(t, db, history, set, migrate.Options{Logger: slog.New(slog.NewTextHandler(&logged, nil))})
+	if err := m.Up(ctx); err != nil {
+		t.Fatalf("Up over the old-style history: %v", err)
+	}
+	if got := text(t, db, typeOf, history); got != "timestamp with time zone" {
+		t.Errorf("applied_at after Up is %q, want timestamp with time zone", got)
+	}
+	if n := count(t, db, "SELECT COUNT(*) FROM "+history+" WHERE version = 1 AND applied_at = CAST('2026-01-15 12:30:00.5+00' AS timestamp with time zone)"); n != 1 {
+		t.Errorf("version 1's applied_at = %s, want the stored wall clock read as UTC",
+			text(t, db, "SELECT CAST(applied_at AS text) FROM "+history+" WHERE version = 1"))
+	}
+	if n := count(t, db, "SELECT COUNT(*) FROM "+history+" WHERE version = 2 AND applied_at BETWEEN CURRENT_TIMESTAMP - INTERVAL '1 minute' AND CURRENT_TIMESTAMP"); n != 1 {
+		t.Errorf("version 2's applied_at = %s, want the default's current instant",
+			text(t, db, "SELECT CAST(applied_at AS text) FROM "+history+" WHERE version = 2"))
+	}
+
+	if err := m.Up(ctx); err != nil {
+		t.Fatalf("second Up: %v", err)
+	}
+	if n := strings.Count(logged.String(), "history upgraded"); n != 1 {
+		t.Errorf("history upgraded %d times over two runs, want once:\n%s", n, logged.String())
+	}
+	if n := count(t, db, "SELECT COUNT(*) FROM "+history+" WHERE version = 1 AND applied_at = CAST('2026-01-15 12:30:00.5+00' AS timestamp with time zone)"); n != 1 {
+		t.Error("the second Up moved version 1's instant")
+	}
+}
+
+// Proof: a history the dialect creates is timestamp with time zone from
+// the start, and the outdated check does not report it.
+func TestLive_HistoryIsCreatedTimeZoneAware(t *testing.T) {
+	ctx := context.Background()
+	db := live(t)
+	const history = "live_aware_history"
+	scratch(t, db, history)
+	m := migrator(t, db, history, []migrate.Migration{{Version: 1, Name: "one", Up: "SELECT 1", Transactional: true}}, migrate.Options{})
+	if err := m.Up(ctx); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	if got := text(t, db, "SELECT data_type FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1 AND column_name = 'applied_at'", history); got != "timestamp with time zone" {
+		t.Errorf("applied_at is %q, want timestamp with time zone", got)
+	}
+	if n := count(t, db, postgres.Dialect{}.HistoryOutdated("$1"), history); n != 0 {
+		t.Errorf("HistoryOutdated counts %d for a current table, want 0", n)
 	}
 }

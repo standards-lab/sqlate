@@ -327,8 +327,8 @@ func (m *Migrator) read(ctx context.Context, q querier, l *layer) ([]row, error)
 func (m *Migrator) preflight(ctx context.Context, conn *sql.Conn) ([][]row, error) {
 	applied := make([][]row, len(m.layers))
 	for i, l := range m.layers {
-		if _, err := conn.ExecContext(ctx, l.sql.create); err != nil {
-			return nil, &SetError{Set: l.name, Err: m.db.MapError(err)}
+		if err := m.ensureHistory(ctx, conn, l); err != nil {
+			return nil, &SetError{Set: l.name, Err: err}
 		}
 		rows, err := m.readHistory(ctx, conn, l)
 		if err != nil {
@@ -537,6 +537,27 @@ func (m *Migrator) queryOne(ctx context.Context, q querier, query string, args [
 		return false, m.db.MapError(err)
 	}
 	return true, m.db.MapError(rows.Err())
+}
+
+// ensureHistory creates the layer's history table when it does not exist
+// and, over a catalog that is a HistoryUpgrader, upgrades a table an
+// earlier release created when the catalog reports it outdated.
+func (m *Migrator) ensureHistory(ctx context.Context, conn *sql.Conn, l *layer) error {
+	if _, err := conn.ExecContext(ctx, l.sql.create); err != nil {
+		return m.db.MapError(err)
+	}
+	if l.sql.outdated == "" {
+		return nil
+	}
+	var n int
+	if _, err := m.queryOne(ctx, conn, l.sql.outdated, []any{l.table}, &n); err != nil || n == 0 {
+		return err
+	}
+	if _, err := conn.ExecContext(ctx, l.sql.upgrade); err != nil {
+		return m.db.MapError(err)
+	}
+	m.log("history upgraded", "set", l.name, "table", l.table)
+	return nil
 }
 
 func (m *Migrator) tableExists(ctx context.Context, q querier, l *layer) (bool, error) {
