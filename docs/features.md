@@ -237,6 +237,13 @@ reflection cannot reach an unexported field.
   name and scanned into a fresh `T`. A column `T` has no field for is an error, so a `SELECT`
   list that grows past its entity fails; a field with no column stays zero.
 - `Scalar[T]` is the scan function for a single-column row.
+- Times come back in UTC. Every `time.Time` that `Scanner` and `Scalar` return is in
+  `time.UTC`, whatever zone the process runs in and whatever location the driver gave it. pgx,
+  for one, delivers a `timestamp with time zone` in `time.Local`. This covers a `time.Time`,
+  a `*time.Time`, and a valid `sql.NullTime` or `sql.Null[time.Time]`, including one reached
+  through an embedded struct. Only the location changes: the instant is the same, and a zero
+  time stays zero. A cursor carries a keyed time as UTC text, so the same row issues the same
+  cursor on every host. A hand-written `ScanFunc` gets the driver's values as they are.
 - A `ScanFunc[T]` reads its row through `Row`, an interface of the two methods a scan needs:
   `Columns` and `Scan`. `*sql.Rows` satisfies it, and so does the adapter through which the
   collection read hides its total column from the scan. A scan therefore relies on nothing
@@ -421,7 +428,12 @@ failure), `Verify` reports `ErrDirty`, and the repair is an operator's task: fix
 syntax differs between engines: creating the table and checking that it exists. `Catalog` is
 that pair; a dialect provides it by implementing the two methods, and a dialect that does not
 gets `StandardCatalog`, which serves MySQL and MariaDB. Its existence check matches the table
-name in every schema, so the `postgres` dialect implements `Catalog` itself.
+name in every schema, so the `postgres` dialect implements `Catalog` itself. The history's
+`applied_at` records an instant: `timestamp with time zone` on PostgreSQL, and `timestamp` in
+`StandardCatalog`, which MySQL and MariaDB store as an instant. A dialect can also implement
+`HistoryUpgrader` to bring a history table from an earlier release up to date. Each locked run
+then checks the table after creating it, before reading it, and alters it in place only when
+the check reports it outdated, so a current table is never rewritten.
 
 **Errors.** `ErrNoLocker`, `ErrDirty` (`DirtyError`), `ErrPending` (`PendingError`, the
 unapplied versions), `ErrUnknownVersion` (`UnknownVersionError`, an applied row the set does
@@ -571,8 +583,12 @@ named and never numbered; the lock belongs to the connection's session and outli
 transaction on it. `Unlock` of a lock the session does not hold is `ErrLockNotHeld`.
 
 `CreateHistory` and `HistoryExists` implement `migrate.Catalog`. `CreateHistory` is
-`StandardCatalog`'s DDL unchanged. `HistoryExists` checks for the table in the session's
-current schema, so a table of the same name in another schema does not satisfy it.
+`StandardCatalog`'s DDL with `applied_at` as `timestamp with time zone`. `HistoryExists` checks
+for the table in the session's current schema, so a table of the same name in another schema
+does not satisfy it. `HistoryOutdated` and `UpgradeHistory` implement `migrate.HistoryUpgrader`.
+A history table created before v0.5.0, whose `applied_at` is a `timestamp` without time zone,
+is altered on the next `Up`, `Steps`, `Down`, `Reset`, or `Force`. The column becomes
+`timestamp with time zone`, and each stored wall clock is read as UTC.
 `ServerVersion` returns `SELECT version()`, the statement an administrative read runs to report
 the engine's version.
 
