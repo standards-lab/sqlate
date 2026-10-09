@@ -15,7 +15,7 @@
 // sqlate.Session, so a handle runs against the pool or inside a transaction
 // alike; every error is mapped through the dialect at the runner boundary.
 // Every time.Time the library's own scans, Scanner and Scalar, return is in
-// time.UTC, whatever the process's zone or the driver's location.
+// time.UTC, whatever time.Local is and whatever location the driver gave it.
 // Statement text is build-time only: files under embed, never request
 // input.
 //

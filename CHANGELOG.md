@@ -23,7 +23,7 @@ records instants.
 ### Changed
 
 - **Breaking:** every `time.Time` that `query.Scanner` and `query.Scalar` return is in
-  `time.UTC`, whatever zone the process runs in and whatever location the driver gave it. This
+  `time.UTC`, whatever `time.Local` is and whatever location the driver gave it. This
   covers a `time.Time`, a `*time.Time`, and a valid `sql.NullTime` or `sql.Null[time.Time]`,
   including one reached through an embedded struct. The instant is unchanged and a zero time
   stays zero, but a caller that compared locations or formatted the value without a zone now

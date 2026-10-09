@@ -10,8 +10,6 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"os"
-	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -440,30 +438,13 @@ func TestLive_NotNullNamesTheColumn(t *testing.T) {
 }
 
 // Proof: a timestamp with time zone read through Scanner and Scalar is in
-// time.UTC on a host whose zone is not. pgx delivers the column in
-// time.Local, so the proof runs in a child process with TZ=Europe/London:
-// in summer London's wall clock is an hour ahead and the driver's value
-// prints as BST, while in winter it prints as GMT and only a comparison of
-// whole values tells it from UTC. The child first checks that the driver's
-// own value is not in UTC, so the proof cannot pass vacuously.
+// time.UTC while time.Local is not (Europe/London, from TestMain). pgx
+// delivers the column in time.Local: in summer London's wall clock is an
+// hour ahead and the driver's value prints as BST, while in winter it prints
+// as GMT and only a comparison of whole values tells it from UTC. The proof
+// first checks that the driver's own value is not in UTC, so it cannot pass
+// vacuously.
 func TestLive_ScanReturnsTimesInUTC(t *testing.T) {
-	if os.Getenv("SQLATE_HELPER") != "london" {
-		live(t) // skip before re-executing when the engine is absent
-		exe, err := os.Executable()
-		if err != nil {
-			t.Fatal(err)
-		}
-		cmd := exec.Command(exe, "-test.run=^TestLive_ScanReturnsTimesInUTC$", "-test.v")
-		cmd.Env = append(os.Environ(), "SQLATE_HELPER=london", "TZ=Europe/London")
-		out, err := cmd.CombinedOutput()
-		if err != nil || !strings.Contains(string(out), "--- PASS: TestLive_ScanReturnsTimesInUTC") {
-			t.Fatalf("child under TZ=Europe/London: %v\n%s", err, out)
-		}
-		return
-	}
-	if zone, _ := time.Date(2026, 7, 1, 0, 0, 0, 0, time.Local).Zone(); zone != "BST" {
-		t.Fatalf("time.Local in the child is %q in summer, want BST: TZ=Europe/London did not take", zone)
-	}
 	ctx := context.Background()
 	db := live(t)
 	_, _ = db.ExecContext(ctx, "DROP TABLE IF EXISTS live_utc")

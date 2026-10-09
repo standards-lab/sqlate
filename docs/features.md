@@ -238,7 +238,7 @@ reflection cannot reach an unexported field.
   list that grows past its entity fails; a field with no column stays zero.
 - `Scalar[T]` is the scan function for a single-column row.
 - Times come back in UTC. Every `time.Time` that `Scanner` and `Scalar` return is in
-  `time.UTC`, whatever zone the process runs in and whatever location the driver gave it. pgx,
+  `time.UTC`, whatever `time.Local` is and whatever location the driver gave it. pgx,
   for one, delivers a `timestamp with time zone` in `time.Local`. This covers a `time.Time`,
   a `*time.Time`, and a valid `sql.NullTime` or `sql.Null[time.Time]`, including one reached
   through an embedded struct. Only the location changes: the instant is the same, and a zero

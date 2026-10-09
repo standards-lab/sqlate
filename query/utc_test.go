@@ -6,28 +6,10 @@ import (
 	"database/sql/driver"
 	"testing"
 	"time"
-	_ "time/tzdata" // Europe/London on a host without a zone database
 
 	"github.com/standards-lab/sqlate/query"
 	"github.com/standards-lab/sqlate/sqltest"
 )
-
-// inLondon runs the rest of the test with time.Local set to Europe/London
-// and returns that zone. Its winter abbreviation is GMT, so a time left in
-// it prints as a UTC time does while comparing unequal to one: only a
-// comparison of whole values tells them apart. The previous zone is
-// restored at cleanup; no test in the package runs in parallel.
-func inLondon(t *testing.T) *time.Location {
-	t.Helper()
-	london, err := time.LoadLocation("Europe/London")
-	if err != nil {
-		t.Fatal(err)
-	}
-	local := time.Local
-	time.Local = london
-	t.Cleanup(func() { time.Local = local })
-	return london
-}
 
 // stamped holds every time destination kind Scanner converts, one of them
 // reached through an embedded struct.
@@ -43,12 +25,13 @@ type stamped struct {
 }
 
 func TestScanner_ReturnsTimesInUTC(t *testing.T) {
-	london := inLondon(t)
-	// A winter instant: London's wall clock reads as UTC's, offset zero.
-	at := time.Date(2026, 1, 15, 12, 30, 0, 500, london)
+	// A winter instant: London's wall clock (time.Local, from TestMain)
+	// reads as UTC's, offset zero, so only a comparison of whole values
+	// tells a value left in time.Local from one in time.UTC.
+	at := time.Date(2026, 1, 15, 12, 30, 0, 500, time.Local)
 	utc := time.Date(2026, 1, 15, 12, 30, 0, 500, time.UTC)
 	// A summer instant, an hour ahead of UTC on London's wall clock.
-	summer := time.Date(2026, 7, 1, 9, 0, 0, 0, london)
+	summer := time.Date(2026, 7, 1, 9, 0, 0, 0, time.Local)
 	summerUTC := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
 	db, _ := session(t, sqltest.Response{
 		Columns: []string{"id", "created_at", "updated", "deleted", "seen", "archived", "never", "raw", "missing"},
@@ -85,8 +68,7 @@ func TestScanner_ReturnsTimesInUTC(t *testing.T) {
 }
 
 func TestScalar_ReturnsTimesInUTC(t *testing.T) {
-	london := inLondon(t)
-	at := time.Date(2026, 7, 1, 9, 0, 0, 0, london)
+	at := time.Date(2026, 7, 1, 9, 0, 0, 0, time.Local)
 	utc := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
 	one := func() sqltest.Response {
 		return sqltest.Response{Columns: []string{"at"}, Rows: [][]driver.Value{{at}}}
@@ -113,11 +95,10 @@ func TestScalar_ReturnsTimesInUTC(t *testing.T) {
 }
 
 func TestContinue_CarriesATimeKeyInUTC(t *testing.T) {
-	london := inLondon(t)
 	// The page's last item is keyed by a summer instant London's wall clock
 	// reads an hour ahead of UTC; the cursor carries it as UTC text, so the
 	// same row issues the same cursor on every host.
-	last := time.Date(2026, 7, 1, 9, 0, 0, 0, london)
+	last := time.Date(2026, 7, 1, 9, 0, 0, 0, time.Local)
 	db, _ := session(t, sqltest.WithTotal(members(last.Add(-time.Hour), last, last.Add(time.Hour)), 9))
 	page, err := memberView(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err != nil || page.Next == "" {

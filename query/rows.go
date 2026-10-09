@@ -25,7 +25,8 @@ type Row interface {
 type ScanFunc[T any] func(Row) (T, error)
 
 // Scalar is the ScanFunc for a single-column row. A time comes back in
-// time.UTC whatever the driver's location, as Scanner's do.
+// time.UTC, whatever time.Local is and whatever location the driver gave
+// it, as Scanner's do.
 func Scalar[T any](row Row) (T, error) {
 	var v T
 	if err := row.Scan(&v); err != nil {

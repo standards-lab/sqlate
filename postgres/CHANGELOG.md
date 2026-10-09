@@ -23,12 +23,12 @@ changelog covers this sub-module only; the base module keeps its own.
 - **Breaking:** `Dialect.CreateHistory` creates `applied_at` as `timestamp with time zone`
   instead of `migrate.StandardCatalog`'s `timestamp`, so each row records an instant whatever
   zone the session runs in.
+- **Breaking:** The `sqlate` requirement is v0.5.0, whose `query.Scanner` and `query.Scalar`
+  return every `time.Time` in `time.UTC`, whatever `time.Local` is.
 - Live proofs added. A `timestamp with time zone` read through `query.Scanner` and
-  `query.Scalar` under `TZ=Europe/London` is in UTC. An old-style history table is upgraded
-  once, under a session in `Asia/Tokyo`, keeping each row's instant. A new history is created
-  time-zone-aware.
-
-Requires `github.com/standards-lab/sqlate v0.5.0`.
+  `query.Scalar` with `time.Local` in Europe/London is in `time.UTC`. An old-style history
+  table is upgraded once, under a session in `Asia/Tokyo`, keeping each row's instant. A new
+  history is created time-zone-aware.
 
 ## [v0.4.0] - 2026-09-23
 

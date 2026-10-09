@@ -5,17 +5,14 @@ import (
 	"time"
 )
 
-// Every time a scan the library provides returns is in time.UTC, whatever
-// time zone the process runs in and whatever location the driver gave the
-// value: a driver such as pgx delivers a timestamptz in time.Local, so the
-// same row would read differently on two hosts. The instant is unchanged;
-// only its location is. A zero time stays zero, since its UTC form is
-// itself.
-
-// inUTC moves the time dest points to into UTC, for each destination kind
-// database/sql scans a time into: a time.Time, a *time.Time, a valid
+// inUTC moves the time dest points to into time.UTC, for each destination
+// kind database/sql scans a time into: a time.Time, a *time.Time, a valid
 // sql.NullTime or sql.Null[time.Time], and an untyped destination holding a
-// time.Time. Every other destination is left as it is.
+// time.Time. Every other destination is left as it is. Scanner and Scalar
+// run it on every value they scan, so their times do not depend on
+// time.Local or on the driver: pgx, for one, delivers a timestamptz in
+// time.Local, and the same row would read differently on two hosts. The
+// instant is unchanged, and a zero time stays zero.
 func inUTC(dest any) {
 	switch d := dest.(type) {
 	case *time.Time:
