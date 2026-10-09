@@ -7,11 +7,13 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
-## [v0.2.2] - 2026-10-09
+## [v0.3.0] - 2026-10-09
 
 ### Changed
 
-- Built against the base module's v0.5.0. The linter's findings are unchanged.
+- **Breaking:** The `sqlate` requirement is v0.5.0, whose Scanner and Scalar return every time
+  in `time.UTC`, so a module that requires the linter, a `tool` directive included, builds
+  against it. The linter's findings are unchanged.
 
 Requires `github.com/standards-lab/sqlate v0.5.0`.
 
@@ -76,8 +78,8 @@ The first release of the linter, against `github.com/standards-lab/sqlate v0.1.0
 - `cmd/sqlint`, the command: one root argument, findings as `path:line: message`, exit 1 on
   any finding.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.2.2...HEAD
-[v0.2.2]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.2.1...sqlint/v0.2.2
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.3.0...HEAD
+[v0.3.0]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.2.1...sqlint/v0.3.0
 [v0.2.1]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.2.0...sqlint/v0.2.1
 [v0.2.0]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.1.2...sqlint/v0.2.0
 [v0.1.2]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.1.1...sqlint/v0.1.2
