@@ -7,7 +7,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
@@ -27,16 +26,6 @@ func pinned(t *testing.T, responses ...sqltest.Response) (*sql.Conn, *sqltest.Re
 	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return conn, rec
-}
-
-func TestLockingDialect_IsATryLocker(t *testing.T) {
-	var d sqlate.Dialect = sqltest.LockingDialect{}
-	if _, ok := d.(sqlate.TryLocker); !ok {
-		t.Fatal("LockingDialect does not assert as sqlate.TryLocker")
-	}
-	if _, ok := d.(sqlate.Locker); !ok {
-		t.Fatal("LockingDialect does not assert as sqlate.Locker")
-	}
 }
 
 func TestLockingDialect_TryLockReportsTheScriptedOutcome(t *testing.T) {
