@@ -43,8 +43,11 @@ it.
 engine's syntax for the nth bind parameter, and `MapError`, the classification of a driver
 error into the library's sentinels. A sub-module named for the engine implements it. `Locker`
 is a capability a dialect may add: `Lock` and `Unlock` of a named session-level lock on a
-pinned connection; `migrate` asserts it. `query.Returner` is another: it renders a returning
-command as one statement, and `Compile` asserts it.
+pinned connection; `migrate` asserts it. `TryLocker` embeds `Locker` and adds `TryLock`, which
+tries the same lock without waiting and reports whether it took it: false, and no error, while
+another session holds the name; a protocol that skips its work rather than wait asserts it.
+`query.Returner` is another: it renders a returning command as one statement, and `Compile`
+asserts it.
 
 **Errors.** The root package defines the errors a consumer matches on, and every package keeps
 its own sentinels and error types in one file, `errors.go`, so a package's whole taxonomy is
@@ -464,7 +467,11 @@ fails (`ErrScript`). It supports prepare, so `Verify` has a harness.
 `*MappedError`, so a test proves with one `errors.As` that an error passed through the
 mapping. `ReturningDialect` embeds it and implements `query.Returner` by appending `RETURNING`,
 so a unit suite covers a returning command's single-statement form as well as its fallback,
-which `Dialect` runs. `WithTotal(response, n)` adds the collection read's trailing count
+which `Dialect` runs. `LockingDialect` embeds it and implements `sqlate.TryLocker`, and so
+`sqlate.Locker`: `Lock`, `TryLock`, and `Unlock` each run one statement on the pinned connection
+(`SELECT lock($1)`, `SELECT try_lock($1)`, `SELECT unlock($1)`), so a test scripts their
+outcomes like any other call; an unlock the script answers false is `ErrLockNotHeld`.
+`WithTotal(response, n)` adds the collection read's trailing count
 column, holding `n`, to a scripted response, so a consumer's suite scripts a counted page
 without naming the column.
 
@@ -581,6 +588,10 @@ Each `ConstraintError` carries the constraint, table, and column names the serve
 on a pinned connection. The name enters the engine's key space through `hashtext`, so locks are
 named and never numbered; the lock belongs to the connection's session and outlives any
 transaction on it. `Unlock` of a lock the session does not hold is `ErrLockNotHeld`.
+`TryLock` implements `sqlate.TryLocker` over `pg_try_advisory_lock` in the same key space: it
+takes the lock without waiting and reports false, with no error, while another session holds the
+name through `Lock` or `TryLock`. `Unlock` releases a lock it takes, as does the end of the
+holding connection's session.
 
 `CreateHistory` and `HistoryExists` implement `migrate.Catalog`. `CreateHistory` is
 `StandardCatalog`'s DDL with `applied_at` as `timestamp with time zone`. `HistoryExists` checks

@@ -12,8 +12,8 @@ import (
 // Dialect is what the library needs from an engine: its name, how it renders
 // the nth bind parameter, and how its driver's errors classify. An engine
 // sub-module implements it; a provider library's dialect satisfies it
-// structurally. Capabilities beyond it, Locker and ErrorMapper, are separate
-// interfaces a protocol asserts.
+// structurally. Capabilities beyond it, Locker, TryLocker, and ErrorMapper,
+// are separate interfaces a protocol asserts.
 type Dialect interface {
 	// Name identifies the engine.
 	Name() string
@@ -52,6 +52,18 @@ type ErrorMapper interface {
 type Locker interface {
 	Lock(ctx context.Context, conn *sql.Conn, name string) error
 	Unlock(ctx context.Context, conn *sql.Conn, name string) error
+}
+
+// TryLocker is the dialect capability a protocol takes when it must not
+// wait for a lock another session holds: a Locker that can also try the
+// same named lock without blocking. TryLock reports whether it took the
+// lock; a lock it takes is the same session-scoped lock Lock takes, in the
+// same name space, and the Locker's Unlock on the same conn releases it. A
+// name held by another session, through Lock or TryLock, reports false and
+// no error.
+type TryLocker interface {
+	Locker
+	TryLock(ctx context.Context, conn *sql.Conn, name string) (bool, error)
 }
 
 // Beginner is a session that can open a transaction: *DB, and any type that

@@ -113,7 +113,8 @@ text.
 - **Dialect**: the engine's name, its placeholder syntax, and its error classification, in a
   sub-module named for the engine. Every error is mapped through it.
 - **Capability**: an interface a protocol asserts on the dialect beyond `Dialect` itself:
-  `Locker` for the migration lock, `ErrorMapper` on a session.
+  `Locker` for the migration lock, `TryLocker` for the same lock tried without waiting,
+  `ErrorMapper` on a session.
 
 ## Lint
 

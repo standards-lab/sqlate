@@ -13,6 +13,11 @@ var (
 	ErrArguments  = errors.New("sqltest: argument count does not match the placeholders")
 )
 
+// ErrLockNotHeld is LockingDialect's Unlock of a name the script reports
+// was not held, the counterpart of an engine that answers false to an
+// unlock rather than failing.
+var ErrLockNotHeld = errors.New("sqltest: lock not held")
+
 // MappedError marks an error that passed through Dialect.MapError.
 type MappedError struct{ Err error }
 

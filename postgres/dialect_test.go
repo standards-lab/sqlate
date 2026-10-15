@@ -187,3 +187,53 @@ func TestUnlock_FalseIsErrLockNotHeld(t *testing.T) {
 		t.Errorf("Unlock = %v, want ErrLockNotHeld", err)
 	}
 }
+
+// tryLocker is sqlate.TryLocker's method set, asserted structurally: the
+// module builds standalone against a sqlate release that predates the
+// interface, so the named assertion joins when the requirement moves.
+type tryLocker interface {
+	Lock(ctx context.Context, conn *sql.Conn, name string) error
+	TryLock(ctx context.Context, conn *sql.Conn, name string) (bool, error)
+	Unlock(ctx context.Context, conn *sql.Conn, name string) error
+}
+
+var _ tryLocker = postgres.Dialect{}
+
+func TestTryLock_ReportsTheEngineAnswerOverHashtext(t *testing.T) {
+	ctx := context.Background()
+	pool, rec := sqltest.Open(t,
+		sqltest.Response{Columns: []string{"pg_try_advisory_lock"}, Rows: [][]driver.Value{{true}}},
+		sqltest.Response{Columns: []string{"pg_try_advisory_lock"}, Rows: [][]driver.Value{{false}}},
+	)
+	conn, err := pool.Conn(ctx)
+	if err != nil {
+		t.Fatalf("conn: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	d := postgres.Dialect{}
+	if got, err := d.TryLock(ctx, conn, "app.sweep"); err != nil || !got {
+		t.Errorf("TryLock answered true = %v, %v; want true, nil", got, err)
+	}
+	if got, err := d.TryLock(ctx, conn, "app.sweep"); err != nil || got {
+		t.Errorf("TryLock answered false = %v, %v; want false, nil", got, err)
+	}
+	for _, c := range rec.Calls() {
+		if c.SQL != "SELECT pg_try_advisory_lock(hashtext($1))" || len(c.Args) != 1 || c.Args[0] != "app.sweep" {
+			t.Errorf("call = %+v, want the try-lock over hashtext of the name", c)
+		}
+	}
+}
+
+func TestTryLock_WrapsTheDriverError(t *testing.T) {
+	boom := errors.New("boom")
+	pool, _ := sqltest.Open(t, sqltest.Response{Err: boom})
+	conn, err := pool.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("conn: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	got, err := (postgres.Dialect{}).TryLock(context.Background(), conn, "app.sweep")
+	if got || !errors.Is(err, boom) || !strings.Contains(err.Error(), "app.sweep") {
+		t.Errorf("TryLock = %v, %v; want false and the driver error naming the lock", got, err)
+	}
+}

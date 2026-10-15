@@ -26,4 +26,7 @@
 //   - [Dialect], the stub dialect, and [MappedError], the mark its MapError
 //     leaves on an error
 //   - [ReturningDialect], the stub dialect with the query.Returner capability
+//   - [LockingDialect], the stub dialect with the sqlate.TryLocker capability
+//     (and so sqlate.Locker), and [ErrLockNotHeld], its Unlock of a name the
+//     script reports was not held
 package sqltest

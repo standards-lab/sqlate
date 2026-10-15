@@ -2,7 +2,8 @@
 //
 //   - how the engine renders the nth bind parameter
 //   - how its driver's errors classify
-//   - the session-level advisory lock the migrate protocol takes
+//   - the session-level advisory lock the migrate protocol takes, and its
+//     non-blocking try
 //   - the statement that reads the server's version
 //   - its spelling of the keyset predicate a cursor continues by
 //   - its migrate.Catalog implementation, the history protocol's engine half
@@ -40,7 +41,11 @@
 // enters the engine's key space through hashtext, so locks are named and
 // never numbered; the lock belongs to the connection's session and outlives
 // any transaction on it. Unlock of a lock the session does not hold is
-// [ErrLockNotHeld].
+// [ErrLockNotHeld]. [Dialect.TryLock] implements sqlate.TryLocker over
+// pg_try_advisory_lock in the same key space: it takes the lock without
+// waiting and reports false, with no error, while another session holds the
+// name through Lock or TryLock. Unlock releases a lock it takes, as does the
+// end of the holding connection's session.
 //
 // # Server version
 //
