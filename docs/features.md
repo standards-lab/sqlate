@@ -413,7 +413,12 @@ the migrator follow the same rule.
 
 **The lock.** A run pins one connection, takes the dialect's named lock on it, does its work,
 and releases the lock, so concurrent starters of the same program, in one process or across
-processes, apply the sets once. A dialect without `Locker` fails with `ErrNoLocker` unless
+processes, apply the sets once. A dialect with `TryLocker` is polled while another session holds
+the lock: each refused `TryLock` pauses, from 25ms doubling to a 1s cap, and tries again, and
+the wait ends with the context's error when the context ends, holding nothing. No statement
+stays open while a starter waits, so a holder's `CREATE INDEX CONCURRENTLY`, which waits for
+every open transaction, cannot deadlock with the waiter. A dialect with `Locker` alone waits in
+its blocking `Lock`. A dialect without `Locker` fails with `ErrNoLocker` unless
 `Options.Unlocked` opts out, in which case concurrent starters are unsafe. Inside the lock,
 every run that applies or reverts migrations creates and reads every set's history table first,
 so a dirty set or a history that does not match its set refuses the run before any migration

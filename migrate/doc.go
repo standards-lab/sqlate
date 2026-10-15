@@ -10,6 +10,13 @@
 // run). The NNNN_name.{up,down}.sql file layout is a helper, never the
 // contract.
 //
+// A run waits for the lock without holding a statement open when the
+// dialect implements sqlate.TryLocker: it polls TryLock, backing off between
+// refusals, and stops with the context's error when the context ends. A
+// holder's non-transactional CREATE INDEX CONCURRENTLY waits for every open
+// transaction, so a waiter blocked in a lock statement would deadlock with
+// it. A dialect with sqlate.Locker alone waits in its blocking Lock.
+//
 // A program installed under an earlier single-set migrator adopts sets
 // without migrating its history: the default table and the history's
 // columns are the same.
