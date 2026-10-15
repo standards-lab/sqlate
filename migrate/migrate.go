@@ -406,13 +406,12 @@ func (m *Migrator) revertApplied(ctx context.Context, conn *sql.Conn, l *layer, 
 
 // locked pins a connection, takes the lock when the dialect has one (see
 // lock for how it waits), runs fn, and releases the lock under a context
-// that survives cancellation,
-// before the connection returns to the pool. Once ctx has ended the driver
-// has discarded the connection and the session's end releases the lock, so
-// an unlock failure then is noise and is not reported. A dialect without
-// the capability is ErrNoLocker unless Unlocked. The history tables are
-// not created here: preflight creates every set's table, and Force creates
-// only its own set's.
+// that survives cancellation, before the connection returns to the pool.
+// Once ctx has ended the driver has discarded the connection and the
+// session's end releases the lock, so an unlock failure then is noise and
+// is not reported. A dialect without the capability is ErrNoLocker unless
+// Unlocked. The history tables are not created here: preflight creates
+// every set's table, and Force creates only its own set's.
 func (m *Migrator) locked(ctx context.Context, fn func(context.Context, *sql.Conn) error) (err error) {
 	if m.locker == nil && !m.opts.Unlocked {
 		return ErrNoLocker

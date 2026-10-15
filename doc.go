@@ -39,8 +39,9 @@
 // interfaces a protocol asserts: [Locker], the named session-scoped lock a
 // concurrent-starter protocol such as migration takes; [TryLocker], the
 // same lock tried without waiting, for a protocol that skips its work when
-// another session holds it; and query.Returner, which renders a command
-// that returns its changed row as one statement.
+// another session holds it or, as migration does, polls for it; and
+// query.Returner, which renders a command that returns its changed row as
+// one statement.
 // [Beginner] is the session capability a protocol asserts to open its own
 // transaction.
 //

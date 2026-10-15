@@ -45,7 +45,8 @@ error into the library's sentinels. A sub-module named for the engine implements
 is a capability a dialect may add: `Lock` and `Unlock` of a named session-level lock on a
 pinned connection; `migrate` asserts it. `TryLocker` embeds `Locker` and adds `TryLock`, which
 tries the same lock without waiting and reports whether it took it: false, and no error, while
-another session holds the name; a protocol that skips its work rather than wait asserts it.
+another session holds the name; a protocol that skips its work rather than wait asserts it,
+and `migrate` polls it, when the dialect has it, to wait without holding a statement open.
 `query.Returner` is another: it renders a returning command as one statement, and `Compile`
 asserts it.
 
