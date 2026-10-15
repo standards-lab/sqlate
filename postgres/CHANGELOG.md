@@ -7,6 +7,16 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Added
+
+- `Dialect.TryLock`, implementing `sqlate.TryLocker` over `pg_try_advisory_lock(hashtext(name))`,
+  the key space `Lock` uses. It takes the session-level lock without waiting and reports false,
+  with no error, while another session holds the name through `Lock` or `TryLock`; `Unlock`
+  releases a lock it takes, as does the end of the holding connection's session.
+- Live proof that a name held through `Lock` or `TryLock` on one session is refused to
+  `TryLock` on another, and is granted again after `Unlock` and after the holding connection
+  closes.
+
 ## [v0.5.0] - 2026-10-09
 
 ### Added

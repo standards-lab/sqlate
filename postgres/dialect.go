@@ -14,9 +14,9 @@ import (
 	"github.com/standards-lab/sqlate/query"
 )
 
-// Dialect is the PostgreSQL dialect: sqlate.Dialect plus the sqlate.Locker
-// and query.Returner capabilities and the server-version statement. It has
-// no fields; the zero value is the dialect.
+// Dialect is the PostgreSQL dialect: sqlate.Dialect plus the sqlate.Locker,
+// sqlate.TryLocker, and query.Returner capabilities and the server-version
+// statement. It has no fields; the zero value is the dialect.
 type Dialect struct{}
 
 var (
@@ -149,6 +149,20 @@ func (Dialect) Lock(ctx context.Context, conn *sql.Conn, name string) error {
 		return fmt.Errorf("advisory lock %s: %w", name, err)
 	}
 	return nil
+}
+
+// TryLock takes the session-level advisory lock for name on conn without
+// waiting and reports whether it got it: false, and no error, when another
+// session holds the lock, through Lock or TryLock. The name enters the same
+// key space as Lock's, through hashtext, and Unlock on the same conn
+// releases a lock it takes. This method gives the dialect the
+// sqlate.TryLocker capability.
+func (Dialect) TryLock(ctx context.Context, conn *sql.Conn, name string) (bool, error) {
+	var got bool
+	if err := conn.QueryRowContext(ctx, "SELECT pg_try_advisory_lock(hashtext($1))", name).Scan(&got); err != nil {
+		return false, fmt.Errorf("advisory try-lock %s: %w", name, err)
+	}
+	return got, nil
 }
 
 // Unlock releases the session-level advisory lock for name on conn.
