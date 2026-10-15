@@ -188,17 +188,6 @@ func TestUnlock_FalseIsErrLockNotHeld(t *testing.T) {
 	}
 }
 
-// tryLocker is sqlate.TryLocker's method set, asserted structurally: the
-// module builds standalone against a sqlate release that predates the
-// interface, so the named assertion joins when the requirement moves.
-type tryLocker interface {
-	Lock(ctx context.Context, conn *sql.Conn, name string) error
-	TryLock(ctx context.Context, conn *sql.Conn, name string) (bool, error)
-	Unlock(ctx context.Context, conn *sql.Conn, name string) error
-}
-
-var _ tryLocker = postgres.Dialect{}
-
 func TestTryLock_ReportsTheEngineAnswerOverHashtext(t *testing.T) {
 	ctx := context.Background()
 	pool, rec := sqltest.Open(t,

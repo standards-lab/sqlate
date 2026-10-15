@@ -22,6 +22,7 @@ type Dialect struct{}
 var (
 	_ sqlate.Dialect          = Dialect{}
 	_ sqlate.Locker           = Dialect{}
+	_ sqlate.TryLocker        = Dialect{}
 	_ migrate.Catalog         = Dialect{}
 	_ migrate.HistoryUpgrader = Dialect{}
 	_ query.Returner          = Dialect{}
