@@ -7,6 +7,18 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.6.1] - 2026-10-15
+
+### Fixed
+
+- `migrate` no longer deadlocks a starter waiting for the migration lock while the holder runs a
+  non-transactional `CREATE INDEX CONCURRENTLY`. The waiter's blocking `Lock` held its statement
+  open, the index build waited for that statement, and postgres aborted the waiter with
+  `deadlock detected (SQLSTATE 40P01)`. On a dialect with `TryLocker`, a run now waits by polling
+  `TryLock` on its pinned connection, backing off from 25ms to a 1s cap, so no statement stays
+  open while it waits; the wait ends with the context's error when the context ends. A dialect
+  with `Locker` alone keeps the blocking `Lock`.
+
 ## [v0.6.0] - 2026-10-15
 
 ### Added
@@ -205,7 +217,8 @@ experiment's library packages.
 - `sqltest`, the scripted `database/sql` driver every consumer's unit tier runs over: `Open`,
   `Recorder`, `Response`, and the stub `Dialect`.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.6.1...HEAD
+[v0.6.1]: https://github.com/standards-lab/sqlate/compare/v0.6.0...v0.6.1
 [v0.6.0]: https://github.com/standards-lab/sqlate/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/standards-lab/sqlate/compare/v0.4.1...v0.5.0
 [v0.4.1]: https://github.com/standards-lab/sqlate/compare/v0.4.0...v0.4.1

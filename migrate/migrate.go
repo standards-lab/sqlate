@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"regexp"
 	"slices"
+	"time"
 
 	"github.com/standards-lab/sqlate"
 )
@@ -45,7 +46,19 @@ type Migrator struct {
 	layers []*layer
 	opts   Options
 	locker sqlate.Locker
+	// after is the lock wait's timer, time.After unless a test replaces it,
+	// so the unit suite drives the backoff without sleeping.
+	after func(time.Duration) <-chan time.Time
 }
+
+// The lock wait's backoff between TryLock attempts: the first pause, doubled
+// after each refusal up to the cap. A short first pause keeps a starter
+// that loses a brief race fast; the cap bounds how long a waiter idles
+// after the holder releases.
+const (
+	lockPollFirst = 25 * time.Millisecond
+	lockPollMax   = time.Second
+)
 
 var tableName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
@@ -102,7 +115,7 @@ func New(db *sqlate.DB, sets []Set, opts Options) (*Migrator, error) {
 	if opts.LockName == "" {
 		opts.LockName = "migrate." + layers[len(layers)-1].table
 	}
-	return &Migrator{db: db, layers: layers, opts: opts, locker: locker}, nil
+	return &Migrator{db: db, layers: layers, opts: opts, locker: locker, after: time.After}, nil
 }
 
 // validate checks one set's migrations: versions positive and strictly
@@ -391,14 +404,14 @@ func (m *Migrator) revertApplied(ctx context.Context, conn *sql.Conn, l *layer, 
 	return nil
 }
 
-// locked pins a connection, takes the lock when the dialect has one, runs
-// fn, and releases the lock under a context that survives cancellation,
-// before the connection returns to the pool. Once ctx has ended the driver
-// has discarded the connection and the session's end releases the lock, so
-// an unlock failure then is noise and is not reported. A dialect without
-// the capability is ErrNoLocker unless Unlocked. The history tables are
-// not created here: preflight creates every set's table, and Force creates
-// only its own set's.
+// locked pins a connection, takes the lock when the dialect has one (see
+// lock for how it waits), runs fn, and releases the lock under a context
+// that survives cancellation, before the connection returns to the pool.
+// Once ctx has ended the driver has discarded the connection and the
+// session's end releases the lock, so an unlock failure then is noise and
+// is not reported. A dialect without the capability is ErrNoLocker unless
+// Unlocked. The history tables are not created here: preflight creates
+// every set's table, and Force creates only its own set's.
 func (m *Migrator) locked(ctx context.Context, fn func(context.Context, *sql.Conn) error) (err error) {
 	if m.locker == nil && !m.opts.Unlocked {
 		return ErrNoLocker
@@ -413,7 +426,7 @@ func (m *Migrator) locked(ctx context.Context, fn func(context.Context, *sql.Con
 		}
 	}()
 	if m.locker != nil && !m.opts.Unlocked {
-		if err := m.locker.Lock(ctx, conn, m.opts.LockName); err != nil {
+		if err := m.lock(ctx, conn); err != nil {
 			return m.db.MapError(err)
 		}
 		defer func() {
@@ -423,6 +436,38 @@ func (m *Migrator) locked(ctx context.Context, fn func(context.Context, *sql.Con
 		}()
 	}
 	return fn(ctx, conn)
+}
+
+// lock takes the migration lock on conn. A dialect with TryLocker is polled:
+// each refusal pauses, from lockPollFirst doubling to lockPollMax, and
+// tries again, so no statement stays open on conn while another session
+// holds the lock. A blocking Lock would hold its statement open for the
+// whole wait, and a holder running CREATE INDEX CONCURRENTLY waits for
+// every open transaction, the waiter's lock statement included, which
+// postgres reports as a deadlock (40P01) and aborts the waiter. A dialect
+// with Locker alone keeps its blocking Lock. The wait ends with ctx's
+// error when ctx ends, holding nothing.
+func (m *Migrator) lock(ctx context.Context, conn *sql.Conn) error {
+	try, ok := m.locker.(sqlate.TryLocker)
+	if !ok {
+		return m.locker.Lock(ctx, conn, m.opts.LockName)
+	}
+	pause := lockPollFirst
+	for {
+		got, err := try.TryLock(ctx, conn, m.opts.LockName)
+		if err != nil {
+			return err
+		}
+		if got {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-m.after(pause):
+		}
+		pause = min(2*pause, lockPollMax)
+	}
 }
 
 // applyOne runs one migration of one layer: in a transaction with its

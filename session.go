@@ -55,8 +55,9 @@ type Locker interface {
 }
 
 // TryLocker is the dialect capability a protocol takes when it must not
-// wait for a lock another session holds: a Locker that can also try the
-// same named lock without blocking. TryLock reports whether it took the
+// wait for a lock another session holds, or must wait without holding a
+// statement open, as migrate does by polling: a Locker that can also try
+// the same named lock without blocking. TryLock reports whether it took the
 // lock; a lock it takes is the same session-scoped lock Lock takes, in the
 // same name space, and the Locker's Unlock on the same conn releases it. A
 // name held by another session, through Lock or TryLock, reports false and

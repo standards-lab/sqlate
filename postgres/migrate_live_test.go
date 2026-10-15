@@ -766,6 +766,33 @@ func waitForWaiters(t *testing.T, db *sqlate.DB, n int) {
 	}
 }
 
+// waitForQueue polls pg_stat_activity, scoped to the test's database, until
+// one starter waits on the gate inside its run, holding the migrator's lock,
+// and another waits for that lock: refused by a try-lock it polls, or, on a
+// dialect migrate cannot poll, blocked in the lock statement. A polling
+// waiter is idle between attempts, and pg_stat_activity keeps an idle
+// backend's last statement, so only a try-lock issued after the wait began
+// counts: the waiter retries within a second, while a backend left idle
+// after an earlier try-lock never does. The gate holder's own lock
+// statement is idle, so it never counts as the waiter.
+func waitForQueue(t *testing.T, db *sqlate.DB) {
+	t.Helper()
+	const (
+		scope   = "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = current_database() AND "
+		gated   = scope + "wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock%'"
+		queued  = scope + "((query = 'SELECT pg_try_advisory_lock(hashtext($1))' AND query_start > $1::timestamptz) OR (query = 'SELECT pg_advisory_lock(hashtext($1))' AND wait_event_type = 'Lock'))"
+		timeout = 20 * time.Second
+	)
+	since := text(t, db, "SELECT clock_timestamp()::text")
+	deadline := time.Now().Add(timeout)
+	for count(t, db, gated) < 1 || count(t, db, queued, since) < 1 {
+		if time.Now().After(deadline) {
+			t.Fatal("no starter waits on the gate with another queued for the migrator's lock")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
 // startBoth releases two starters through a barrier and runs each one's Up,
 // returning the two errors once both have ended.
 func startBoth(ctx context.Context, a, b *migrate.Migrator) (errA, errB error) {
@@ -787,7 +814,7 @@ func startBoth(ctx context.Context, a, b *migrate.Migrator) (errA, errB error) {
 // Proof: two starters serialize under one lock. Two migrators over the gate
 // set and both real sets start Up together on one empty database. The first
 // to take the lock blocks on the gate inside its first migration; the test
-// sees the second waiting on a lock (the migrator's) before it releases the
+// sees the second waiting for the migrator's lock before it releases the
 // gate. Both succeed, every migration is applied once, and each history
 // holds one row per migration. The control runs the same race Unlocked: the
 // second starter then waits on the first's transaction instead and fails
@@ -811,7 +838,7 @@ func TestLive_MultisetStartersSerialize(t *testing.T) {
 		defer close(finished)
 		errA, errB = startBoth(ctx, a, b)
 	}()
-	waitForWaiters(t, db, 2)
+	waitForQueue(t, db)
 	release()
 	<-finished
 	if errA != nil || errB != nil {
@@ -1077,5 +1104,51 @@ func TestLive_HistoryIsCreatedTimeZoneAware(t *testing.T) {
 	}
 	if n := count(t, db, postgres.Dialect{}.HistoryOutdated("$1"), history); n != 0 {
 		t.Errorf("HistoryOutdated counts %d for a current table, want 0", n)
+	}
+}
+
+// Proof: a concurrent index build does not deadlock the waiter. The first
+// starter to take the lock creates a table and blocks on the gate inside
+// that migration; the test sees the second waiting for the migrator's lock,
+// then releases the gate, and the holder runs CREATE INDEX CONCURRENTLY,
+// which waits for every transaction open when it starts. A waiter blocked in
+// pg_advisory_lock holds its statement open, so the build and the waiter
+// wait on each other and postgres aborts one with deadlock_detected (40P01);
+// migrate polls pg_try_advisory_lock instead, leaving nothing open while it
+// waits. Both starters succeed, each migration is applied once, and the
+// index exists and is valid.
+func TestLive_ConcurrentIndexBuildDoesNotDeadlockTheWaiter(t *testing.T) {
+	ctx := context.Background()
+	db := live(t)
+	scratch(t, db, "live_cic_history", "live_cic")
+	set := []migrate.Migration{
+		{
+			Version:       1,
+			Name:          "table",
+			Up:            "CREATE TABLE live_cic (x int);\nSELECT pg_advisory_xact_lock(hashtext('" + gateName + "'));",
+			Down:          "DROP TABLE live_cic",
+			Transactional: true,
+		},
+		{Version: 2, Name: "index", Up: "CREATE INDEX CONCURRENTLY live_cic_x ON live_cic (x)", Down: "DROP INDEX CONCURRENTLY live_cic_x"},
+	}
+	release := holdGate(t, db)
+	a := migrator(t, db, "live_cic_history", set, migrate.Options{})
+	b := migrator(t, db, "live_cic_history", set, migrate.Options{})
+	var errA, errB error
+	finished := make(chan struct{})
+	go func() {
+		defer close(finished)
+		errA, errB = startBoth(ctx, a, b)
+	}()
+	waitForQueue(t, db)
+	release()
+	<-finished
+	if errA != nil || errB != nil {
+		t.Fatalf("starters over a concurrent index build: a = %v (SQLSTATE %q), b = %v (SQLSTATE %q); want both to succeed",
+			errA, sqlState(errA), errB, sqlState(errB))
+	}
+	assertAppliedOnce(t, db, "live_cic_history", len(set))
+	if exists, valid := indexValid(t, db, "live_cic_x"); !exists || !valid {
+		t.Errorf("index live_cic_x exists=%v valid=%v, want one valid index", exists, valid)
 	}
 }

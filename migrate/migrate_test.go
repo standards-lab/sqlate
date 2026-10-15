@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/migrate"
@@ -558,5 +559,112 @@ func TestOptions_TableAndLockNameDefaultsAndOverrides(t *testing.T) {
 	_ = m2.Up(context.Background())
 	if rec1.Calls()[0].Args[0] != "migrate.schema_version" || rec2.Calls()[0].Args[0] != "migrate.other" {
 		t.Errorf("default lock names = %v, %v", rec1.Calls()[0].Args[0], rec2.Calls()[0].Args[0])
+	}
+}
+
+// tryLockAnswer is the scripted try-lock row: true grants the lock, false
+// is a refusal while another session holds it.
+func tryLockAnswer(granted bool) sqltest.Response {
+	return sqltest.Response{Columns: []string{"try_lock"}, Rows: [][]driver.Value{{granted}}}
+}
+
+// newTryMigrator builds a one-set migrator, over the first migration only,
+// on sqltest.LockingDialect, so the run takes the lock by polling TryLock,
+// with its lock-wait timer replaced by after.
+func newTryMigrator(t *testing.T, after func(time.Duration) <-chan time.Time, responses ...sqltest.Response) (*migrate.Migrator, *sqltest.Recorder) {
+	t.Helper()
+	pool, rec := sqltest.Open(t, responses...)
+	m, err := migrate.New(sqlate.Wrap(pool, sqltest.LockingDialect{}), []migrate.Set{{Name: "app", Migrations: set[:1]}}, migrate.Options{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	migrate.SetAfter(m, after)
+	return m, rec
+}
+
+// fired is a lock-wait timer that has already fired.
+func fired() <-chan time.Time {
+	c := make(chan time.Time, 1)
+	c <- time.Time{}
+	return c
+}
+
+func TestLocked_TryLockerPollsUntilGranted(t *testing.T) {
+	const refusals = 8 // enough to reach the cap and hold it
+	responses := make([]sqltest.Response, 0, refusals+6)
+	for range refusals {
+		responses = append(responses, tryLockAnswer(false))
+	}
+	responses = append(responses, tryLockAnswer(true), created, history(), sqltest.Response{}, sqltest.Response{}, unlocked)
+	var pauses []time.Duration
+	m, rec := newTryMigrator(t, func(d time.Duration) <-chan time.Time {
+		pauses = append(pauses, d)
+		return fired()
+	}, responses...)
+	if err := m.Up(context.Background()); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	// One pause per refusal: the documented schedule, 25ms doubling to a 1s
+	// cap.
+	ms := time.Millisecond
+	want := []time.Duration{25 * ms, 50 * ms, 100 * ms, 200 * ms, 400 * ms, 800 * ms, time.Second, time.Second}
+	if !slices.Equal(pauses, want) {
+		t.Errorf("pauses = %v, want %v", pauses, want)
+	}
+	calls := rec.Calls()
+	for i := range refusals + 1 {
+		if calls[i].SQL != "SELECT try_lock($1)" || calls[i].Args[0] != "migrate.schema_version" {
+			t.Errorf("call %d = %+v, want the named try-lock", i, calls[i])
+		}
+	}
+	if slices.ContainsFunc(calls, func(c sqltest.Call) bool { return c.SQL == "SELECT lock($1)" }) {
+		t.Error("a TryLocker dialect was waited on with the blocking Lock")
+	}
+	if last := calls[len(calls)-1]; last.SQL != "SELECT unlock($1)" {
+		t.Errorf("last call = %q, want the unlock", last.SQL)
+	}
+	if rec.Pending() != 0 {
+		t.Errorf("%d scripted responses unconsumed", rec.Pending())
+	}
+}
+
+func TestLocked_ContextEndingDuringTheWaitHoldsNothing(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m, rec := newTryMigrator(t, func(time.Duration) <-chan time.Time {
+		cancel()
+		return nil // never fires: only ctx ends the wait
+	}, tryLockAnswer(false))
+	if err := m.Up(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("Up = %v, want context.Canceled", err)
+	}
+	// The one refused try-lock and nothing after it: no lock is held, so
+	// none is released, and the run did no work.
+	assertOps(t, rec, sqltest.OpQuery)
+}
+
+func TestLocked_TryLockErrorIsMapped(t *testing.T) {
+	m, rec := newTryMigrator(t, func(time.Duration) <-chan time.Time {
+		t.Error("the run paused after a failed try-lock")
+		return fired()
+	}, sqltest.Response{Err: errDriver})
+	err := m.Up(context.Background())
+	if _, mapped := errors.AsType[*sqltest.MappedError](err); !mapped || !errors.Is(err, errDriver) {
+		t.Fatalf("Up = %v, want the driver's error, mapped", err)
+	}
+	assertOps(t, rec, sqltest.OpQuery)
+}
+
+func TestLocked_LockerWithoutTryLockerBlocksOnLock(t *testing.T) {
+	m, rec := newMigrator(t, migrate.Options{}, locked, created, sqltest.Response{}, unlocked)
+	migrate.SetAfter(m, func(time.Duration) <-chan time.Time {
+		t.Error("a dialect without TryLocker polled")
+		return fired()
+	})
+	if err := m.Force(context.Background(), 0); err != nil {
+		t.Fatalf("Force: %v", err)
+	}
+	if calls := rec.Calls(); calls[0].SQL != "SELECT lock($1)" {
+		t.Errorf("first call = %q, want the blocking lock", calls[0].SQL)
 	}
 }

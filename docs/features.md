@@ -45,7 +45,8 @@ error into the library's sentinels. A sub-module named for the engine implements
 is a capability a dialect may add: `Lock` and `Unlock` of a named session-level lock on a
 pinned connection; `migrate` asserts it. `TryLocker` embeds `Locker` and adds `TryLock`, which
 tries the same lock without waiting and reports whether it took it: false, and no error, while
-another session holds the name; a protocol that skips its work rather than wait asserts it.
+another session holds the name; a protocol that skips its work rather than wait asserts it,
+and `migrate` polls it, when the dialect has it, to wait without holding a statement open.
 `query.Returner` is another: it renders a returning command as one statement, and `Compile`
 asserts it.
 
@@ -413,7 +414,12 @@ the migrator follow the same rule.
 
 **The lock.** A run pins one connection, takes the dialect's named lock on it, does its work,
 and releases the lock, so concurrent starters of the same program, in one process or across
-processes, apply the sets once. A dialect without `Locker` fails with `ErrNoLocker` unless
+processes, apply the sets once. A dialect with `TryLocker` is polled while another session holds
+the lock: each refused `TryLock` pauses, from 25ms doubling to a 1s cap, and tries again, and
+the wait ends with the context's error when the context ends, holding nothing. No statement
+stays open while a starter waits, so a holder's `CREATE INDEX CONCURRENTLY`, which waits for
+every open transaction, cannot deadlock with the waiter. A dialect with `Locker` alone waits in
+its blocking `Lock`. A dialect without `Locker` fails with `ErrNoLocker` unless
 `Options.Unlocked` opts out, in which case concurrent starters are unsafe. Inside the lock,
 every run that applies or reverts migrations creates and reads every set's history table first,
 so a dirty set or a history that does not match its set refuses the run before any migration
