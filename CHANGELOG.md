@@ -7,6 +7,17 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+### Added
+
+- `TryLocker`, the dialect capability beside `Locker` that tries a named session-scoped lock
+  without waiting. `TryLock(ctx, conn, name)` reports whether it took the lock, and the
+  `Locker`'s `Unlock` releases it. A name another session holds, through `Lock` or `TryLock`,
+  reports false and no error. `TryLocker` embeds `Locker`, so one assertion finds both.
+- `sqltest.LockingDialect`, the stub dialect with the `TryLocker` capability, so a consumer's
+  unit suite scripts a protocol that takes a lock. `Lock`, `TryLock`, and `Unlock` each run one
+  statement on the pinned connection (`SELECT lock($1)`, `SELECT try_lock($1)`,
+  `SELECT unlock($1)`), and an unlock the script answers false is `sqltest.ErrLockNotHeld`.
+
 ## [v0.5.0] - 2026-10-09
 
 Times the library returns no longer depend on the host's zone, and the migration history
