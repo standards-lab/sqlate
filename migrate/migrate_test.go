@@ -590,7 +590,7 @@ func fired() <-chan time.Time {
 }
 
 func TestLocked_TryLockerPollsUntilGranted(t *testing.T) {
-	const refusals = 8
+	const refusals = 8 // enough to reach the cap and hold it
 	responses := make([]sqltest.Response, 0, refusals+6)
 	for range refusals {
 		responses = append(responses, tryLockAnswer(false))
@@ -604,16 +604,12 @@ func TestLocked_TryLockerPollsUntilGranted(t *testing.T) {
 	if err := m.Up(context.Background()); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	// One pause per refusal, doubling from the first and capped.
-	want := make([]time.Duration, refusals)
-	for i, d := 0, migrate.LockPollFirst; i < refusals; i, d = i+1, min(2*d, migrate.LockPollMax) {
-		want[i] = d
-	}
+	// One pause per refusal: the documented schedule, 25ms doubling to a 1s
+	// cap.
+	ms := time.Millisecond
+	want := []time.Duration{25 * ms, 50 * ms, 100 * ms, 200 * ms, 400 * ms, 800 * ms, time.Second, time.Second}
 	if !slices.Equal(pauses, want) {
 		t.Errorf("pauses = %v, want %v", pauses, want)
-	}
-	if want[refusals-1] != migrate.LockPollMax {
-		t.Errorf("the schedule never reached the cap: %v", want)
 	}
 	calls := rec.Calls()
 	for i := range refusals + 1 {

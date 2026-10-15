@@ -769,18 +769,23 @@ func waitForWaiters(t *testing.T, db *sqlate.DB, n int) {
 // waitForQueue polls pg_stat_activity, scoped to the test's database, until
 // one starter waits on the gate inside its run, holding the migrator's lock,
 // and another waits for that lock: refused by a try-lock it polls, or, on a
-// dialect migrate cannot poll, blocked in the lock statement. The gate
-// holder's own lock statement is idle, so it never counts as the waiter.
+// dialect migrate cannot poll, blocked in the lock statement. A polling
+// waiter is idle between attempts, and pg_stat_activity keeps an idle
+// backend's last statement, so only a try-lock issued after the wait began
+// counts: the waiter retries within a second, while a backend left idle
+// after an earlier try-lock never does. The gate holder's own lock
+// statement is idle, so it never counts as the waiter.
 func waitForQueue(t *testing.T, db *sqlate.DB) {
 	t.Helper()
 	const (
 		scope   = "SELECT COUNT(*) FROM pg_stat_activity WHERE datname = current_database() AND "
 		gated   = scope + "wait_event_type = 'Lock' AND query LIKE '%pg_advisory_xact_lock%'"
-		queued  = scope + "(query = 'SELECT pg_try_advisory_lock(hashtext($1))' OR (query = 'SELECT pg_advisory_lock(hashtext($1))' AND wait_event_type = 'Lock'))"
+		queued  = scope + "((query = 'SELECT pg_try_advisory_lock(hashtext($1))' AND query_start > $1::timestamptz) OR (query = 'SELECT pg_advisory_lock(hashtext($1))' AND wait_event_type = 'Lock'))"
 		timeout = 20 * time.Second
 	)
+	since := text(t, db, "SELECT clock_timestamp()::text")
 	deadline := time.Now().Add(timeout)
-	for count(t, db, gated) < 1 || count(t, db, queued) < 1 {
+	for count(t, db, gated) < 1 || count(t, db, queued, since) < 1 {
 		if time.Now().After(deadline) {
 			t.Fatal("no starter waits on the gate with another queued for the migrator's lock")
 		}
