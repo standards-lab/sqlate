@@ -7,6 +7,8 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.6.1] - 2026-10-15
+
 ### Fixed
 
 - `migrate` no longer deadlocks a starter waiting for the migration lock while the holder runs a
@@ -215,7 +217,8 @@ experiment's library packages.
 - `sqltest`, the scripted `database/sql` driver every consumer's unit tier runs over: `Open`,
   `Recorder`, `Response`, and the stub `Dialect`.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.6.1...HEAD
+[v0.6.1]: https://github.com/standards-lab/sqlate/compare/v0.6.0...v0.6.1
 [v0.6.0]: https://github.com/standards-lab/sqlate/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/standards-lab/sqlate/compare/v0.4.1...v0.5.0
 [v0.4.1]: https://github.com/standards-lab/sqlate/compare/v0.4.0...v0.4.1
