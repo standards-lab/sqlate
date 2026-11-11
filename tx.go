@@ -61,11 +61,11 @@ func (d *DB) Transact[T any](ctx context.Context, fn func(*Tx) (T, error), opts 
 
 // Transact runs fn as one unit of work with a result in a transaction b
 // opens: begin with opts (nil for a default transaction), fn, commit on
-// success. On fn's error it rolls back
-// and returns that error, with a rollback failure joined onto it. A panic in
-// fn rolls back and re-panics, so no transaction leaks to the pool's reaper.
-// b is *DB or any type that embeds it, so a protocol handed a session it
-// asserts to Beginner runs its unit the way DB.Transact does.
+// success. On fn's error it rolls back and returns that error, with a
+// rollback failure joined onto it. A panic in fn rolls back and re-panics,
+// so no transaction leaks to the pool's reaper. b is *DB or any type that
+// embeds it, so a protocol handed a session it asserts to Beginner runs its
+// unit the way DB.Transact does.
 func Transact[T any](ctx context.Context, b Beginner, fn func(*Tx) (T, error), opts *sql.TxOptions) (T, error) {
 	var zero T
 	tx, err := b.Begin(ctx, opts)
