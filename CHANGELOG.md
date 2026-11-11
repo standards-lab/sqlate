@@ -7,6 +7,71 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-11-11
+
+A transaction's configuration is the standard library's `*sql.TxOptions`, passed as a trailing
+argument, not variadic option functions: `DB.Begin`, `DB.Transact`, and `Transact` take it, and
+nil keeps a default transaction.
+
+### Changed
+
+- **Breaking:** `DB.Begin(ctx, opts)` takes a `*sql.TxOptions` in place of variadic `TxOption`
+  values. Nil opens a default transaction; a non-nil value's `Isolation` and `ReadOnly` reach
+  the driver.
+- **Breaking:** `DB.Transact(ctx, fn, opts)` and `Transact(ctx, b, fn, opts)` take a required
+  trailing `*sql.TxOptions` in place of variadic `TxOption` values. A call with no option
+  passes nil.
+- **Breaking:** `Beginner.Begin` has `DB.Begin`'s new signature,
+  `Begin(ctx context.Context, opts *sql.TxOptions) (*Tx, error)`, so a type that implements
+  `Beginner` with its own `Begin` changes its signature. A type embedding `*DB` is unaffected.
+
+### Removed
+
+- **Breaking:** `TxOption` and the `Isolation` and `ReadOnly` option functions, with no
+  aliases. Set `sql.TxOptions.Isolation` and `sql.TxOptions.ReadOnly`.
+
+### Migrating from v0.6.x
+
+- **Options become one `*sql.TxOptions` value.** Pass nil for a default transaction.
+
+  ```go
+  // v0.6.x
+  tx, err := db.Begin(ctx)
+  tx, err := db.Begin(ctx, sqlate.Isolation(sql.LevelSerializable))
+  tx, err := db.Begin(ctx, sqlate.Isolation(sql.LevelRepeatableRead), sqlate.ReadOnly())
+
+  // v0.7.0
+  tx, err := db.Begin(ctx, nil)
+  tx, err := db.Begin(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+  tx, err := db.Begin(ctx, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+  ```
+
+- **`Transact` takes the options as its last argument.** A call that passed none passes nil.
+
+  ```go
+  // v0.6.x
+  n, err := db.Transact(ctx, fn)
+  n, err := sqlate.Transact(ctx, b, fn, sqlate.ReadOnly())
+
+  // v0.7.0
+  n, err := db.Transact(ctx, fn, nil)
+  n, err := sqlate.Transact(ctx, b, fn, &sql.TxOptions{ReadOnly: true})
+  ```
+
+- **A `Beginner` implementer's `Begin` takes `*sql.TxOptions`.** Pass the value on unchanged.
+
+  ```go
+  // v0.6.x
+  func (a *AppDB) Begin(ctx context.Context, opts ...sqlate.TxOption) (*sqlate.Tx, error) {
+  	return a.DB.Begin(ctx, opts...)
+  }
+
+  // v0.7.0
+  func (a *AppDB) Begin(ctx context.Context, opts *sql.TxOptions) (*sqlate.Tx, error) {
+  	return a.DB.Begin(ctx, opts)
+  }
+  ```
+
 ## [v0.6.1] - 2026-10-15
 
 ### Fixed
@@ -217,7 +282,8 @@ experiment's library packages.
 - `sqltest`, the scripted `database/sql` driver every consumer's unit tier runs over: `Open`,
   `Recorder`, `Response`, and the stub `Dialect`.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.7.0...HEAD
+[v0.7.0]: https://github.com/standards-lab/sqlate/compare/v0.6.1...v0.7.0
 [v0.6.1]: https://github.com/standards-lab/sqlate/compare/v0.6.0...v0.6.1
 [v0.6.0]: https://github.com/standards-lab/sqlate/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/standards-lab/sqlate/compare/v0.4.1...v0.5.0
