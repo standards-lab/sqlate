@@ -31,8 +31,8 @@ reach the driver, as in `&sql.TxOptions{Isolation: sql.LevelSerializable, ReadOn
 options: it begins, calls `fn(tx)`, commits on success, and returns `fn`'s result. On
 `fn`'s error it rolls back and returns that error with a rollback failure joined onto it. A
 panic in `fn` rolls back and re-panics, so no transaction leaks to the pool. `Beginner` is the
-interface of a session that can open a transaction, its `Begin` with `DB.Begin`'s signature,
-satisfied by `*DB` and any type embedding it. A protocol handed a session rather than a
+interface of a session that can open a transaction. Its `Begin` has `DB.Begin`'s signature, and
+`*DB` and any type embedding it satisfy it. A protocol handed a session rather than a
 transaction asserts `Beginner` to open its own. `sqlate.Transact(ctx, b, fn, opts)` is the same
 runner over any `Beginner`, so a protocol, or an application's own pool type embedding `*DB`,
 runs its unit exactly as `DB.Transact` does; `DB.Transact` is `Transact` over the `*DB`.

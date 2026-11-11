@@ -14,10 +14,9 @@ type Tx struct {
 	dialect Dialect
 }
 
-// Begin opens a transaction with opts, the standard library's options
-// passed to the driver as given: nil opens a default transaction, and a
-// non-nil value's isolation level and read-only flag reach the driver
-// unchanged. A failure to begin wraps ErrConnectionFailed.
+// Begin opens a transaction with opts, which it passes to the driver as
+// given; nil opens a default transaction. A failure to begin wraps
+// ErrConnectionFailed.
 func (d *DB) Begin(ctx context.Context, opts *sql.TxOptions) (*Tx, error) {
 	tx, err := d.pool.BeginTx(ctx, opts)
 	if err != nil {
