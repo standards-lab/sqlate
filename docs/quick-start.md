@@ -572,7 +572,7 @@ func (s *Store) Seed(ctx context.Context, rows []SeedTeam) (int64, error) {
 			inserted += n
 		}
 		return inserted, nil
-	})
+	}, nil)
 }
 
 // Create validates the command and runs it; the result is the new row's
@@ -619,7 +619,7 @@ func (s *Store) Replace(ctx context.Context, id string, version int64, t NewTeam
 			return Identity{}, err
 		}
 		return s.create.One(ctx, tx, query.ArgsOf(t))
-	})
+	}, nil)
 }
 ```
 
@@ -638,7 +638,8 @@ func (s *Store) Replace(ctx context.Context, id string, version int64, t NewTeam
 - `Rename` validates, then runs the guarded command with the version the caller read and
   returns the new one; `With` adds the id the command needs beside the command's own fields.
 - `Replace` runs two commands as one unit of work: `Transact` commits on success and rolls back
-  on error or panic.
+  on error or panic. Its last argument is the transaction's `*sql.TxOptions`; nil is a default
+  transaction, and `&sql.TxOptions{Isolation: sql.LevelSerializable}` would run it serializable.
 
 ## 9. Test without a database
 

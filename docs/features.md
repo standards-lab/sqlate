@@ -23,17 +23,19 @@ dialect before returning it. `ErrorMapper` is the capability both expose for err
 after a call returns, from `rows.Err` and `Scan`; the typed values use it, and a consumer
 running raw SQL through a session can too.
 
-**Transactions.** `DB.Begin(ctx, opts...)` opens a `*Tx` with `TxOption` values applied:
-`Isolation(level)` and `ReadOnly()`. `Tx.Commit` maps its error, the one place a violation
-deferred to `COMMIT` can be classified; `Tx.Rollback` does not. `DB.Transact(ctx, fn, opts...)`
-is the runner: it begins, calls `fn(tx)`, commits on success, and returns `fn`'s result. On
+**Transactions.** `DB.Begin(ctx, opts)` opens a `*Tx` with the standard library's
+`*sql.TxOptions`: nil is a default transaction, and a non-nil value's `Isolation` and `ReadOnly`
+reach the driver, as in `&sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: true}`.
+`Tx.Commit` maps its error, the one place a violation deferred to `COMMIT` can be classified;
+`Tx.Rollback` does not. `DB.Transact(ctx, fn, opts)` is the runner, taking the same trailing
+options: it begins, calls `fn(tx)`, commits on success, and returns `fn`'s result. On
 `fn`'s error it rolls back and returns that error with a rollback failure joined onto it. A
 panic in `fn` rolls back and re-panics, so no transaction leaks to the pool. `Beginner` is the
-interface of a session that can open a transaction, satisfied by `*DB` and any type embedding
-it. A protocol handed a session rather than a transaction asserts `Beginner` to open its own.
-`sqlate.Transact(ctx, b, fn, opts...)` is the same runner over any `Beginner`, so a protocol, or
-an application's own pool type embedding `*DB`, runs its unit exactly as `DB.Transact` does;
-`DB.Transact` is `Transact` over the `*DB`.
+interface of a session that can open a transaction. Its `Begin` has `DB.Begin`'s signature, and
+`*DB` and any type embedding it satisfy it. A protocol handed a session rather than a
+transaction asserts `Beginner` to open its own. `sqlate.Transact(ctx, b, fn, opts)` is the same
+runner over any `Beginner`, so a protocol, or an application's own pool type embedding `*DB`,
+runs its unit exactly as `DB.Transact` does; `DB.Transact` is `Transact` over the `*DB`.
 
 **Pinned connections.** `DB.Conn(ctx)` pins one connection for a protocol that needs session
 scope: a session-level lock, or DDL an engine refuses inside a transaction. The caller closes

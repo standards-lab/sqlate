@@ -124,9 +124,9 @@ func (c *counted) QueryContext(ctx context.Context, q string, args ...any) (*sql
 	return c.DB.QueryContext(ctx, q, args...)
 }
 
-func (c *counted) Begin(ctx context.Context, opts ...sqlate.TxOption) (*sqlate.Tx, error) {
+func (c *counted) Begin(ctx context.Context, opts *sql.TxOptions) (*sqlate.Tx, error) {
 	c.begin++
-	return c.DB.Begin(ctx, opts...)
+	return c.DB.Begin(ctx, opts)
 }
 
 // calls is what one scenario cost: the session's calls and the engine's
@@ -465,7 +465,7 @@ func TestLive_ReturningInsideACallersTransaction(t *testing.T) {
 				return row, fmt.Errorf("retire again: %+v, changed %v: %w", row, changed, err)
 			}
 			return row, nil
-		})
+		}, nil)
 		sent := tr.take()
 		if err != nil {
 			t.Errorf("%s: Transact: %v", f.name, err)

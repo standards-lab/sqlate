@@ -70,8 +70,9 @@ type TryLocker interface {
 // Beginner is a session that can open a transaction: *DB, and any type that
 // embeds it. A protocol that must run several statements as one unit, and
 // is handed a session rather than a transaction, asserts it to open its own.
+// Begin has DB.Begin's signature: nil opts opens a default transaction.
 type Beginner interface {
-	Begin(ctx context.Context, opts ...TxOption) (*Tx, error)
+	Begin(ctx context.Context, opts *sql.TxOptions) (*Tx, error)
 }
 
 var _ Beginner = (*DB)(nil)

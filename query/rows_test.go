@@ -163,7 +163,7 @@ func TestExec_TransactionRequired(t *testing.T) {
 	_, err := db.Transact(ctx, func(tx *sqlate.Tx) (struct{}, error) {
 		_, err := lock.Exec(ctx, tx, query.Args{"key": int64(1)})
 		return struct{}{}, err
-	})
+	}, nil)
 	if err != nil {
 		t.Errorf("Exec in a transaction: %v", err)
 	}
