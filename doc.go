@@ -23,7 +23,8 @@
 // [Session] is the method set the query and migrate packages take,
 // implemented by both [DB] and [Tx], so the same statement runs against the
 // pool or inside a transaction. The consumer owns the transaction boundary:
-// [DB.Begin] opens a [Tx] with [TxOption] values applied, and [DB.Transact]
+// [DB.Begin] opens a [Tx] with the standard library's
+// [database/sql.TxOptions], nil for a default transaction, and [DB.Transact]
 // runs one unit of work with a result: commit on success, rollback on the
 // unit's error or panic; [Transact] is the same runner over any [Beginner].
 // [Tx.Commit] routes its error through the dialect's MapError, the one place

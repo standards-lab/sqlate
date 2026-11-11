@@ -97,7 +97,7 @@ func TestTx_EveryMethodMapsIncludingCommit(t *testing.T) {
 	rec.FailPrepare = func(string) error { return errDriver }
 	rec.FailCommit = errDriver
 
-	tx, err := db.Begin(ctx)
+	tx, err := db.Begin(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
@@ -110,11 +110,24 @@ func TestTx_EveryMethodMapsIncludingCommit(t *testing.T) {
 	mapped(t, tx.Commit())
 }
 
+func TestBegin_NilOpensADefaultTransaction(t *testing.T) {
+	db, rec := wrap(t)
+	tx, err := db.Begin(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	_ = tx.Rollback()
+	begin := rec.Calls()[0]
+	if begin.Op != sqltest.OpBegin || begin.TxOptions != (driver.TxOptions{}) {
+		t.Errorf("begin recorded %+v, want default options", begin)
+	}
+}
+
 func TestBegin_OptionsReachTheDriverAndFailureWrapsConnectionFailed(t *testing.T) {
 	ctx := context.Background()
 	db, rec := wrap(t)
 
-	tx, err := db.Begin(ctx, sqlate.Isolation(sql.LevelSerializable), sqlate.ReadOnly())
+	tx, err := db.Begin(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: true})
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
@@ -127,7 +140,7 @@ func TestBegin_OptionsReachTheDriverAndFailureWrapsConnectionFailed(t *testing.T
 	}
 
 	rec.FailBegin = errDriver
-	_, err = db.Begin(ctx)
+	_, err = db.Begin(ctx, nil)
 	if !errors.Is(err, sqlate.ErrConnectionFailed) || !errors.Is(err, errDriver) {
 		t.Errorf("begin failure = %v, want ErrConnectionFailed wrapping the driver error", err)
 	}
@@ -141,7 +154,7 @@ func TestTransact_CommitsAndReturnsTheResult(t *testing.T) {
 			return 0, err
 		}
 		return res.RowsAffected()
-	})
+	}, nil)
 	if err != nil || n != 1 {
 		t.Fatalf("Transact = %d, %v", n, err)
 	}
@@ -149,13 +162,29 @@ func TestTransact_CommitsAndReturnsTheResult(t *testing.T) {
 	if got := rec.Ops(); !slices.Equal(got, want) {
 		t.Errorf("ops = %v, want %v", got, want)
 	}
+	if got := rec.Calls()[0].TxOptions; got != (driver.TxOptions{}) {
+		t.Errorf("begin options = %+v, want default options for nil", got)
+	}
+}
+
+func TestTransact_PassesItsOptionsToBegin(t *testing.T) {
+	db, rec := wrap(t)
+	_, err := db.Transact(context.Background(), func(*sqlate.Tx) (int, error) { return 1, nil },
+		&sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		t.Fatalf("Transact: %v", err)
+	}
+	got := rec.Calls()[0].TxOptions
+	if got.Isolation != driver.IsolationLevel(sql.LevelRepeatableRead) || !got.ReadOnly {
+		t.Errorf("begin options = %+v, want repeatable read, read-only", got)
+	}
 }
 
 func TestTransact_RollsBackOnErrorAndJoinsRollbackFailure(t *testing.T) {
 	db, rec := wrap(t)
 	unit := errors.New("unit failed")
 
-	_, err := db.Transact(context.Background(), func(*sqlate.Tx) (int, error) { return 0, unit })
+	_, err := db.Transact(context.Background(), func(*sqlate.Tx) (int, error) { return 0, unit }, nil)
 	if !errors.Is(err, unit) {
 		t.Fatalf("err = %v, want the unit's error", err)
 	}
@@ -164,7 +193,7 @@ func TestTransact_RollsBackOnErrorAndJoinsRollbackFailure(t *testing.T) {
 	}
 
 	rec.FailRollback = errDriver
-	_, err = db.Transact(context.Background(), func(*sqlate.Tx) (int, error) { return 0, unit })
+	_, err = db.Transact(context.Background(), func(*sqlate.Tx) (int, error) { return 0, unit }, nil)
 	if !errors.Is(err, unit) || !errors.Is(err, errDriver) {
 		t.Errorf("err = %v, want the unit error joined with the rollback error", err)
 	}
@@ -173,7 +202,7 @@ func TestTransact_RollsBackOnErrorAndJoinsRollbackFailure(t *testing.T) {
 func TestTransact_CommitFailureIsMapped(t *testing.T) {
 	db, rec := wrap(t)
 	rec.FailCommit = errDriver
-	_, err := db.Transact(context.Background(), func(*sqlate.Tx) (int, error) { return 1, nil })
+	_, err := db.Transact(context.Background(), func(*sqlate.Tx) (int, error) { return 1, nil }, nil)
 	mapped(t, err)
 }
 
@@ -187,7 +216,7 @@ func TestTransact_PanicRollsBackAndRepanics(t *testing.T) {
 			t.Errorf("ops = %v, want begin then rollback", got)
 		}
 	}()
-	_, _ = db.Transact(context.Background(), func(*sqlate.Tx) (int, error) { panic("boom") })
+	_, _ = db.Transact(context.Background(), func(*sqlate.Tx) (int, error) { panic("boom") }, nil)
 }
 
 // appDB is an application's own pool type, a sqlate.Beginner through the
@@ -203,26 +232,26 @@ func TestTransact_RunsTheUnitOnAnEmbeddingBeginner(t *testing.T) {
 			return 0, err
 		}
 		return res.RowsAffected()
-	}, sqlate.ReadOnly())
+	}, &sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: true})
 	if err != nil || n != 1 {
 		t.Fatalf("Transact = %d, %v", n, err)
 	}
 	if got, want := rec.Ops(), []sqltest.Op{sqltest.OpBegin, sqltest.OpExec, sqltest.OpCommit}; !slices.Equal(got, want) {
 		t.Errorf("ops = %v, want %v", got, want)
 	}
-	if !rec.Calls()[0].TxOptions.ReadOnly {
-		t.Errorf("begin options = %+v, want the options applied", rec.Calls()[0].TxOptions)
+	if got := rec.Calls()[0].TxOptions; got.Isolation != driver.IsolationLevel(sql.LevelSerializable) || !got.ReadOnly {
+		t.Errorf("begin options = %+v, want the options as given", got)
 	}
 
 	unit := errors.New("unit failed")
 	rec.FailRollback = errDriver
-	if _, err := sqlate.Transact(ctx, appDB{db}, func(*sqlate.Tx) (int, error) { return 0, unit }); !errors.Is(err, unit) || !errors.Is(err, errDriver) {
+	if _, err := sqlate.Transact(ctx, appDB{db}, func(*sqlate.Tx) (int, error) { return 0, unit }, nil); !errors.Is(err, unit) || !errors.Is(err, errDriver) {
 		t.Errorf("err = %v, want the unit error joined with the rollback error", err)
 	}
 
 	rec.FailBegin = errDriver
 	called := false
-	if _, err := sqlate.Transact(ctx, appDB{db}, func(*sqlate.Tx) (int, error) { called = true; return 0, nil }); !errors.Is(err, sqlate.ErrConnectionFailed) || called {
+	if _, err := sqlate.Transact(ctx, appDB{db}, func(*sqlate.Tx) (int, error) { called = true; return 0, nil }, nil); !errors.Is(err, sqlate.ErrConnectionFailed) || called {
 		t.Errorf("begin failure = %v, unit called %v; want ErrConnectionFailed and no unit", err, called)
 	}
 }
@@ -288,7 +317,7 @@ func TestMapError_ClassifiesConnectivityBeforeTheDialect(t *testing.T) {
 	// it, so it is asserted through the mapper rather than the driver.
 	connectionFailed(db.MapError(fmt.Errorf("query: %w", driver.ErrBadConn)))
 
-	tx, err := db.Begin(ctx)
+	tx, err := db.Begin(ctx, nil)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}

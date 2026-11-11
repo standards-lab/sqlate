@@ -304,7 +304,7 @@ func (r Returning[T]) One(ctx context.Context, s sqlate.Session, args Args) (T, 
 		out, err := sqlate.Transact(ctx, s, func(tx *sqlate.Tx) (changedRow[T], error) {
 			row, changed, err := r.fallback(ctx, tx, args)
 			return changedRow[T]{row: row, changed: changed}, err
-		})
+		}, nil)
 		return out.row, out.changed, err
 	}
 	return zero, false, ErrTransactionRequired

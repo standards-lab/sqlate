@@ -7,20 +7,6 @@ import (
 	"fmt"
 )
 
-// TxOption sets a field of the sql.TxOptions Begin opens with.
-type TxOption func(*sql.TxOptions)
-
-// Isolation requests an isolation level; the guard's serializable claim has
-// a code path through it.
-func Isolation(level sql.IsolationLevel) TxOption {
-	return func(o *sql.TxOptions) { o.Isolation = level }
-}
-
-// ReadOnly opens the transaction read-only.
-func ReadOnly() TxOption {
-	return func(o *sql.TxOptions) { o.ReadOnly = true }
-}
-
 // Tx is one transaction, a Session whose errors are classified and mapped
 // on every call and on commit.
 type Tx struct {
@@ -28,14 +14,12 @@ type Tx struct {
 	dialect Dialect
 }
 
-// Begin opens a transaction with the options applied; a failure to begin
-// wraps ErrConnectionFailed.
-func (d *DB) Begin(ctx context.Context, opts ...TxOption) (*Tx, error) {
-	var o sql.TxOptions
-	for _, opt := range opts {
-		opt(&o)
-	}
-	tx, err := d.pool.BeginTx(ctx, &o)
+// Begin opens a transaction with opts, the standard library's options
+// passed to the driver as given: nil opens a default transaction, and a
+// non-nil value's isolation level and read-only flag reach the driver
+// unchanged. A failure to begin wraps ErrConnectionFailed.
+func (d *DB) Begin(ctx context.Context, opts *sql.TxOptions) (*Tx, error) {
+	tx, err := d.pool.BeginTx(ctx, opts)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrConnectionFailed, err)
 	}
@@ -69,20 +53,22 @@ func (t *Tx) Commit() error { return t.MapError(t.tx.Commit()) }
 func (t *Tx) Rollback() error { return t.tx.Rollback() }
 
 // Transact runs fn as one unit of work with a result on the pool: it is
-// the root Transact over d.
-func (d *DB) Transact[T any](ctx context.Context, fn func(*Tx) (T, error), opts ...TxOption) (T, error) {
-	return Transact(ctx, d, fn, opts...)
+// the root Transact over d, opening the transaction with opts (nil for a
+// default transaction).
+func (d *DB) Transact[T any](ctx context.Context, fn func(*Tx) (T, error), opts *sql.TxOptions) (T, error) {
+	return Transact(ctx, d, fn, opts)
 }
 
 // Transact runs fn as one unit of work with a result in a transaction b
-// opens: begin with opts, fn, commit on success. On fn's error it rolls back
+// opens: begin with opts (nil for a default transaction), fn, commit on
+// success. On fn's error it rolls back
 // and returns that error, with a rollback failure joined onto it. A panic in
 // fn rolls back and re-panics, so no transaction leaks to the pool's reaper.
 // b is *DB or any type that embeds it, so a protocol handed a session it
 // asserts to Beginner runs its unit the way DB.Transact does.
-func Transact[T any](ctx context.Context, b Beginner, fn func(*Tx) (T, error), opts ...TxOption) (T, error) {
+func Transact[T any](ctx context.Context, b Beginner, fn func(*Tx) (T, error), opts *sql.TxOptions) (T, error) {
 	var zero T
-	tx, err := b.Begin(ctx, opts...)
+	tx, err := b.Begin(ctx, opts)
 	if err != nil {
 		return zero, err
 	}

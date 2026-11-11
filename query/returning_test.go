@@ -415,7 +415,7 @@ func TestReturningOne_InsideATransactionOpensNone(t *testing.T) {
 		pool, rec := sqltest.Open(t, script...)
 		db := sqlate.Wrap(pool, f.dialect)
 		r := rename(t, f.dialect)
-		tx, err := db.Begin(ctx)
+		tx, err := db.Begin(ctx, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
