@@ -7,6 +7,19 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Added
+
+- Package `pgtest`, an integration test's throwaway database over pgx's `database/sql` driver.
+  `Create(t, env, prefix)` creates `<prefix>_test_<hex>` on the server whose admin DSN the
+  environment variable `env` holds, failing the test when it is unset, and returns a
+  `*Database` holding the pool and the DSN pointed at the new database; `Migrated` is `Create`
+  with `migrate.Set`s applied under the PostgreSQL dialect, and `Database.Session` wraps the
+  pool under `Dialect`. When the test ends the pool is closed and the database dropped
+  `WITH (FORCE)`, retried while the server reports a closing session, so a session still open on
+  it does not hold the drop back; a `CREATE` that timed out is dropped too.
+- Live proof that a migrated `pgtest` database is dropped at its test's cleanup with another
+  pool's session still open on it.
+
 ## [v0.7.0] - 2026-11-11
 
 ### Changed
