@@ -72,12 +72,12 @@ func Migrated(t testing.TB, env, prefix string, sets ...migrate.Set) *Database {
 // is quoted, so it reaches the server exactly as the DSN spells it.
 func scratch(t testing.TB, admin, prefix string) string {
 	t.Helper()
+	name := prefix + "_test_" + suffix(t)
+	ident := pgx.Identifier{name}.Sanitize()
 	db, err := sql.Open("pgx", admin)
 	if err != nil {
 		t.Fatalf("open admin connection: %v", err)
 	}
-	name := prefix + "_test_" + suffix(t)
-	ident := pgx.Identifier{name}.Sanitize()
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if _, err := db.ExecContext(ctx, "CREATE DATABASE "+ident); err != nil {
@@ -95,14 +95,16 @@ func scratch(t testing.TB, admin, prefix string) string {
 		// can still report one closing, so the drop retries, each attempt
 		// with a deadline of its own so one stall does not use up the rest.
 		var err error
-		for range 4 {
+		for attempt := range 4 {
+			if attempt > 0 {
+				time.Sleep(200 * time.Millisecond)
+			}
 			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			_, err = db.ExecContext(ctx, "DROP DATABASE "+ident+" WITH (FORCE)")
 			cancel()
 			if err == nil {
 				break
 			}
-			time.Sleep(200 * time.Millisecond)
 		}
 		if err != nil {
 			t.Errorf("drop database %s: %v", name, err)

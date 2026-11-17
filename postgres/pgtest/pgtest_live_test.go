@@ -79,8 +79,8 @@ func TestLive_MigratedDroppedWithSessionOpen(t *testing.T) {
 			t.Fatalf("ping the held session: %v", err)
 		}
 	})
-	if name == "" {
-		t.Fatal("the subtest created no database")
+	if name == "" || conn == nil {
+		t.Fatal("the subtest did not create a database and hold a session on it")
 	}
 	if exists(t, admin, name) {
 		t.Errorf("database %s still exists after its test's cleanup", name)
