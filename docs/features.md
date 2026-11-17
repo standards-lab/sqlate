@@ -630,3 +630,18 @@ agrees with its total when writes commit between the statement and the caller, w
 read as its own statement does not; that it agrees under concurrent writers; and that the
 counted page scans its base once under one window while the uncounted page keeps the key's
 index order. `mise run acceptance` runs them against a compose PostgreSQL and tears it down.
+
+### pgtest: a test's throwaway database
+
+`pgtest` gives an integration test its own PostgreSQL database, so no test depends on the
+state of a shared database or on another test. `Create(t, env, prefix)` creates
+`<prefix>_test_<hex>` on the server whose admin DSN the environment variable `env` holds, and
+fails the test when `env` is unset. It returns a `*Database` holding a pinged pool over the new
+database (`Pool`) and the admin DSN pointed at it (`DSN`), which a test hands to a process it
+starts. `Migrated(t, env, prefix, sets...)` is `Create` with the `migrate.Set`s applied in order
+under the PostgreSQL dialect, and `Database.Session()` wraps the pool under `Dialect`.
+
+When the test ends the pool is closed and the database dropped `WITH (FORCE)`, so a session
+still open on it, such as a started process's pool, is ended rather than holding the drop back;
+the drop is retried while the server reports a session still closing. The package imports
+`testing`, so only test files import it.
