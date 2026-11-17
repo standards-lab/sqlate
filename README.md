@@ -111,7 +111,8 @@ Three conventions the library keeps are stricter than a reader might expect:
   third-party migration dependency.
 - `sqltest` is the scripted `database/sql` driver for hermetic tests.
 - `postgres` (sub-module) is the PostgreSQL dialect: placeholders, error classification, the
-  advisory lock, and the engine's native forms.
+  advisory lock, and the engine's native forms. Its `pgtest` package gives an integration test
+  its own throwaway database, migrated or empty, dropped when the test ends.
 - `sqlint` (sub-module) is the conventions linter as a package, with the command at
   `sqlint/cmd/sqlint`.
 

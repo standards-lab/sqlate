@@ -83,7 +83,7 @@ image's one pin.
 `compose/postgres/Dockerfile`:
 
 ```dockerfile
-FROM postgres:18.6-alpine
+FROM postgres:18.7-alpine
 
 ENV POSTGRES_USER=app \
     POSTGRES_PASSWORD=app \
