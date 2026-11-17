@@ -7,6 +7,8 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.8.0] - 2026-11-17
+
 ### Added
 
 - Package `pgtest`, an integration test's throwaway database over pgx's `database/sql` driver.
@@ -140,7 +142,8 @@ The first release of the PostgreSQL dialect, against `github.com/standards-lab/s
 - The integration tier: the migrate and query proofs against a live engine, behind the
   `integration` build tag.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/postgres/v0.7.0...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/postgres/v0.8.0...HEAD
+[v0.8.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.7.0...postgres/v0.8.0
 [v0.7.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.6.0...postgres/v0.7.0
 [v0.6.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.5.0...postgres/v0.6.0
 [v0.5.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.4.0...postgres/v0.5.0
