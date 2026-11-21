@@ -34,9 +34,6 @@ type SetStatus struct {
 	Dirty   bool
 }
 
-// layer is one set as the migrator holds it: the table after defaulting,
-// the validated copy of the migrations, and the statements rendered for
-// the table.
 type layer struct {
 	name       string
 	table      string
@@ -167,7 +164,6 @@ func (l Layer) Force(ctx context.Context, version int) error {
 	})
 }
 
-// copyOf returns a copy of ms, so a caller never holds a migrator's slice.
 func copyOf(ms []Migration) []Migration {
 	out := make([]Migration, len(ms))
 	copy(out, ms)

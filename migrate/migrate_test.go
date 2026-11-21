@@ -22,9 +22,14 @@ var (
 		{Version: 2, Name: "b", Up: "CREATE INDEX CONCURRENTLY ix ON a (x)", Down: "DROP INDEX CONCURRENTLY ix"},
 	}
 	historyCols = []string{"version", "name", "dirty"}
-	locked      = sqltest.Response{}                                                            // lock
-	created     = sqltest.Response{}                                                            // CREATE TABLE IF NOT EXISTS
-	unlocked    = sqltest.Response{Columns: []string{"unlock"}, Rows: [][]driver.Value{{true}}} // unlock
+	locked      = sqltest.Response{}
+	created     = sqltest.Response{}
+	unlocked    = sqltest.Response{Columns: []string{"unlock"}, Rows: [][]driver.Value{{true}}}
+	ran         = sqltest.Response{}
+	failed      = sqltest.Response{Err: errDriver}
+	rowWritten  = sqltest.Response{}
+	rowMissing  = sqltest.Response{}
+	rowFound    = sqltest.Response{Affected: 1}
 )
 
 func history(rows ...[]driver.Value) sqltest.Response {
@@ -39,9 +44,6 @@ func exists(yes bool) sqltest.Response {
 	return sqltest.Response{Columns: []string{"count"}, Rows: [][]driver.Value{{n}}}
 }
 
-// lockingDialect is the stub dialect with the lock capability an engine
-// sub-module supplies: Lock executes one statement on the pinned connection
-// and Unlock queries one row whose boolean says whether the lock was held.
 type lockingDialect struct{ sqltest.Dialect }
 
 func (lockingDialect) Lock(ctx context.Context, conn *sql.Conn, name string) error {
@@ -60,15 +62,11 @@ func (lockingDialect) Unlock(ctx context.Context, conn *sql.Conn, name string) e
 	return nil
 }
 
-// newMigrator builds a one-set migrator over the driver fake with the lock
-// capability, so lock and unlock calls are part of the recorded script. The
-// set leaves its table empty, so it uses migrate.DefaultTable.
 func newMigrator(t *testing.T, opts migrate.Options, responses ...sqltest.Response) (*migrate.Migrator, *sqltest.Recorder) {
 	t.Helper()
 	return newMigratorTable(t, "", opts, responses...)
 }
 
-// newMigratorTable is newMigrator with the set's history table named.
 func newMigratorTable(t *testing.T, table string, opts migrate.Options, responses ...sqltest.Response) (*migrate.Migrator, *sqltest.Recorder) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
@@ -128,8 +126,8 @@ func TestNew_ValidatesTheSet(t *testing.T) {
 func TestSteps_TransactionalMigrationAppliesInsideOneTransaction(t *testing.T) {
 	m, rec := newMigrator(t, migrate.Options{},
 		locked, created, history(),
-		sqltest.Response{}, // up
-		sqltest.Response{}, // history insert
+		ran,
+		rowWritten,
 		unlocked,
 	)
 	if err := m.Steps(context.Background(), 1); err != nil {
@@ -162,7 +160,7 @@ func TestSteps_TransactionalMigrationAppliesInsideOneTransaction(t *testing.T) {
 func TestSteps_TransactionalFailureRecordsNothingAndStillUnlocks(t *testing.T) {
 	m, rec := newMigrator(t, migrate.Options{},
 		locked, created, history(),
-		sqltest.Response{Err: errDriver}, // up fails
+		failed,
 		unlocked,
 	)
 	err := m.Up(context.Background())
@@ -185,9 +183,9 @@ func TestSteps_TransactionalFailureRecordsNothingAndStillUnlocks(t *testing.T) {
 func TestUp_NonTransactionalMigrationMarksDirtyThenClean(t *testing.T) {
 	m, rec := newMigrator(t, migrate.Options{},
 		locked, created, history([]driver.Value{int64(1), "a", false}),
-		sqltest.Response{}, // insert dirty
-		sqltest.Response{}, // up
-		sqltest.Response{}, // set clean
+		rowWritten,
+		ran,
+		rowWritten,
 		unlocked,
 	)
 	if err := m.Up(context.Background()); err != nil {
@@ -213,8 +211,8 @@ func TestUp_NonTransactionalMigrationMarksDirtyThenClean(t *testing.T) {
 func TestUp_NonTransactionalFailureLeavesTheRowDirty(t *testing.T) {
 	m, rec := newMigrator(t, migrate.Options{},
 		locked, created, history([]driver.Value{int64(1), "a", false}),
-		sqltest.Response{},               // insert dirty
-		sqltest.Response{Err: errDriver}, // up fails
+		rowWritten,
+		failed,
 		unlocked,
 	)
 	err := m.Up(context.Background())
@@ -257,11 +255,11 @@ func TestSteps_RefusesHistoryTheSetDoesNotCarry(t *testing.T) {
 func TestDown_RevertsTheMostRecentApplied(t *testing.T) {
 	m, rec := newMigrator(t, migrate.Options{},
 		locked, created, history([]driver.Value{int64(1), "a", false}, []driver.Value{int64(2), "b", false}),
-		sqltest.Response{}, // set dirty (b is non-transactional)
-		sqltest.Response{}, // down
-		sqltest.Response{}, // delete row
-		sqltest.Response{}, // a: begin → down
-		sqltest.Response{}, // a: delete row
+		rowWritten,
+		ran,
+		rowWritten,
+		ran,
+		rowWritten,
 		unlocked,
 	)
 	if err := m.Down(context.Background(), 2); err != nil {
@@ -299,9 +297,9 @@ func TestDown_WithoutDownTextIsErrNoDown(t *testing.T) {
 func TestForce_ResetsTheHistoryWithoutTouchingTheSchema(t *testing.T) {
 	m, rec := newMigrator(t, migrate.Options{},
 		locked, created,
-		sqltest.Response{}, // delete above 1
-		sqltest.Response{}, // set clean → 0 rows
-		sqltest.Response{}, // insert 1
+		rowWritten,
+		rowMissing,
+		rowWritten,
 		unlocked,
 	)
 	if err := m.Force(context.Background(), 1); err != nil {
@@ -320,16 +318,13 @@ func TestForce_ResetsTheHistoryWithoutTouchingTheSchema(t *testing.T) {
 	assertOps(t, rec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery)
 }
 
-// Forcing above an empty or shorter history writes the set's whole prefix
-// through the version, not the version's row alone, so the history the
-// prefix check reads back is one the set carries.
 func TestForce_WritesThePrefixThroughTheVersion(t *testing.T) {
 	m, rec := newMigrator(t, migrate.Options{},
 		locked, created,
-		sqltest.Response{},            // delete above 2
-		sqltest.Response{},            // set 1 clean → 0 rows
-		sqltest.Response{},            // insert 1
-		sqltest.Response{Affected: 1}, // set 2 clean → present
+		rowWritten,
+		rowMissing,
+		rowWritten,
+		rowFound,
 		unlocked,
 	)
 	if err := m.Force(context.Background(), 2); err != nil {
@@ -406,8 +401,6 @@ func TestVersion_ReadsTheHead(t *testing.T) {
 	}
 }
 
-// catalogDialect is a dialect with the lock capability and its own Catalog,
-// the shape an engine without IF NOT EXISTS or information_schema ships.
 type catalogDialect struct{ lockingDialect }
 
 func (catalogDialect) CreateHistory(table string) string {
@@ -432,7 +425,7 @@ func TestNew_TakesTheCatalogFromTheDialect(t *testing.T) {
 	if err := m.Steps(ctx, 0); err != nil {
 		t.Fatalf("Steps: %v", err)
 	}
-	_ = m.Force(ctx, 0) // one locked run: lock, create, delete above, unlock
+	_ = m.Force(ctx, 0)
 	if got := rec.SQL(sqltest.OpQuery)[0]; got != "SELECT COUNT(*) FROM sys.tables WHERE name = $1" {
 		t.Errorf("exists = %q", got)
 	}
@@ -441,8 +434,6 @@ func TestNew_TakesTheCatalogFromTheDialect(t *testing.T) {
 	}
 }
 
-// upgradingDialect is a dialect whose Catalog is also a HistoryUpgrader:
-// StandardCatalog's pair with an outdated check and its upgrade.
 type upgradingDialect struct {
 	lockingDialect
 	migrate.StandardCatalog
@@ -473,8 +464,6 @@ func TestHistory_UpgradesAnOutdatedTableOnlyWhenTheCatalogSaysSo(t *testing.T) {
 	}
 	current := history([]driver.Value{int64(1), "a", false}, []driver.Value{int64(2), "b", false})
 
-	// An outdated table is upgraded after it is created and before the
-	// history is read, inside the lock.
 	m, rec := open(locked, created, outdated(true), sqltest.Response{}, current, unlocked)
 	if err := m.Up(ctx); err != nil {
 		t.Fatalf("Up: %v", err)
@@ -488,15 +477,12 @@ func TestHistory_UpgradesAnOutdatedTableOnlyWhenTheCatalogSaysSo(t *testing.T) {
 		t.Errorf("upgrade = %q", calls[3].SQL)
 	}
 
-	// A current table is checked and left alone, so a second run does not
-	// upgrade it again.
 	m, rec = open(locked, created, outdated(false), current, unlocked)
 	if err := m.Up(ctx); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
 	assertOps(t, rec, sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery)
 
-	// Force, which creates its own set's table, upgrades it the same way.
 	m, rec = open(locked, created, outdated(true), sqltest.Response{}, sqltest.Response{}, unlocked)
 	if err := m.Force(ctx, 0); err != nil {
 		t.Fatalf("Force: %v", err)
@@ -505,7 +491,6 @@ func TestHistory_UpgradesAnOutdatedTableOnlyWhenTheCatalogSaysSo(t *testing.T) {
 		t.Errorf("Force execs = %q, want the upgrade after the create", got)
 	}
 
-	// A failing upgrade fails the run, naming the set.
 	m, _ = open(locked, created, outdated(true), sqltest.Response{Err: errDriver}, unlocked)
 	var setErr *migrate.SetError
 	if err := m.Up(ctx); !errors.As(err, &setErr) || setErr.Set != "app" || !errors.Is(err, errDriver) {
@@ -515,7 +500,7 @@ func TestHistory_UpgradesAnOutdatedTableOnlyWhenTheCatalogSaysSo(t *testing.T) {
 
 func TestLocked_DialectWithoutLockerFailsUnlessUnlocked(t *testing.T) {
 	pool, rec := sqltest.Open(t, created, history(), sqltest.Response{}, sqltest.Response{})
-	db := sqlate.Wrap(pool, sqltest.Dialect{}) // the stub dialect has no Locker
+	db := sqlate.Wrap(pool, sqltest.Dialect{})
 	m, err := migrate.New(db, []migrate.Set{{Name: "app", Migrations: set[:1]}}, migrate.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -554,7 +539,7 @@ func TestOptions_TableAndLockNameDefaultsAndOverrides(t *testing.T) {
 
 	m1, rec1 := newMigrator(t, migrate.Options{}, locked, created, history(), unlocked)
 	m2, rec2 := newMigratorTable(t, "other", migrate.Options{}, locked, created, history(), unlocked)
-	_ = m1.Steps(context.Background(), 0) // no-op: no calls
+	_ = m1.Steps(context.Background(), 0)
 	_ = m1.Up(context.Background())
 	_ = m2.Up(context.Background())
 	if rec1.Calls()[0].Args[0] != "migrate.schema_version" || rec2.Calls()[0].Args[0] != "migrate.other" {
@@ -562,15 +547,10 @@ func TestOptions_TableAndLockNameDefaultsAndOverrides(t *testing.T) {
 	}
 }
 
-// tryLockAnswer is the scripted try-lock row: true grants the lock, false
-// is a refusal while another session holds it.
 func tryLockAnswer(granted bool) sqltest.Response {
 	return sqltest.Response{Columns: []string{"try_lock"}, Rows: [][]driver.Value{{granted}}}
 }
 
-// newTryMigrator builds a one-set migrator, over the first migration only,
-// on sqltest.LockingDialect, so the run takes the lock by polling TryLock,
-// with its lock-wait timer replaced by after.
 func newTryMigrator(t *testing.T, after func(time.Duration) <-chan time.Time, responses ...sqltest.Response) (*migrate.Migrator, *sqltest.Recorder) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
@@ -582,7 +562,6 @@ func newTryMigrator(t *testing.T, after func(time.Duration) <-chan time.Time, re
 	return m, rec
 }
 
-// fired is a lock-wait timer that has already fired.
 func fired() <-chan time.Time {
 	c := make(chan time.Time, 1)
 	c <- time.Time{}
@@ -590,7 +569,7 @@ func fired() <-chan time.Time {
 }
 
 func TestLocked_TryLockerPollsUntilGranted(t *testing.T) {
-	const refusals = 8 // enough to reach the cap and hold it
+	const refusals = 8
 	responses := make([]sqltest.Response, 0, refusals+6)
 	for range refusals {
 		responses = append(responses, tryLockAnswer(false))
@@ -604,8 +583,6 @@ func TestLocked_TryLockerPollsUntilGranted(t *testing.T) {
 	if err := m.Up(context.Background()); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	// One pause per refusal: the documented schedule, 25ms doubling to a 1s
-	// cap.
 	ms := time.Millisecond
 	want := []time.Duration{25 * ms, 50 * ms, 100 * ms, 200 * ms, 400 * ms, 800 * ms, time.Second, time.Second}
 	if !slices.Equal(pauses, want) {
@@ -633,13 +610,11 @@ func TestLocked_ContextEndingDuringTheWaitHoldsNothing(t *testing.T) {
 	defer cancel()
 	m, rec := newTryMigrator(t, func(time.Duration) <-chan time.Time {
 		cancel()
-		return nil // never fires: only ctx ends the wait
+		return nil
 	}, tryLockAnswer(false))
 	if err := m.Up(ctx); !errors.Is(err, context.Canceled) {
 		t.Fatalf("Up = %v, want context.Canceled", err)
 	}
-	// The one refused try-lock and nothing after it: no lock is held, so
-	// none is released, and the run did no work.
 	assertOps(t, rec, sqltest.OpQuery)
 }
 
