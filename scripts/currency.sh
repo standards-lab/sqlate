@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # currency reports every dependency, toolchain, and pin that trails its latest
 # release, one line each, and exits non-zero when it reports any. It reads the
-# network and writes nothing. Run it through `mise run currency`.
+# network and writes nothing. Run it through `mise run currency`. The actions it
+# checks are those of the project root's workflows and, when the repository nests
+# the project in a subdirectory, of the git top-level's.
+#
+# Each scan captures its command's output in a variable before reading it, so
+# under set -e a scan command that fails (a go list missing a go.sum entry)
+# fails currency instead of reporting nothing.
 set -euo pipefail
 cd "$MISE_PROJECT_ROOT"
 export GOWORK=off
@@ -12,7 +18,7 @@ report() {
 	stale=1
 }
 
-matches_in_existing_files() {
+matches() {
 	local pattern=$1 file
 	local files=()
 	shift
@@ -51,20 +57,9 @@ report_outdated_mise_tools() {
 	done <<<"$outdated"
 }
 
-project_and_toplevel_workflows() {
-	local root top
-	root=$(pwd -P)
-	top=$(git rev-parse --show-toplevel 2>/dev/null || echo "$root")
-	printf '%s\n' "$root"/.github/workflows/*.yml
-	if [ "$top" != "$root" ]; then
-		printf '%s\n' "$top"/.github/workflows/*.yml
-	fi
-}
-
 report_outdated_actions() {
-	local workflows actions uses action pin repo latest
-	mapfile -t workflows < <(project_and_toplevel_workflows)
-	actions=$(matches_in_existing_files 'uses: *[^ ]*@[^ ]*' "${workflows[@]}" | sed 's/uses: *//' | sort -u)
+	local actions uses action pin repo latest
+	actions=$(matches 'uses: *[^ ]*@[^ ]*' "${workflows[@]}" | sed 's/uses: *//' | sort -u)
 	for uses in $actions; do
 		action=${uses%@*}
 		pin=${uses#*@}
@@ -83,9 +78,8 @@ latest_dotted_release_tag() {
 }
 
 report_outdated_image_lines() {
-	local workflows images ref image pin latest
-	mapfile -t workflows < <(project_and_toplevel_workflows)
-	images=$(matches_in_existing_files '^ *image: *[^ ]*' compose.yml compose/*.yml "${workflows[@]}" |
+	local images ref image pin latest
+	images=$(matches '^ *image: *[^ ]*' compose.yml compose/*.yml "${workflows[@]}" |
 		sed 's/^ *image: *//' | tr -d "\"'" | sort -u)
 	for ref in $images; do
 		image=${ref%:*}
@@ -99,13 +93,18 @@ report_outdated_dockerfile_bases() {
 	local dockerfile ref image pin latest
 	for dockerfile in compose/*/Dockerfile; do
 		[ -e "$dockerfile" ] || continue
-		ref=$(sed -n 's/^FROM  *\([^ ]*\).*/\1/p' "$dockerfile" | head -n1)
+		ref=$(sed -n '/^FROM /{s/^FROM  *\([^ ]*\).*/\1/p;q;}' "$dockerfile")
 		image=${ref%:*}
 		pin=${ref##*:}
 		latest=$(latest_dotted_release_tag "$image" "$pin")
 		[ "$pin" = "$latest" ] || report "$dockerfile: $image $pin -> $latest"
 	done
 }
+
+root=$(pwd -P)
+top=$(git rev-parse --show-toplevel 2>/dev/null || echo "$root")
+workflows=("$root"/.github/workflows/*.yml)
+[ "$top" = "$root" ] || workflows+=("$top"/.github/workflows/*.yml)
 
 go_minor=$(mise latest go | cut -d. -f1,2)
 for mod in $GO_MODULES; do

@@ -193,7 +193,7 @@ error passes through the session's mapper.
 | `Exec(ctx, session, args)` | none | Returns the rows affected. |
 | `Scan(scan)` | `Rows[T]` | `One` returns the first row (`sql.ErrNoRows` when none); `All` returns every row; `Each` yields rows one at a time as an `iter.Seq2[T, error]`, closing the row set when the loop ends. |
 | `Project(scan)` | `Projection[T]` | `List(ctx, session, directives, page, base...)` reads one page by offset and returns a `Collection[T]`; `Continue(ctx, session, directives, after, size, base...)` reads the `size` rows past a previous page's cursor and returns the same; `One(ctx, session, field, value, base...)` is the base under one equality predicate; `Verify` probes the field contract. A base without a key or field contract, or one with an expanded parameter (`{{name...}}`), panics at binding; a base's other parameters bind from the `base` arguments. |
-| `Guarded(check, version)` | `Guard` | `Run(ctx, session, version, args)` binds the expected version under the named parameter, runs the command, and returns the new version; when the command changed nothing it runs the check: no row is `sql.ErrNoRows`, a row is `ErrVersionMismatch` wrapping the expected and current versions. |
+| `Guarded(check, version)` | `Guard` | `Run(ctx, session, version, args)` binds the expected version under the named parameter, runs the command, and returns the new version; when the command changed nothing it runs the check: no row is `sql.ErrNoRows`, a row at another version is `ErrVersionMismatch` wrapping the expected and current versions, and a row at the expected version, which a predicate of the command's own refused, is `ErrRefused`. |
 | `Returning(scan)` | `Returning[T]` | For a returning command. `One(ctx, session, args)` runs the command and returns the row as it stands afterward and whether the command changed it: no row at all is `sql.ErrNoRows`; a command that changed more than one row, or whose read does not find the row it changed, is `ErrNotOneRow`. `Guarded(version, current)` returns a `RowGuard[T]`. |
 | `Returning(scan).Guarded(version, current)` | `RowGuard[T]` | For a guarded command whose own predicate, beyond the key and the version, can refuse a row. `current` reads a row's version. `Run(ctx, session, version, args)` returns the changed row; when the command changed nothing it classifies the row its read found: no row is `sql.ErrNoRows`, a row at another version is `ErrVersionMismatch`, and a row at the expected version is a `*RefusedError[T]` carrying the row, which unwraps to `ErrRefused`. |
 
@@ -332,8 +332,8 @@ URL-safe text a caller relays unchanged. It records the base, the keyed fields, 
 and the values, under a hash of those and each keyed field's declared type, so a cursor from
 before a contract change is refused. The hash is unkeyed and guards against accident, not
 forgery: a cursor's values re-enter the read only as bound parameters cast to the fields' types,
-so a forged cursor can at most select another page. It also records the filters, so `Continue` under other
-filters than the page that issued it is refused as a `CursorMismatch`. Filters with a value
+so a forged cursor can at most select another page. It also records the filters, so `Continue`
+under other filters than the page that issued it is refused as a `CursorMismatch`. Filters with a value
 that has no JSON form, such as a float NaN, cannot be recorded, and their page reports `More`
 without a `Next`.
 

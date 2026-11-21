@@ -2,6 +2,7 @@ package query_test
 
 import (
 	"context"
+	"database/sql"
 	"database/sql/driver"
 	"errors"
 	"math"
@@ -257,6 +258,22 @@ func TestList_KeyedColumnsAreMatchedInThePagesOwnCase(t *testing.T) {
 	got, err := memberView(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err != nil || got.Next == "" {
 		t.Fatalf("List = %+v, %v, want a cursor over the folded columns", got, err)
+	}
+}
+
+func TestList_IssuesACursorWhenTheScanReadsIntoRawBytes(t *testing.T) {
+	view := catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement("member").Project(func(rows query.Row) (member, error) {
+		var org, id, name sql.RawBytes
+		err := rows.Scan(&org, &id, &name)
+		return member{Org: string(org), ID: string(id), Name: string(name)}, err
+	})
+	db, _ := session(t, sqltest.WithTotal(members("a", "b", "c"), 9))
+	got, err := view.List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
+	if err != nil {
+		t.Fatalf("List = %+v, %v", got, err)
+	}
+	if len(got.Items) != 2 || got.Items[1].ID != "b" || got.Next == "" {
+		t.Errorf("page = %+v, want two items and a cursor", got)
 	}
 }
 

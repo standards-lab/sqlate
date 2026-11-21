@@ -91,6 +91,14 @@ func TestGuard_MissClassifiesNotFoundAndMismatch(t *testing.T) {
 	}
 }
 
+func TestGuard_MissAtTheExpectedVersionIsRefused(t *testing.T) {
+	db, _ := session(t, sqltest.Response{Affected: 0}, versionRow(3))
+	_, err := guard(t).Run(context.Background(), db, 3, query.Args{"id": "x", "name": "n"})
+	if !errors.Is(err, query.ErrRefused) || errors.Is(err, query.ErrVersionMismatch) {
+		t.Errorf("err = %v, want ErrRefused", err)
+	}
+}
+
 func TestGuard_CommandFailurePassesThroughMapped(t *testing.T) {
 	db, _ := session(t, sqltest.Response{Err: errDriver})
 	_, err := guard(t).Run(context.Background(), db, 1, query.Args{"id": "x", "name": "n"})

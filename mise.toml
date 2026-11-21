@@ -1,3 +1,4 @@
+# See architecture/standards/go-elemental/principles/release-and-ci.md
 [settings]
 task.run_auto_install = false
 
@@ -17,15 +18,6 @@ description = "Build, vet, format, fix, tidy, test, and lint every module, then 
 run = '''
 set -eu
 export GOWORK=off
-fail=0
-run_lint() {
-  if ! command -v "$1" >/dev/null; then
-    echo "FAIL: $1 is not on PATH; run mise install" >&2
-    fail=1
-    return
-  fi
-  "$1" || fail=1
-}
 for mod in $GO_MODULES; do
   echo "check: $mod"
   cd "$MISE_PROJECT_ROOT/$mod"
@@ -41,8 +33,15 @@ done
 echo "check: sqlint"
 cd "$MISE_PROJECT_ROOT"
 env -u GOWORK go run github.com/standards-lab/sqlate/sqlint/cmd/sqlint .
-run_lint lint-context
-run_lint lint-references
+fail=0
+for lint in lint-context lint-references; do
+  if ! command -v "$lint" >/dev/null; then
+    echo "FAIL: $lint is not on PATH; run mise install" >&2
+    fail=1
+  elif ! "$lint"; then
+    fail=1
+  fi
+done
 exit "$fail"
 '''
 

@@ -53,8 +53,10 @@ type Guard struct {
 // Run executes the command with version bound under the guard's parameter
 // name alongside args. A row affected is success and the new version,
 // version+1, with no second round trip. No row affected runs the check with
-// the same args: no row is sql.ErrNoRows, a row is ErrVersionMismatch
-// with the expected and current versions.
+// the same args: no row is sql.ErrNoRows, a row at another version is
+// ErrVersionMismatch with the expected and current versions, and a row at
+// the expected version, which a predicate of the command's own refused, is
+// ErrRefused.
 func (g Guard) Run(ctx context.Context, s sqlate.Session, version int64, args Args) (int64, error) {
 	bound := make(Args, len(args)+1)
 	maps.Copy(bound, args)
