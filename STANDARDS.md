@@ -15,4 +15,4 @@ The judgement calls the standards-reviewer applies to sqlate, beyond what `mise 
 - `architecture/principles/tool-beside-library.md`: the `sqlint` package and its command.
 - `architecture/principles/validation-first.md`: authored SQL, `sqlint.Load` and `migrate.New`.
 - `architecture/principles/comments.md`: every comment; a `.sql` file's `--|` header is also its template metadata.
-- `architecture/principles/context-architecture.md`: the guide, `README.md` and `docs/`, and each `doc.go`.
+- `architecture/principles/context-architecture.md`: the guide (`README.md` and `docs/`) and each `doc.go`.
