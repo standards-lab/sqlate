@@ -332,9 +332,9 @@ URL-safe text a caller relays unchanged. It records the base, the keyed fields, 
 and the values, under a hash of those and each keyed field's declared type, so a cursor from
 before a contract change is refused. The hash is unkeyed and guards against accident, not
 forgery: a cursor's values re-enter the read only as bound parameters cast to the fields' types,
-so a forged cursor can at most select another page. It also records the filters, so `Continue`
-under other filters than the page that issued it is refused as a `CursorMismatch`. Filters with a value
-that has no JSON form, such as a float NaN, cannot be recorded, and their page reports `More`
+so a forged cursor can at most select another page. A cursor also records the filters, so
+`Continue` under other filters than the page that issued it is refused as a `CursorMismatch`.
+Filters with a value that has no JSON form, such as a float NaN, cannot be recorded, and their page reports `More`
 without a `Next`.
 
 Every error a request's declarations can cause unwraps to `ErrDirectives`, so a caller's
@@ -423,13 +423,13 @@ the lock: each refused `TryLock` pauses, from 25ms doubling to a 1s cap, and tri
 the wait ends with the context's error when the context ends, holding nothing. No statement
 stays open while a starter waits, so a holder's `CREATE INDEX CONCURRENTLY`, which waits for
 every open transaction, cannot deadlock with the waiter. A dialect with `Locker` alone waits in
-its blocking `Lock`. The lock is released under a context that survives the run's cancellation;
-once the context has ended, the engine releases it with the discarded connection's session, and
-an unlock failure then is not reported. A dialect without `Locker` fails with `ErrNoLocker` unless
-`Options.Unlocked` opts out, in which case concurrent starters are unsafe. Inside the lock,
-every run that applies or reverts migrations creates and reads every set's history table first,
-so a dirty set or a history that does not match its set refuses the run before any migration
-runs. `Force` is the exception, since it repairs a dirty history.
+its blocking `Lock`. The lock is released under a context that survives the run's
+cancellation. Once the run's context has ended, an unlock failure is not reported, because the
+discarded connection's session ends and releases the lock. A dialect without `Locker` fails with
+`ErrNoLocker` unless `Options.Unlocked` opts out, in which case concurrent starters are unsafe.
+Inside the lock, every run that applies or reverts migrations creates and reads every set's
+history table first, so a dirty set or a history that does not match its set refuses the run
+before any migration runs. `Force` is the exception, since it repairs a dirty history.
 
 **Transactions and dirty state.** A transactional migration runs inside a transaction and
 leaves nothing behind on failure. A migration headed `transaction: none` runs under autocommit
@@ -653,5 +653,5 @@ under the PostgreSQL dialect, and `Database.Session()` wraps the pool under `Dia
 When the test ends the pool is closed and the database dropped `WITH (FORCE)`, so a session
 still open on it, such as a started process's pool, is ended rather than holding the drop back;
 the drop is retried while the server reports a session still closing. A create that fails is
-followed by a drop too, since one that timed out can still finish on the server. The package imports
-`testing`, so only test files import it.
+followed by a drop too, since a create that timed out can still finish on the server. The
+package imports `testing`, so only test files import it.
