@@ -193,7 +193,7 @@ error passes through the session's mapper.
 | `Exec(ctx, session, args)` | none | Returns the rows affected. |
 | `Scan(scan)` | `Rows[T]` | `One` returns the first row (`sql.ErrNoRows` when none); `All` returns every row; `Each` yields rows one at a time as an `iter.Seq2[T, error]`, closing the row set when the loop ends. |
 | `Project(scan)` | `Projection[T]` | `List(ctx, session, directives, page, base...)` reads one page by offset and returns a `Collection[T]`; `Continue(ctx, session, directives, after, size, base...)` reads the `size` rows past a previous page's cursor and returns the same; `One(ctx, session, field, value, base...)` is the base under one equality predicate; `Verify` probes the field contract. A base without a key or field contract, or one with an expanded parameter (`{{name...}}`), panics at binding; a base's other parameters bind from the `base` arguments. |
-| `Guarded(check, version)` | `Guard` | `Run(ctx, session, version, args)` binds the expected version under the named parameter, runs the command, and returns the new version; when the command changed nothing it runs the check: no row is `sql.ErrNoRows`, a row is `ErrVersionMismatch` wrapping the expected and current versions. |
+| `Guarded(check, version)` | `Guard` | `Run(ctx, session, version, args)` binds the expected version under the named parameter, runs the command, and returns the new version; when the command changed nothing it runs the check: no row is `sql.ErrNoRows`, a row at another version is `ErrVersionMismatch` wrapping the expected and current versions, and a row at the expected version, which a predicate of the command's own refused, is `ErrRefused`. |
 | `Returning(scan)` | `Returning[T]` | For a returning command. `One(ctx, session, args)` runs the command and returns the row as it stands afterward and whether the command changed it: no row at all is `sql.ErrNoRows`; a command that changed more than one row, or whose read does not find the row it changed, is `ErrNotOneRow`. `Guarded(version, current)` returns a `RowGuard[T]`. |
 | `Returning(scan).Guarded(version, current)` | `RowGuard[T]` | For a guarded command whose own predicate, beyond the key and the version, can refuse a row. `current` reads a row's version. `Run(ctx, session, version, args)` returns the changed row; when the command changed nothing it classifies the row its read found: no row is `sql.ErrNoRows`, a row at another version is `ErrVersionMismatch`, and a row at the expected version is a `*RefusedError[T]` carrying the row, which unwraps to `ErrRefused`. |
 
@@ -330,9 +330,11 @@ standard spelling of the predicate is a chain of disjuncts, `(a > x) OR (a = x A
 engine may overlay it as a row-value comparison, `(a, b) > (x, y)`. A cursor is opaque,
 URL-safe text a caller relays unchanged. It records the base, the keyed fields, the direction,
 and the values, under a hash of those and each keyed field's declared type, so a cursor from
-before a contract change is refused. It also records the filters, so `Continue` under other
-filters than the page that issued it is refused as a `CursorMismatch`. Filters with a value
-that has no JSON form, such as a float NaN, cannot be recorded, and their page reports `More`
+before a contract change is refused. The hash is unkeyed and guards against accident, not
+forgery: a cursor's values re-enter the read only as bound parameters cast to the fields' types,
+so a forged cursor can at most select another page. A cursor also records the filters, so
+`Continue` under other filters than the page that issued it is refused as a `CursorMismatch`.
+Filters with a value that has no JSON form, such as a float NaN, cannot be recorded, and their page reports `More`
 without a `Next`.
 
 Every error a request's declarations can cause unwraps to `ErrDirectives`, so a caller's
@@ -421,11 +423,13 @@ the lock: each refused `TryLock` pauses, from 25ms doubling to a 1s cap, and tri
 the wait ends with the context's error when the context ends, holding nothing. No statement
 stays open while a starter waits, so a holder's `CREATE INDEX CONCURRENTLY`, which waits for
 every open transaction, cannot deadlock with the waiter. A dialect with `Locker` alone waits in
-its blocking `Lock`. A dialect without `Locker` fails with `ErrNoLocker` unless
-`Options.Unlocked` opts out, in which case concurrent starters are unsafe. Inside the lock,
-every run that applies or reverts migrations creates and reads every set's history table first,
-so a dirty set or a history that does not match its set refuses the run before any migration
-runs. `Force` is the exception, since it repairs a dirty history.
+its blocking `Lock`. The lock is released under a context that survives the run's
+cancellation. Once the run's context has ended, an unlock failure is not reported, because the
+discarded connection's session ends and releases the lock. A dialect without `Locker` fails with
+`ErrNoLocker` unless `Options.Unlocked` opts out, in which case concurrent starters are unsafe.
+Inside the lock, every run that applies or reverts migrations creates and reads every set's
+history table first, so a dirty set or a history that does not match its set refuses the run
+before any migration runs. `Force` is the exception, since it repairs a dirty history.
 
 **Transactions and dirty state.** A transactional migration runs inside a transaction and
 leaves nothing behind on failure. A migration headed `transaction: none` runs under autocommit
@@ -591,6 +595,8 @@ package rather than the command.
 | anything else | the error unchanged, `sql.ErrNoRows` included |
 
 Each `ConstraintError` carries the constraint, table, and column names the server reports.
+PostgreSQL 19 records a `NOT NULL` as a named constraint in `pg_constraint`, yet its not-null
+violation still reports no constraint name, so `Column` remains that error's handle.
 
 `Lock` and `Unlock` implement `sqlate.Locker` over `pg_advisory_lock` and `pg_advisory_unlock`
 on a pinned connection. The name enters the engine's key space through `hashtext`, so locks are
@@ -630,6 +636,9 @@ agrees with its total when writes commit between the statement and the caller, w
 read as its own statement does not; that it agrees under concurrent writers; and that the
 counted page scans its base once under one window while the uncounted page keeps the key's
 index order. `mise run acceptance` runs them against a compose PostgreSQL and tears it down.
+The compose PostgreSQL reports healthy once it accepts TCP connections to the app database. The
+probe goes over TCP, not the socket, because the first start's initialization runs a temporary
+server on the socket alone, which would report ready before the real server starts.
 
 ### pgtest: a test's throwaway database
 
@@ -643,5 +652,6 @@ under the PostgreSQL dialect, and `Database.Session()` wraps the pool under `Dia
 
 When the test ends the pool is closed and the database dropped `WITH (FORCE)`, so a session
 still open on it, such as a started process's pool, is ended rather than holding the drop back;
-the drop is retried while the server reports a session still closing. The package imports
-`testing`, so only test files import it.
+the drop is retried while the server reports a session still closing. A create that fails is
+followed by a drop too, since a create that timed out can still finish on the server. The
+package imports `testing`, so only test files import it.

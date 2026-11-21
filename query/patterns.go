@@ -13,26 +13,6 @@ import (
 	"github.com/standards-lab/sqlate/header"
 )
 
-// The pattern catalog: reusable protocol SQL, authored as files, each
-// declaring its tier, published under a namespace. A pattern's body contains
-// slots in the {{ }} syntax; a pattern contains slots only and never includes
-// another, so it reads on its own. Two uses:
-//
-//   - at request time, the collection read composes its page, counted or
-//     not, and its single-row read from the library's patterns over a
-//     program's base and the request's declarations; the library fills the
-//     slots with text it composed from other patterns, never with request
-//     input;
-//   - at load time, a statement includes a pattern with {{> namespace.name}},
-//     and the pattern's text is spliced in before parameters are rewritten,
-//     so a protocol's predicate and columns are written once.
-//
-// Any package may publish patterns: the library's own are Patterns(), an
-// application registers its namespace beside them, and an engine overlays
-// the library's request-time patterns it must spell differently. The
-// catalog is built once, where the program starts, and every set of
-// statements is compiled against it.
-
 //go:embed patterns/*.sql
 var patternFiles embed.FS
 
@@ -64,7 +44,6 @@ type Pattern struct {
 	Text      string
 }
 
-// layer is one directory of pattern files.
 type layer struct {
 	fsys fs.FS
 	dir  string
@@ -121,8 +100,6 @@ func (s Source) Overlay(fsys fs.FS, dir string) Source {
 	return s
 }
 
-// pattern is one catalog entry: its body, tier, the slots it declares, and
-// the alternate slots an overlay may declare in their place.
 type pattern struct {
 	name      string
 	tier      Tier
@@ -245,11 +222,6 @@ func (c *Catalog) Patterns() []Pattern {
 	return out
 }
 
-// readLayer reads every pattern file of one directory: the header must
-// declare a tier, a native tier its port, and the body's {{ }} occurrences
-// are its slots; an include inside a pattern is an error. An optional
-// alternate declaration names the slots an overlay may declare in place of
-// the body's own, as a comma-separated list.
 func readLayer(ns string, l layer) (map[string]pattern, error) {
 	entries, err := fs.ReadDir(l.fsys, l.dir)
 	if err != nil {
@@ -315,8 +287,6 @@ func readLayer(ns string, l layer) (map[string]pattern, error) {
 	return out, errors.Join(errs...)
 }
 
-// sameSet reports whether two slot lists name the same slots, in any order
-// and multiplicity.
 func sameSet(a, b []string) bool {
 	set := func(xs []string) map[string]bool {
 		m := map[string]bool{}
@@ -337,7 +307,6 @@ func sameSet(a, b []string) bool {
 	return true
 }
 
-// lookup finds a pattern by qualified name.
 func (c *Catalog) lookup(ns, name string) (pattern, bool) {
 	set, ok := c.namespaces[ns]
 	if !ok {
@@ -347,12 +316,6 @@ func (c *Catalog) lookup(ns, name string) (pattern, bool) {
 	return p, ok
 }
 
-// render fills one of the library's request-time patterns, resolved under
-// Namespace, which only the library's source registers under. Every slot the
-// pattern declares must be filled; a fill that names no slot is ignored,
-// which is how one call serves a pattern's own slots and its alternate set.
-// An unfilled slot is a defect in the library or an overlay, not a request
-// error, and panics.
 func (c *Catalog) render(name string, fill map[string]string) string {
 	set, ok := c.namespaces[Namespace]
 	if !ok {
@@ -372,11 +335,6 @@ func (c *Catalog) render(name string, fill map[string]string) string {
 	})
 }
 
-// expand splices {{> namespace.name}} includes into a statement body, so a
-// statement contains a pattern's text as if authored there. An unqualified
-// include, an unknown namespace or pattern, or a native pattern in a
-// standard-tier statement is a load error naming it. Patterns contain no
-// includes, so one pass expands everything.
 func (c *Catalog) expand(body string, tier Tier) (string, error) {
 	var err error
 	body = bare.ReplaceAllStringFunc(body, func(m string) string {

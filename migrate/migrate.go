@@ -46,15 +46,9 @@ type Migrator struct {
 	layers []*layer
 	opts   Options
 	locker sqlate.Locker
-	// after is the lock wait's timer, time.After unless a test replaces it,
-	// so the unit suite drives the backoff without sleeping.
-	after func(time.Duration) <-chan time.Time
+	after  func(time.Duration) <-chan time.Time
 }
 
-// The lock wait's backoff between TryLock attempts: the first pause, doubled
-// after each refusal up to the cap. A short first pause keeps a starter
-// that loses a brief race fast; the cap bounds how long a waiter idles
-// after the holder releases.
 const (
 	lockPollFirst = 25 * time.Millisecond
 	lockPollMax   = time.Second
@@ -118,8 +112,6 @@ func New(db *sqlate.DB, sets []Set, opts Options) (*Migrator, error) {
 	return &Migrator{db: db, layers: layers, opts: opts, locker: locker, after: time.After}, nil
 }
 
-// validate checks one set's migrations: versions positive and strictly
-// increasing, names and up texts present.
 func validate(set Set) error {
 	last := 0
 	for _, mig := range set.Migrations {
@@ -138,8 +130,6 @@ func validate(set Set) error {
 	return nil
 }
 
-// topLayer is the handle on the last set declared, the one a method without
-// a set name acts on.
 func (m *Migrator) topLayer() Layer { return Layer{m: m, i: len(m.layers) - 1} }
 
 // Layers returns a handle on every set, in declared order.
@@ -258,7 +248,6 @@ func (m *Migrator) Status(ctx context.Context) ([]SetStatus, error) {
 	return out, nil
 }
 
-// version reads one layer's history head from the pool.
 func (m *Migrator) version(ctx context.Context, l *layer) (Version, error) {
 	var v Version
 	ok, err := m.tableExists(ctx, m.db, l)
@@ -278,7 +267,6 @@ func (m *Migrator) version(ctx context.Context, l *layer) (Version, error) {
 	return v, nil
 }
 
-// verify checks one layer's history against its migrations, from the pool.
 func (m *Migrator) verify(ctx context.Context, l *layer) error {
 	applied, err := m.read(ctx, m.db, l)
 	if err != nil {
@@ -297,9 +285,6 @@ func (m *Migrator) verify(ctx context.Context, l *layer) error {
 	return nil
 }
 
-// status reads one layer's state from the pool. Pending migrations and a
-// dirty row are state it reports, not failures; a history row the set does
-// not carry is an *UnknownVersionError.
 func (m *Migrator) status(ctx context.Context, l *layer) (SetStatus, error) {
 	applied, err := m.read(ctx, m.db, l)
 	if err != nil {
@@ -324,7 +309,6 @@ func (m *Migrator) status(ctx context.Context, l *layer) (SetStatus, error) {
 	return s, nil
 }
 
-// read returns the layer's history, nil when its table does not exist.
 func (m *Migrator) read(ctx context.Context, q querier, l *layer) ([]row, error) {
 	ok, err := m.tableExists(ctx, q, l)
 	if err != nil || !ok {
@@ -333,10 +317,6 @@ func (m *Migrator) read(ctx context.Context, q querier, l *layer) ([]row, error)
 	return m.readHistory(ctx, q, l)
 }
 
-// preflight makes sure every set's history table exists and reads and
-// checks every set's history on the pinned connection, in declared order,
-// before any set runs. It runs inside the lock, so no starter can change a
-// history between the check and the run.
 func (m *Migrator) preflight(ctx context.Context, conn *sql.Conn) ([][]row, error) {
 	applied := make([][]row, len(m.layers))
 	for i, l := range m.layers {
@@ -355,8 +335,6 @@ func (m *Migrator) preflight(ctx context.Context, conn *sql.Conn) ([][]row, erro
 	return applied, nil
 }
 
-// aboveApplied refuses a revert of layer i while a layer above it still has
-// applied migrations.
 func (m *Migrator) aboveApplied(applied [][]row, i int) error {
 	for j := i + 1; j < len(m.layers); j++ {
 		if len(applied[j]) > 0 {
@@ -366,8 +344,6 @@ func (m *Migrator) aboveApplied(applied [][]row, i int) error {
 	return nil
 }
 
-// belowPending refuses an apply on layer i while a layer below it still has
-// pending migrations.
 func (m *Migrator) belowPending(applied [][]row, i int) error {
 	for j := range i {
 		if len(applied[j]) < len(m.layers[j].migrations) {
@@ -377,8 +353,6 @@ func (m *Migrator) belowPending(applied [][]row, i int) error {
 	return nil
 }
 
-// applyPending applies up to n of the layer's pending migrations, in
-// version order.
 func (m *Migrator) applyPending(ctx context.Context, conn *sql.Conn, l *layer, applied []row, n int) error {
 	pending := l.migrations[len(applied):]
 	if n < len(pending) {
@@ -392,8 +366,6 @@ func (m *Migrator) applyPending(ctx context.Context, conn *sql.Conn, l *layer, a
 	return nil
 }
 
-// revertApplied reverts up to n of the layer's applied migrations, most
-// recent first.
 func (m *Migrator) revertApplied(ctx context.Context, conn *sql.Conn, l *layer, applied []row, n int) error {
 	for i := 0; i < n && len(applied)-1-i >= 0; i++ {
 		mig := l.migrations[len(applied)-1-i]
@@ -404,14 +376,6 @@ func (m *Migrator) revertApplied(ctx context.Context, conn *sql.Conn, l *layer, 
 	return nil
 }
 
-// locked pins a connection, takes the lock when the dialect has one (see
-// lock for how it waits), runs fn, and releases the lock under a context
-// that survives cancellation, before the connection returns to the pool.
-// Once ctx has ended the driver has discarded the connection and the
-// session's end releases the lock, so an unlock failure then is noise and
-// is not reported. A dialect without the capability is ErrNoLocker unless
-// Unlocked. The history tables are not created here: preflight creates
-// every set's table, and Force creates only its own set's.
 func (m *Migrator) locked(ctx context.Context, fn func(context.Context, *sql.Conn) error) (err error) {
 	if m.locker == nil && !m.opts.Unlocked {
 		return ErrNoLocker
@@ -438,15 +402,6 @@ func (m *Migrator) locked(ctx context.Context, fn func(context.Context, *sql.Con
 	return fn(ctx, conn)
 }
 
-// lock takes the migration lock on conn. A dialect with TryLocker is polled:
-// each refusal pauses, from lockPollFirst doubling to lockPollMax, and
-// tries again, so no statement stays open on conn while another session
-// holds the lock. A blocking Lock would hold its statement open for the
-// whole wait, and a holder running CREATE INDEX CONCURRENTLY waits for
-// every open transaction, the waiter's lock statement included, which
-// postgres reports as a deadlock (40P01) and aborts the waiter. A dialect
-// with Locker alone keeps its blocking Lock. The wait ends with ctx's
-// error when ctx ends, holding nothing.
 func (m *Migrator) lock(ctx context.Context, conn *sql.Conn) error {
 	try, ok := m.locker.(sqlate.TryLocker)
 	if !ok {
@@ -470,10 +425,6 @@ func (m *Migrator) lock(ctx context.Context, conn *sql.Conn) error {
 	}
 }
 
-// applyOne runs one migration of one layer: in a transaction with its
-// history insert, so a failure records nothing; or, when the migration opts
-// out, as a dirty insert, the statement, then the clean-up, so a failure
-// leaves the row dirty and every later run refuses until Force.
 func (m *Migrator) applyOne(ctx context.Context, conn *sql.Conn, l *layer, mig Migration) error {
 	if mig.Transactional {
 		err := m.inTx(ctx, conn, func(tx *sql.Tx) error {
@@ -502,7 +453,6 @@ func (m *Migrator) applyOne(ctx context.Context, conn *sql.Conn, l *layer, mig M
 	return nil
 }
 
-// revertOne runs one migration's down with the symmetric history change.
 func (m *Migrator) revertOne(ctx context.Context, conn *sql.Conn, l *layer, mig Migration) error {
 	if mig.Down == "" {
 		return fmt.Errorf("%w: %d %s", ErrNoDown, mig.Version, mig.Name)
@@ -534,11 +484,6 @@ func (m *Migrator) revertOne(ctx context.Context, conn *sql.Conn, l *layer, mig 
 	return nil
 }
 
-// inTx runs fn in a transaction on the pinned connection, rolling back on
-// error and mapping the failure. Once ctx has ended, database/sql rolls the
-// transaction back itself and the driver discards the connection, so the
-// explicit rollback's result reports nothing new and is not joined; nor is
-// ErrTxDone, the same fact reported when that rollback runs first.
 func (m *Migrator) inTx(ctx context.Context, conn *sql.Conn, fn func(*sql.Tx) error) error {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
@@ -560,15 +505,10 @@ type row struct {
 	dirty   bool
 }
 
-// querier is the read half of the session, satisfied by *sqlate.DB and by a
-// pinned *sql.Conn. Single-row reads go through QueryContext because the
-// Session interface deliberately leaves QueryRowContext out: *sql.Row
-// defers its error to Scan, where nothing can map it.
 type querier interface {
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
 }
 
-// queryOne scans the first row into dest, reporting whether there was one.
 func (m *Migrator) queryOne(ctx context.Context, q querier, query string, args []any, dest ...any) (bool, error) {
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -584,9 +524,6 @@ func (m *Migrator) queryOne(ctx context.Context, q querier, query string, args [
 	return true, m.db.MapError(rows.Err())
 }
 
-// ensureHistory creates the layer's history table when it does not exist
-// and, over a catalog that is a HistoryUpgrader, upgrades a table an
-// earlier release created when the catalog reports it outdated.
 func (m *Migrator) ensureHistory(ctx context.Context, conn *sql.Conn, l *layer) error {
 	if _, err := conn.ExecContext(ctx, l.sql.create); err != nil {
 		return m.db.MapError(err)
@@ -630,8 +567,6 @@ func (m *Migrator) readHistory(ctx context.Context, q querier, l *layer) ([]row,
 	return out, m.db.MapError(rows.Err())
 }
 
-// checkPrefix refuses a dirty row and requires the applied rows to be the
-// migrations' prefix, by version and name.
 func checkPrefix(migrations []Migration, applied []row) error {
 	for i, r := range applied {
 		if r.dirty {

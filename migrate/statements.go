@@ -77,18 +77,10 @@ func (StandardCatalog) HistoryExists(param string) string {
 	return "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = " + param
 }
 
-// statements are the texts one set's layer runs against its history table,
-// rendered once with the dialect's placeholders: the catalog pair from the
-// Catalog, the outdated check and its upgrade from a HistoryUpgrader (both
-// empty for a catalog without one), the rest standard DML, and drop, the
-// DDL Reset runs to remove the set's own history table once that set is
-// reverted. Booleans bind as parameters, never as literals.
 type statements struct {
 	create, exists, outdated, upgrade, all, head, insert, setDirty, del, delAbove, drop string
 }
 
-// history renders the statements for the history table t over
-// catalog c, with p as the dialect's placeholder.
 func history(t string, p func(int) string, c Catalog) statements {
 	var outdated, upgrade string
 	if u, ok := c.(HistoryUpgrader); ok {

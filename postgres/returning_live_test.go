@@ -1,14 +1,5 @@
 //go:build integration
 
-// Live proof for the returning command against the compose PostgreSQL. The
-// same files compile twice: under the dialect, which renders each command's
-// single-statement form with RETURNING, and under a wrapper that hides the
-// query.Returner capability, so each command runs the fallback, the command
-// and then its read in a transaction. In every outcome of a plain and a
-// guarded command, both forms return the row an immediate read returns,
-// on the pool and inside a caller's transaction; they differ only in the
-// statements the engine receives.
-// `mise run integration`.
 package postgres_test
 
 import (
@@ -31,8 +22,6 @@ import (
 	"github.com/standards-lab/sqlate/query"
 )
 
-// returningFS holds the proof's pattern namespace, live, and its statements:
-// the read, and three returning commands naming it.
 var returningFS = fstest.MapFS{
 	"patterns/item_columns.sql": {Data: []byte("--| tier: standard\ni.id, i.status, i.size, i.version, i.created_at, i.updated_at")},
 	"sql/item_by_id.sql":        {Data: []byte("--| tier: standard\nSELECT {{> live.item_columns}} FROM item i WHERE i.id = {{id}}")},
@@ -54,13 +43,8 @@ func scanItem(rows query.Row) (item, error) {
 	return it, err
 }
 
-// shape is the row less what differs between the two forms by construction:
-// the client-supplied id and the timestamps.
 func shape(it item) item { return item{Status: it.Status, Size: it.Size, Version: it.Version} }
 
-// tracer records the statements the engine receives, by leading keyword:
-// the count below the session, where a transaction's statements are
-// visible too.
 type tracer struct {
 	mu   sync.Mutex
 	sent []string
@@ -85,8 +69,6 @@ func (tr *tracer) take() []string {
 	return sent
 }
 
-// liveTraced is live over a pool whose connections report every statement
-// to the returned tracer.
 func liveTraced(t testing.TB) (*sqlate.DB, *tracer) {
 	t.Helper()
 	dsn := os.Getenv("SQLATE_DSN")
@@ -107,8 +89,6 @@ func liveTraced(t testing.TB) (*sqlate.DB, *tracer) {
 	return sqlate.Wrap(pool, postgres.Dialect{}), tr
 }
 
-// counted is the session each scenario runs through: *sqlate.DB with the
-// calls a returning handle makes on it counted.
 type counted struct {
 	*sqlate.DB
 	exec, query, begin int
@@ -129,22 +109,17 @@ func (c *counted) Begin(ctx context.Context, opts *sql.TxOptions) (*sqlate.Tx, e
 	return c.DB.Begin(ctx, opts)
 }
 
-// calls is what one scenario cost: the session's calls and the engine's
-// statements.
 type calls struct {
 	exec, query, begin int
 	sent               []string
 }
 
-// result is one scenario's outcome: the row, whether the command changed
-// it, and the error.
 type result struct {
 	row     item
 	changed bool
 	err     error
 }
 
-// form is one compilation of the proof's files and its handles.
 type form struct {
 	name    string
 	stmts   *query.Statements
@@ -152,21 +127,11 @@ type form struct {
 	create  query.Returning[item]
 	claim   query.RowGuard[item]
 	retire  query.Returning[item]
-	changed calls // a changed row: the cost the form promises
-	same    calls // an unchanged row that exists
-	absent  calls // no row at all
+	changed calls
+	same    calls
+	absent  calls
 }
 
-// Proof: the returning command's two forms return the same row. Every
-// scenario runs on both: an insert; a guarded claim that succeeds, meets
-// another version, is refused by its own status predicate, and finds no
-// row; a predicate-form retire, then the same retire again, which changes
-// nothing and returns the retired row. Each result equals an immediate read
-// by the read statement, and the forms' rows are equal apart from the id and
-// timestamps. The single-statement form is one query for a changed row and
-// two for an unchanged one; the fallback is a transaction it begins,
-// holding the command and then its read. A column renamed out from under
-// the read fails Verify, naming the single-statement form (returning).
 func TestLive_ReturningTwoForms(t *testing.T) {
 	ctx := context.Background()
 	db, tr := liveTraced(t)
@@ -221,8 +186,6 @@ func TestLive_ReturningTwoForms(t *testing.T) {
 		}
 	}
 
-	// run runs one scenario's operation on a counted session and reports
-	// its result and what it cost.
 	run := func(op func(s sqlate.Session) (item, bool, error)) (result, calls) {
 		s := &counted{DB: db}
 		tr.take()
@@ -242,7 +205,7 @@ func TestLive_ReturningTwoForms(t *testing.T) {
 	scenarios := []struct {
 		name  string
 		verb  string
-		key   string // the item the outcome is read back by
+		key   string
 		op    func(f form, id func(string) string) func(sqlate.Session) (item, bool, error)
 		cost  func(f form) calls
 		check func(r result) bool
@@ -315,8 +278,6 @@ func TestLive_ReturningTwoForms(t *testing.T) {
 		},
 	}
 
-	// Item b, held, is the row the claim's own predicate refuses at the
-	// expected version.
 	for _, f := range forms {
 		if _, _, err := f.create.One(ctx, db, query.Args{"id": f.name + "-b", "status": "held", "size": 5}); err != nil {
 			t.Fatalf("%s: create b: %v", f.name, err)
@@ -359,9 +320,6 @@ func TestLive_ReturningTwoForms(t *testing.T) {
 		}
 	}
 
-	// A column renamed out from under the read: the claim and the retire do
-	// not name it, so their own text still prepares and only their
-	// single-statement form fails, named (returning).
 	if _, err := db.ExecContext(ctx, "ALTER TABLE item RENAME COLUMN size TO bulk"); err != nil {
 		t.Fatal(err)
 	}
@@ -377,8 +335,6 @@ func TestLive_ReturningTwoForms(t *testing.T) {
 	}
 }
 
-// txFS is the proof's statements over their own table, so the scenarios
-// inside a caller's transaction share no rows with the two-forms proof.
 var txFS = fstest.MapFS{
 	"sql/tx_item_by_id.sql": {Data: []byte("--| tier: standard\nSELECT i.id, i.status, i.size, i.version, i.created_at, i.updated_at FROM tx_item i WHERE i.id = {{id}}")},
 	"sql/tx_create.sql":     {Data: []byte("--| tier: standard\n--| returning: tx_item_by_id\nINSERT INTO tx_item (id, status, size) VALUES ({{id}}, {{status}}, {{size}})")},
@@ -386,14 +342,6 @@ var txFS = fstest.MapFS{
 	"sql/tx_retire.sql":     {Data: []byte("--| tier: standard\n--| returning: tx_item_by_id\nUPDATE tx_item\nSET status = 'retired', version = version + 1\nWHERE id = {{id}} AND status <> 'retired'")},
 }
 
-// Proof: both forms run inside a caller's transaction, on the one
-// connection it holds. In one db.Transact per form: an insert; a guarded
-// claim that succeeds, then meets another version; a retire, then the same
-// retire again, which changes nothing. On the single-statement form an
-// unchanged outcome is the command returning no row and then the read on
-// the same connection, which the driver refuses while the command's row set
-// is still open. The fallback begins no transaction of its own: the engine
-// receives one BEGIN, the caller's, and one COMMIT.
 func TestLive_ReturningInsideACallersTransaction(t *testing.T) {
 	ctx := context.Background()
 	db, tr := liveTraced(t)
@@ -414,16 +362,15 @@ func TestLive_ReturningInsideACallersTransaction(t *testing.T) {
 	for _, f := range []struct {
 		name string
 		d    sqlate.Dialect
-		// sent is what the engine receives for the unit, by leading keyword.
 		sent []string
 	}{
 		{"native", postgres.Dialect{}, []string{
 			"BEGIN",
-			"INSERT",           // create: changed
-			"UPDATE",           // claim: changed
-			"UPDATE", "SELECT", // claim again: unchanged, then the read
-			"UPDATE",           // retire: changed
-			"UPDATE", "SELECT", // retire again: unchanged, then the read
+			"INSERT",
+			"UPDATE",
+			"UPDATE", "SELECT",
+			"UPDATE",
+			"UPDATE", "SELECT",
 			"COMMIT",
 		}},
 		{"fallback", struct{ sqlate.Dialect }{postgres.Dialect{}}, []string{

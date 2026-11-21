@@ -139,8 +139,6 @@ func TestLoad_RejectsBrokenHeaders(t *testing.T) {
 		if err == nil || !strings.Contains(err.Error(), "s.sql") {
 			t.Errorf("%s: err = %v, want a load error naming the file", name, err)
 		}
-		// A misspelled suffix passes the type grammar, so only the
-		// suffix check refuses it.
 		if strings.HasPrefix(name, "not null") && (err == nil || !strings.Contains(err.Error(), `the type contains "not" or "null"`)) {
 			t.Errorf("%s: err = %v, want the misspelled suffix named", name, err)
 		}

@@ -11,8 +11,6 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// A statement file includes the guard patterns; the spliced text binds the
-// pattern's parameters like the file's own.
 func TestLoad_ExpandsPatternIncludes(t *testing.T) {
 	st := load(t, "--| tier: standard\nUPDATE t SET a = {{a}}, {{> sql.guard_set}}\nWHERE {{> sql.guard_where}}")
 	if st.Text() != "UPDATE t SET a = $1, updated_at = CURRENT_TIMESTAMP, version = version + 1\nWHERE id = $2 AND version = $3" {
@@ -37,8 +35,6 @@ func TestLoad_RejectsBadIncludes(t *testing.T) {
 	}
 }
 
-// The guard runs over the included patterns exactly as over hand-written
-// text.
 func TestGuard_OverIncludedPatterns(t *testing.T) {
 	stmts := catalog().MustCompile(fstest.MapFS{
 		"sql/edit.sql":    {Data: []byte("--| tier: standard\nUPDATE t SET a = {{a}}, {{> sql.guard_set}} WHERE {{> sql.guard_where}}")},
@@ -54,8 +50,6 @@ func TestGuard_OverIncludedPatterns(t *testing.T) {
 	}
 }
 
-// A port overlays the library's paging: the collection read composes with
-// the port's spelling and the slots the library fills are unchanged.
 func TestOverlay_RespellsPagingForAPort(t *testing.T) {
 	mysql := fstest.MapFS{"port/paging.sql": {Data: []byte("--| tier: native\n--| native: mysql — LIMIT/OFFSET\n LIMIT {{fetch}} OFFSET {{offset}}")}}
 	c := query.MustCatalog(query.Patterns().Overlay(mysql, "port"))
@@ -69,9 +63,6 @@ func TestOverlay_RespellsPagingForAPort(t *testing.T) {
 	if _, err := view.List(context.Background(), db, query.Directives{}, query.Page{Number: 3, Size: 4}); err != nil {
 		t.Fatal(err)
 	}
-	// The library binds offset then fetch, whatever order the port's text
-	// names them in; the page fetches one row past its size.
-	// The counted page takes the same respelling.
 	for i, want := range []string{
 		"SELECT * FROM (SELECT id FROM t) q ORDER BY q.id LIMIT $2 OFFSET $1",
 		"SELECT * FROM (SELECT q.*, COUNT(*) OVER () AS sqlate_total FROM (SELECT id FROM t) q) q ORDER BY q.id LIMIT $2 OFFSET $1",
@@ -86,8 +77,6 @@ func TestOverlay_RespellsPagingForAPort(t *testing.T) {
 	}
 }
 
-// A pattern declares an alternate slot set, and an overlay respells it with
-// either that set or the pattern's own; any other set is still refused.
 func TestOverlay_AcceptsAPatternsAlternateSlots(t *testing.T) {
 	base := query.Publish("app", fstest.MapFS{
 		"p/paging.sql": {Data: []byte("--| tier: standard\n--| alternate: x, y\nLIMIT {{a}}")},
@@ -133,8 +122,6 @@ func TestNewCatalog_RejectsWhatItCannotCompose(t *testing.T) {
 	}
 }
 
-// An application publishes its namespace beside the library's, and a
-// statement includes from both; an alias renames the application's.
 func TestCompile_IncludesAcrossNamespacesAndAliases(t *testing.T) {
 	app := query.Publish("app", fstest.MapFS{
 		"p/identity.sql": {Data: []byte("--| tier: native\n--| native: postgres — RETURNING\nRETURNING id, version")},
@@ -156,8 +143,6 @@ func TestCompile_IncludesAcrossNamespacesAndAliases(t *testing.T) {
 	}
 }
 
-// A native pattern spliced into a standard-tier statement would hide the
-// port; the compile refuses it.
 func TestCompile_RefusesANativePatternInAStandardStatement(t *testing.T) {
 	app := query.Publish("app", fstest.MapFS{"p/identity.sql": {Data: []byte("--| tier: native\n--| native: postgres — RETURNING\nRETURNING id")}}, "p")
 	_, err := query.MustCatalog(query.Patterns(), app).Compile(fstest.MapFS{
@@ -168,9 +153,6 @@ func TestCompile_RefusesANativePatternInAStandardStatement(t *testing.T) {
 	}
 }
 
-// A pattern file that NewCatalog cannot read is a catalog error naming the
-// file and its namespace: no tier, a tier it does not know, a native
-// declaration on the wrong tier, or an include inside a pattern.
 func TestNewCatalog_RejectsMalformedPatterns(t *testing.T) {
 	cases := map[string]string{
 		"no tier":                 "SELECT {{a}}",
@@ -187,8 +169,6 @@ func TestNewCatalog_RejectsMalformedPatterns(t *testing.T) {
 	}
 }
 
-// The inventory lists every registered pattern ordered by namespace, then
-// name, each with its tier, native note, slots in body order, and body.
 func TestCatalog_PatternsReportsTheInventoryInOrder(t *testing.T) {
 	c := query.MustCatalog(
 		query.Publish("zeta", fstest.MapFS{"p/b.sql": {Data: []byte("--| tier: standard\nWHERE {{second}} = {{first}}")}}, "p"),
@@ -215,9 +195,6 @@ func TestCatalog_PatternsReportsTheInventoryInOrder(t *testing.T) {
 	}
 }
 
-// A projection composes its reads from the library's patterns, so a catalog
-// without them cannot serve one: the read is a defect in the program's
-// wiring and panics, naming what is missing.
 func TestProjection_PanicsWithoutTheLibrarysPatterns(t *testing.T) {
 	app := query.Publish("app", fstest.MapFS{"p/x.sql": {Data: []byte("--| tier: standard\nSELECT 1")}}, "p")
 	db, rec := session(t)

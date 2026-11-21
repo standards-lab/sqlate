@@ -12,8 +12,6 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// The engine's patterns are the library's with the keyset predicate alone
-// respelled: every other pattern is accepted as written.
 func TestPatterns_RespellOnlyTheKeysetPredicate(t *testing.T) {
 	library := query.MustCatalog(query.Patterns()).Patterns()
 	engine := query.MustCatalog(postgres.Patterns()).Patterns()
@@ -31,8 +29,6 @@ func TestPatterns_RespellOnlyTheKeysetPredicate(t *testing.T) {
 	}
 }
 
-// A cursor issued by one page continues on the next through the overlay's
-// row-value comparison, each keyed value bound once.
 func TestPatterns_CursorContinuesWithARowValueComparison(t *testing.T) {
 	view := query.MustCatalog(postgres.Patterns()).MustCompile(fstest.MapFS{
 		"sql/member.sql": {Data: []byte("--| tier: standard\n--| key: org, id\n--| field: org uuid not null\n--| field: id uuid not null\nSELECT org, id FROM member")},

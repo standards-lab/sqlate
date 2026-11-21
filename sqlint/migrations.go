@@ -8,8 +8,6 @@ import (
 	"github.com/standards-lab/sqlate/header"
 )
 
-// lintMigrations checks each migration's header and, for a
-// non-transactional file, that it contains exactly one statement.
 func (l *linter) lintMigrations(dir string, on map[string]bool) {
 	entries, _ := fs.ReadDir(l.fsys, dir)
 	for _, e := range entries {

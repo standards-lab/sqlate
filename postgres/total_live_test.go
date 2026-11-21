@@ -1,14 +1,5 @@
 //go:build integration
 
-// Live proofs for the exact total against the compose PostgreSQL. The count
-// is a window in the page's own statement, so the total and the page read
-// one snapshot and agree even while writes land between the statement and
-// the caller. A count run as its own statement before the page is shown to
-// disagree under the same writes. The agreement holds under concurrent
-// writers on the pool, where the two-statement form is shown to disagree
-// too. The counted page scans its base once under one
-// window, and the uncounted page keeps the key's index order.
-// `mise run integration`.
 package postgres_test
 
 import (
@@ -34,10 +25,6 @@ type totalRow struct {
 	N       int64
 }
 
-// liveTotal creates a proof's table, keyed by a uuid primary key (and so
-// indexed on the key), with rows 'x' rows and a fifth as many 'y' rows the
-// filters exclude, n spread over 0..999, and drops it at cleanup. It returns
-// the table's projection under the engine's patterns.
 func liveTotal(t testing.TB, db *sqlate.DB, table string, rows int) query.Projection[totalRow] {
 	t.Helper()
 	ctx := context.Background()
@@ -61,13 +48,10 @@ func liveTotal(t testing.TB, db *sqlate.DB, table string, rows int) query.Projec
 	return items
 }
 
-// onlyX is the proofs' filter: the 'x' rows, which every write touches.
+const continuedPageOffset = -1
+
 var onlyX = []query.Filter{{Field: "grp", Op: query.OpEq, Value: "x"}}
 
-// disagreement reports how a page with items disagrees with the total it is
-// read against, or "" when they agree. offset is the page's offset, or -1
-// for a Continue page, whose offset is unknown: then only the bounds a
-// position does not enter are checked.
 func disagreement(c query.Collection[totalRow], total, offset, size int) string {
 	n := len(c.Items)
 	for _, it := range c.Items {
@@ -82,22 +66,16 @@ func disagreement(c query.Collection[totalRow], total, offset, size int) string 
 		return fmt.Sprintf("%d items and no total", n)
 	case c.More && n != size:
 		return fmt.Sprintf("More with %d items on a page of %d", n, size)
-	case offset < 0 && n > total:
+	case offset == continuedPageOffset && n > total:
 		return fmt.Sprintf("%d items past a total of %d", n, total)
-	case offset >= 0 && offset+n > total:
+	case offset != continuedPageOffset && offset+n > total:
 		return fmt.Sprintf("items end at %d past a total of %d", offset+n, total)
-	case offset >= 0 && c.More != (offset+n < total):
+	case offset != continuedPageOffset && c.More != (offset+n < total):
 		return fmt.Sprintf("More = %v with items ending at %d of a total of %d", c.More, offset+n, total)
 	}
 	return ""
 }
 
-// racer is a session that, each time a query returns, commits a write to the
-// filtered rows on a connection of its own: an 'x' row inserted, then the
-// lowest 'x' row deleted, alternately. The write lands after the engine has
-// begun the query's statement, and so taken its snapshot, and before the
-// caller reads a row of it: between a total being computed and the caller
-// seeing it.
 type racer struct {
 	*sqlate.DB
 	t      testing.TB
@@ -123,7 +101,6 @@ func (r *racer) QueryContext(ctx context.Context, q string, args ...any) (*sql.R
 	return rows, nil
 }
 
-// countX reads the filtered rows' count now, failing the test on an error.
 func countX(t testing.TB, s sqlate.Session, table string) int {
 	t.Helper()
 	n, err := readX(s, table)
@@ -133,7 +110,6 @@ func countX(t testing.TB, s sqlate.Session, table string) int {
 	return n
 }
 
-// readX reads the filtered rows' count now.
 func readX(s sqlate.Session, table string) (int, error) {
 	rows, err := s.QueryContext(context.Background(), "SELECT COUNT(*) FROM "+table+" WHERE grp = 'x'")
 	if err != nil {
@@ -148,14 +124,6 @@ func readX(s sqlate.Session, table string) (int, error) {
 	return n, err
 }
 
-// Proof: the counted total agrees with its page when a write commits between
-// the page's statement and the caller reading it. Every read runs through a
-// racer, and each page is shown to have raced a write (the count now differs
-// from the page's total) and still to agree with its total: a page with More
-// is full, and an offset page's items end at or before the total, before it
-// exactly when More. The control runs the two-statement form under the
-// same racer, an explicit COUNT(*) statement and then an uncounted page,
-// and the two disagree every round.
 func TestLive_TotalAgreesUnderRacingWrites(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -207,7 +175,7 @@ func TestLive_TotalAgreesUnderRacingWrites(t *testing.T) {
 		if err != nil {
 			t.Fatalf("cursor page %d: %v", page, err)
 		}
-		offset := -1 // a Continue page's offset is unknown
+		offset := continuedPageOffset
 		if page == 1 {
 			offset = 0
 		}
@@ -225,9 +193,6 @@ func TestLive_TotalAgreesUnderRacingWrites(t *testing.T) {
 	}
 	t.Logf("counted: %d pages, each raced by a write (%d writes), 0 disagreements", pages, r.writes)
 
-	// The counted rounds, the control's shape under TotalExact: each round
-	// reads every filtered row on one page, so its items number exactly its
-	// total, and the write racing it still lands.
 	const rounds = 6
 	agreed := 0
 	for round := range rounds {
@@ -246,16 +211,8 @@ func TestLive_TotalAgreesUnderRacingWrites(t *testing.T) {
 	}
 	t.Logf("counted rounds agreed in %d of %d", agreed, rounds)
 
-	// The control: the total from its own statement, then the page. Each
-	// round's page reads every filtered row, as a counted round does, so it
-	// agrees with the count only when nothing changed between the two
-	// statements.
 	disagreed := 0
 	for round := range rounds {
-		// Each round runs two queries, so the write racing the count
-		// would be the same every round; stepping the racer on odd
-		// rounds puts an insert between the two in some rounds and a
-		// delete in others.
 		r.writes += round % 2
 		total := countX(t, r, table)
 		c, err := items.List(ctx, r, query.Directives{Sort: byN, Filters: onlyX, Total: query.TotalNone}, query.Page{Number: 1, Size: 1000})
@@ -276,17 +233,11 @@ func TestLive_TotalAgreesUnderRacingWrites(t *testing.T) {
 	t.Logf("control: two statements disagreed in %d of %d rounds", disagreed, rounds)
 }
 
-// stressResult is what one stress run saw: its reads and writes, and the
-// pages that disagreed with their totals, the first five described.
 type stressResult struct {
 	lists, continues, writes, violations int64
 	first                                []string
 }
 
-// stress runs two writers that insert and delete batches of 50 filtered
-// rows for two seconds against four readers outside any transaction. Each
-// reader calls read in a loop, which reports each disagreement it finds
-// through violate and whether it continued a page.
 func stress(t *testing.T, db *sqlate.DB, table string, read func(violate func(string)) (continued int)) stressResult {
 	t.Helper()
 	ctx := context.Background()
@@ -306,8 +257,6 @@ func stress(t *testing.T, db *sqlate.DB, table string, read func(violate func(st
 	var wg sync.WaitGroup
 	for range 2 {
 		wg.Go(func() {
-			// SKIP LOCKED keeps the two writers' deletes from waiting on,
-			// and so deadlocking with, each other's rows.
 			insert := fmt.Sprintf("INSERT INTO %s (grp, n) SELECT 'x', (random() * 999)::int FROM generate_series(1, 50)", table)
 			del := fmt.Sprintf("DELETE FROM %s WHERE id IN (SELECT id FROM %[1]s WHERE grp = 'x' ORDER BY random() LIMIT 50 FOR UPDATE SKIP LOCKED)", table)
 			for i := 0; time.Now().Before(deadline); i++ {
@@ -335,12 +284,6 @@ func stress(t *testing.T, db *sqlate.DB, table string, read func(violate func(st
 	return stressResult{lists: lists.Load(), continues: continues.Load(), writes: writes.Load(), violations: violations.Load(), first: first}
 }
 
-// Proof: under concurrent writers on the pool, every counted page a reader
-// sees agrees with its own total. Four readers run List at a random page and
-// Continue from it while the writers run; no page may disagree. The control
-// runs the same stress over the two-statement form, a COUNT(*) statement
-// and then an uncounted page of the whole filtered listing, and shows the
-// stress catches it disagreeing.
 func TestLive_TotalAgreesUnderConcurrentWrites(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -354,7 +297,7 @@ func TestLive_TotalAgreesUnderConcurrentWrites(t *testing.T) {
 			t.Errorf("List: %v", err)
 			return 0
 		}
-		empty := query.NoTotal // an empty later page carries no count
+		empty := query.NoTotal
 		if number == 1 {
 			empty = 0
 		}
@@ -373,7 +316,7 @@ func TestLive_TotalAgreesUnderConcurrentWrites(t *testing.T) {
 			if len(c.Items) == 0 && c.Total != query.NoTotal {
 				violate(fmt.Sprintf("empty Continue page: Total = %d", c.Total))
 			}
-			if msg := disagreement(c, c.Total, -1, size); msg != "" {
+			if msg := disagreement(c, c.Total, continuedPageOffset, size); msg != "" {
 				violate("Continue: " + msg)
 			}
 		}
@@ -387,9 +330,6 @@ func TestLive_TotalAgreesUnderConcurrentWrites(t *testing.T) {
 		t.Errorf("the stress ran no reads or writes of some kind")
 	}
 
-	// The control: the same stress over the two-statement form. Each read
-	// is the whole filtered listing on one page, so it agrees with the
-	// count only when no batch committed between the two statements.
 	const control = "live_total_stress_control"
 	plain := liveTotal(t, db, control, 400)
 	res = stress(t, db, control, func(violate func(string)) int {
@@ -414,7 +354,6 @@ func TestLive_TotalAgreesUnderConcurrentWrites(t *testing.T) {
 	}
 }
 
-// capture is a session that keeps the last query's text and arguments.
 type capture struct {
 	*sqlate.DB
 	text string
@@ -426,7 +365,6 @@ func (c *capture) QueryContext(ctx context.Context, q string, args ...any) (*sql
 	return c.DB.QueryContext(ctx, q, args...)
 }
 
-// planNode is one node of EXPLAIN (FORMAT JSON)'s plan tree.
 type planNode struct {
 	NodeType   string     `json:"Node Type"`
 	Relation   string     `json:"Relation Name"`
@@ -440,8 +378,6 @@ type explained struct {
 	ExecutionTime float64  `json:"Execution Time"`
 }
 
-// explain runs EXPLAIN with the given options over a captured statement and
-// its arguments.
 func explain(t testing.TB, db *sqlate.DB, options string, c *capture) explained {
 	t.Helper()
 	rows, err := db.QueryContext(context.Background(), "EXPLAIN ("+options+") "+c.text, c.args...)
@@ -463,7 +399,6 @@ func explain(t testing.TB, db *sqlate.DB, options string, c *capture) explained 
 	return out[0]
 }
 
-// walk visits a plan tree depth first.
 func walk(n planNode, visit func(planNode)) {
 	visit(n)
 	for _, c := range n.Plans {
@@ -471,7 +406,6 @@ func walk(n planNode, visit func(planNode)) {
 	}
 }
 
-// planShape lists a plan's node types depth first, a scan with its relation.
 func planShape(n planNode) string {
 	var parts []string
 	walk(n, func(n planNode) {
@@ -484,11 +418,6 @@ func planShape(n planNode) string {
 	return strings.Join(parts, " > ")
 }
 
-// Proof: the plans of the two total modes over 10k rows sorted by the
-// indexed key. The counted page has exactly one WindowAgg and scans its base
-// relation once, so the count costs no second pass; the uncounted page has no
-// WindowAgg and no Sort beneath its Limit, reading the key's index in order.
-// Each plan's execution time and shared buffers are logged, not asserted.
 func TestLive_TotalPlans(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)

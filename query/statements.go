@@ -64,9 +64,6 @@ func (c *Catalog) Compile(fsys fs.FS, dir string, d sqlate.Dialect) (*Statements
 		stmts.statements[st.name] = st
 		sources[st.name] = src
 	}
-	// A returning declaration names a read of the same directory, so it
-	// resolves once every file is parsed; in name order, so the first
-	// failure reported is stable.
 	for _, st := range stmts.Statements() {
 		if sources[st.name].returning == "" {
 			continue
@@ -152,27 +149,11 @@ func Verify(ctx context.Context, db sqlate.Session, vs ...Verifier) error {
 	return errors.Join(errs...)
 }
 
-// source is what Compile keeps of a statement for resolving returning
-// declarations: its body after include expansion, its parameters still
-// {{…}} slots, and the read its returning declaration names, empty for none.
 type source struct {
 	body      string
 	returning string
 }
 
-// parse reads the header, expands the body's pattern includes, and rewrites
-// its parameters; the engine receives the body, less a trailing semicolon
-// so the statement composes as a derived table. The header grammar: tier
-// required (standard | native); native required when the tier is native,
-// the engine feature used and the port as free text; port optional and
-// native only, the port as its own declaration; transaction optional
-// (required); key optional, naming one declared field or several separated
-// by commas, each named once; field repeated, "<name> <type>" with an
-// optional trailing "not null", matched case-insensitively, the name an
-// identifier; returning optional, naming the statement of the same
-// directory that reads the changed row back, resolved by Compile once every
-// file is parsed. The source returned beside the statement is its expanded
-// body and returning declaration, which that resolution reads.
 func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, source, error) {
 	st := Statement{name: name, dialect: d, catalog: c}
 	var src source
@@ -258,11 +239,8 @@ func (c *Catalog) parse(name, text string, d sqlate.Dialect) (Statement, source,
 	return st, src, err
 }
 
-// notNullSuffix is the optional trailing suffix of a field declaration.
 const notNullSuffix = " not null"
 
-// cutNotNull returns decl without its trailing "not null" suffix, matched
-// case-insensitively as SQL keywords are, and whether the suffix was there.
 func cutNotNull(decl string) (string, bool) {
 	if len(decl) > len(notNullSuffix) && strings.EqualFold(decl[len(decl)-len(notNullSuffix):], notNullSuffix) {
 		return decl[:len(decl)-len(notNullSuffix)], true
@@ -270,12 +248,6 @@ func cutNotNull(decl string) (string, bool) {
 	return decl, false
 }
 
-// strayNotNull reports whether a field's type, with its "not null" suffix
-// already cut, still contains the word not or null, or ends in the one-word
-// spelling notnull or not_null. Each marks a misspelled suffix, such as
-// "nott null", "not  null", or "notnull", which the type grammar would
-// otherwise accept as part of the type, leaving the field nullable and the
-// failure to the engine. No SQL type name contains any of these words.
 func strayNotNull(typ string) bool {
 	words := strings.Fields(typ)
 	for _, w := range words {
@@ -290,6 +262,4 @@ func strayNotNull(typ string) bool {
 	return false
 }
 
-// identifier is a contract field name as it appears in the composed SQL:
-// unquoted, lowercase, the base's own alias for the column.
 var identifier = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)

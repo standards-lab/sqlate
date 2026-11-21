@@ -13,9 +13,6 @@ import (
 	"github.com/standards-lab/sqlate/sqlint"
 )
 
-// lint loads the configuration from fsys and lints under it, returning
-// the findings rendered the way the command prints them, after the lines
-// of any configuration error.
 func lint(fsys fs.FS, resolve sqlint.Resolver) []string {
 	var lines []string
 	cfg, err := sqlint.Load(fsys)
@@ -28,10 +25,6 @@ func lint(fsys fs.FS, resolve sqlint.Resolver) []string {
 	return lines
 }
 
-// tree is a module the way the linter sees it: a configuration naming the
-// library and the engine, the engine's export, and the files each
-// convention catches. The library's namespace always resolves to the
-// patterns the query package embeds, so the tree holds no copy of them.
 func tree(config string) fstest.MapFS {
 	return fstest.MapFS{
 		"sqlint.toml":                          {Data: []byte(config)},
@@ -114,15 +107,12 @@ func TestLint_FindsEachConvention(t *testing.T) {
 	reject(t, findings, "native.sql", "edit.sql", "version.sql", "delete.sql", "sqlint.toml")
 }
 
-// An override refines the role's switches for one directory set; the
-// other sets keep the role's.
 func TestLint_OverrideRefinesOneDirectorySet(t *testing.T) {
 	findings := lint(tree(config+"\n[statements.\"admin/*/statements\"]\nnative_forms = false\nverb_named = false\n"), nil)
 	reject(t, findings, "seed.sql")
 	want(t, findings, `list.sql:4: "RETURNING" (returning) in a standard-tier file`, "insert_thing.sql: named for its SQL verb")
 }
 
-// A switch off at the role turns the check off everywhere.
 func TestLint_RoleSwitchesOff(t *testing.T) {
 	cfg := strings.NewReplacer("[statements]\n", "[statements]\nnative_forms = false\nguard = false\n", "[migrations]\n", "[migrations]\nsingle_statement = false\n").Replace(config)
 	findings := lint(tree(cfg), nil)
@@ -130,10 +120,6 @@ func TestLint_RoleSwitchesOff(t *testing.T) {
 	want(t, findings, "0002_b.up.sql: header")
 }
 
-// Without a configuration the roles are every directory of the role's
-// name, every check on, and no source: an include is a load error and
-// the native-forms list is empty. The guard check reads the include's
-// name from the body, so it holds without a catalog.
 func TestLint_Defaults(t *testing.T) {
 	fsys := tree(config)
 	delete(fsys, "sqlint.toml")
@@ -148,8 +134,6 @@ func TestLint_Defaults(t *testing.T) {
 	reject(t, findings, "in a standard-tier file", "sqlint.toml")
 }
 
-// Errors in the file's own syntax are Load's, each line beginning with
-// the file's name, beside the configuration that parsed.
 func TestLoad_ReportsConfigurationErrors(t *testing.T) {
 	cases := map[string]string{
 		`statements: override "nope/*" names no entry of dirs`:                       config + "\n[statements.\"nope/*\"]\nnative_forms = false\n",
@@ -172,8 +156,6 @@ func TestLoad_ReportsConfigurationErrors(t *testing.T) {
 	}
 }
 
-// A source or engine that does not resolve is a finding against the
-// configuration file, and the rest of the tree is linted with what did.
 func TestLint_ReportsResolutionFailures(t *testing.T) {
 	cases := map[string]string{
 		"sources.app: open missing":                      source(`app = "missing"`),
@@ -201,8 +183,6 @@ func TestLint_ReportsResolutionFailures(t *testing.T) {
 	}
 }
 
-// A nil configuration is the defaults, and a finding renders as the
-// command prints it.
 func TestLint_NilConfigIsDefaultsAndFindingString(t *testing.T) {
 	fsys := tree(config)
 	delete(fsys, "sqlint.toml")
@@ -220,9 +200,6 @@ func TestLint_NilConfigIsDefaultsAndFindingString(t *testing.T) {
 	}
 }
 
-// A role's dirs entry matches a directory segment by segment, each segment
-// a path.Match pattern, with "**" standing for any run of segments,
-// including none.
 func TestLint_RoleGlobsMatchBySegment(t *testing.T) {
 	cases := []struct {
 		glob, dir string
@@ -249,8 +226,6 @@ func TestLint_RoleGlobsMatchBySegment(t *testing.T) {
 	}
 }
 
-// A source whose first segment holds a dot is a module path, resolved
-// through the resolver; anything else is a directory of the tree.
 func TestLint_ModulePathsAreTheDottedOnes(t *testing.T) {
 	for value, module := range map[string]bool{
 		"github.com/x/y": true,
@@ -268,9 +243,6 @@ func TestLint_ModulePathsAreTheDottedOnes(t *testing.T) {
 	}
 }
 
-// A module path resolves through the resolver to the module's root
-// filesystem, and its export is read there; an overlay resolves the same
-// way and respells the library's pattern.
 func TestLint_ResolvesPackagePaths(t *testing.T) {
 	packages := map[string]fstest.MapFS{
 		"github.com/standards-lab/sqlate": {
@@ -310,9 +282,6 @@ dirs = ["domain/*/statements"]
 	want(t, lint(fsys, nil), "sqlint.toml: sources.lib: no module resolution for github.com/standards-lab/sqlate")
 }
 
-// A bare directory under [sources] is the pattern files themselves, the
-// service's own namespace declared entirely in the root file, while a
-// directory that contains sqlint.toml is a producer whose export is read.
 func TestLint_BareDirectoryIsThePatternsThemselves(t *testing.T) {
 	fsys := tree(source(`app = "admin/x/patterns"`))
 	fsys["admin/x/patterns/identity.sql"] = &fstest.MapFile{Data: []byte("--| tier: native\n--| native: postgres — RETURNING\nRETURNING id, version")}
@@ -322,11 +291,6 @@ func TestLint_BareDirectoryIsThePatternsThemselves(t *testing.T) {
 	want(t, findings, `orphan.sql: include of unknown namespace "org" (registered: app, sql)`)
 }
 
-// The header forms a statement or pattern may use lint clean through the
-// compile: a port folded across lines, a composite key, a not-null field,
-// and a pattern's alternate slot set with an overlay that declares it. The
-// library's namespace takes an overlay the same way, onto the embedded
-// patterns, whatever path its entry names.
 func TestLint_HeaderFormsLintClean(t *testing.T) {
 	overlay, err := os.ReadFile("../postgres/overlay/keyset.sql")
 	if err != nil {
@@ -353,10 +317,6 @@ func source(line string) string {
 	return strings.Replace(config, "[sources]\n", "[sources]\n"+line+"\n", 1)
 }
 
-// Every native form the PostgreSQL engine declares trips exactly once on
-// the line written for it, and none trips on identifiers, literals,
-// comments, or a native-tier file. The engine's real declaration is the
-// input, so an entry added there is exercised here.
 func TestNativeForms_TrippedOnceAndSilentOtherwise(t *testing.T) {
 	engine, err := os.ReadFile("../postgres/sqlint.toml")
 	if err != nil {
@@ -415,9 +375,6 @@ func TestNativeForms_TrippedOnceAndSilentOtherwise(t *testing.T) {
 	}
 }
 
-// A returning pair lints clean; each shape the query package refuses is a
-// compile finding against its directory; and RETURNING written into a
-// standard file is still a native form, the declaration notwithstanding.
 func TestLint_ReturningCommands(t *testing.T) {
 	read := "--| tier: standard\nSELECT i.id, i.status FROM item i WHERE i.id = {{id}}"
 	fsys := tree(config)
@@ -445,8 +402,6 @@ func TestLint_ReturningCommands(t *testing.T) {
 	)
 }
 
-// A field declaration whose not null suffix is misspelled is a compile
-// finding against its directory: the type would otherwise absorb the typo.
 func TestLint_MisspelledNotNull(t *testing.T) {
 	fsys := tree(config)
 	fsys["domain/f/statements/sized.sql"] = &fstest.MapFile{Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid not null\n--| field: size bigint nott null\nSELECT id, size FROM t")}

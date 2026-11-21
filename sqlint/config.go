@@ -56,15 +56,12 @@ type Role struct {
 	Overrides map[string]map[string]bool
 }
 
-// The checks each role knows, by switch name.
 var roleChecks = map[string][]string{
 	"statements": {"verb_named", "delimiter", "native_forms", "guard"},
 	"patterns":   {"delimiter", "native_forms"},
 	"migrations": {"single_statement"},
 }
 
-// defaults are the conventions as they stand: every directory of each
-// role's name, every check on.
 func defaults() *Config {
 	c := &Config{Sources: map[string]Source{}, Roles: map[string]*Role{}}
 	for name, checks := range roleChecks {
@@ -77,8 +74,6 @@ func defaults() *Config {
 	return c
 }
 
-// raw is the file as TOML sees it; the role tables decode in two passes
-// because they mix scalar switches with glob-keyed override tables.
 type raw struct {
 	Engine     string                    `toml:"engine"`
 	Sources    map[string]toml.Primitive `toml:"sources"`
@@ -137,16 +132,12 @@ func parseConfig(text string) (*Config, error) {
 			errs = append(errs, err)
 		}
 	}
-	// Every primitive is decoded by now, so what remains undecoded is a key
-	// the configuration does not know.
 	for _, k := range md.Undecoded() {
 		fail("unknown key %s", k)
 	}
 	return c, errors.Join(errs...)
 }
 
-// parseRole fills role from its table: dirs, the known switches, and one
-// override table per dirs entry, containing switches only.
 func parseRole(md toml.MetaData, name string, table map[string]toml.Primitive, role *Role) error {
 	var errs []error
 	fail := func(format string, args ...any) { errs = append(errs, fmt.Errorf(File+": "+name+": "+format, args...)) }
@@ -205,9 +196,6 @@ func parseRole(md toml.MetaData, name string, table map[string]toml.Primitive, r
 	return errors.Join(errs...)
 }
 
-// switches resolves the checks in force for dir: the first dirs entry
-// that matches names the set, and its override refines the role's
-// switches. A directory no entry matches is not the role's.
 func (r *Role) switches(dir string) (map[string]bool, bool) {
 	for _, glob := range r.Dirs {
 		if !match(glob, dir) {
@@ -221,18 +209,11 @@ func (r *Role) switches(dir string) (map[string]bool, bool) {
 	return nil, false
 }
 
-// isModulePath reports whether a source or engine value is a Go module
-// path (its first segment contains a dot, as a module path's host does)
-// rather than a directory relative to the configuration.
 func isModulePath(p string) bool {
 	first, _, _ := strings.Cut(p, "/")
 	return strings.Contains(first, ".")
 }
 
-// isProducer reports whether base in fsys declares itself: a module
-// always does, and a directory does when it contains File. A directory
-// without one is the pattern files themselves, the module's own,
-// declared entirely in the root configuration.
 func isProducer(fsys fs.FS, base string) bool {
 	if base == "." {
 		return true
@@ -241,8 +222,6 @@ func isProducer(fsys fs.FS, base string) bool {
 	return err == nil
 }
 
-// readExport reads a producer's File under base in fsys and returns its
-// export; a producer without one declares nothing.
 func readExport(fsys fs.FS, base string) (Export, error) {
 	text, err := fs.ReadFile(fsys, path.Join(base, File))
 	if errors.Is(err, fs.ErrNotExist) {

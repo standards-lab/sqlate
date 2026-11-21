@@ -10,7 +10,9 @@ var (
 	// failure to obtain a connection or begin a transaction, and a network
 	// error or driver.ErrBadConn raised by any session call. It is wrapped
 	// as fmt.Errorf("%w: %w", ErrConnectionFailed, err) so errors.Is
-	// matches it and the driver's error stays reachable.
+	// matches it and the driver's error stays reachable. A context deadline
+	// or cancellation is not a connectivity failure: it reports the caller's
+	// budget, not the engine's reachability, and the dialect maps it.
 	ErrConnectionFailed = errors.New("database connection failed")
 
 	// ErrInvalidValue classifies a data exception: a bound value the engine

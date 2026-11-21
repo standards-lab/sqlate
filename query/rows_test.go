@@ -49,8 +49,6 @@ var testFiles = fstest.MapFS{
 	"sql/in_tree.sql": {Data: []byte("--| tier: standard\nSELECT COUNT(*) FROM t WHERE node = {{node}} AND (a = {{candidate}} OR b = {{node}})")},
 }
 
-// catalog is the library's own patterns, the catalog every test compiles
-// against unless it registers more.
 func catalog() *query.Catalog { return query.MustCatalog(query.Patterns()) }
 
 func source(t *testing.T) *query.Statements {
@@ -140,7 +138,6 @@ func TestRows_ErrorsCrossTheMappingBoundary(t *testing.T) {
 		t.Errorf("query error = %v, want mapped", err)
 	}
 
-	// A scan failure: the row is narrower than the scan function reads.
 	db, rec := session(t, sqltest.Response{Columns: []string{"id"}, Rows: [][]driver.Value{{"a"}}})
 	if _, err := all.One(ctx, db, nil); !errors.As(err, &mapped) {
 		t.Errorf("scan error = %v, want mapped through ErrorMapper", err)

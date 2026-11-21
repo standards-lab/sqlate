@@ -94,9 +94,6 @@ func Files(fsys fs.FS, dir string) ([]Migration, error) {
 	return out, nil
 }
 
-// declarations reads a file's header and returns whether the migration runs in a
-// transaction ("none" opts out, "required" or no declaration keeps it, any
-// other value is an error) and the body the engine receives.
 func declarations(text string) (transactional bool, body string, err error) {
 	h, err := header.Parse(text)
 	if err != nil {

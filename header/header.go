@@ -49,8 +49,6 @@ func Parse(text string) (Header, error) {
 	var h Header
 	inHeader := true
 	offset := 0
-	// open is the index in h.declarations of the declaration a fold may
-	// continue, or -1 when no declaration is open.
 	open := -1
 	for n := 1; offset < len(text); n++ {
 		raw, next := text[offset:], len(text)
@@ -63,8 +61,6 @@ func Parse(text string) (Header, error) {
 			h.end = offset
 		}
 		if !strings.HasPrefix(line, Marker) {
-			// A blank line, a prose line, and the body all close the
-			// declaration a fold may continue.
 			open = -1
 			offset = next
 			continue

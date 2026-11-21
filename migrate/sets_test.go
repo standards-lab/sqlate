@@ -13,9 +13,6 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// The two sets every multi-set proof declares: a library set over its own
-// history table and the program's own set over the default one, the library
-// declared first because the program's migrations reference its objects.
 var (
 	library = migrate.Set{
 		Name:  "lib",
@@ -30,26 +27,19 @@ var (
 			{Version: 1, Name: "app_one", Up: "CREATE TABLE app_one ()", Down: "DROP TABLE app_one", Transactional: true},
 		},
 	}
-	// two is a set of two migrations, for the states one migration cannot
-	// show: a partly applied history.
 	two = migrate.Set{Name: "two", Table: "two_schema_version", Migrations: set}
 
 	libApplied = [][]driver.Value{{int64(1), "lib_one", false}}
 	appApplied = [][]driver.Value{{int64(1), "app_one", false}}
 
-	// step scripts one statement of a migration or of its history row.
 	step = sqltest.Response{}
 )
 
-// migrationTexts are the two sets' up and down texts, the statements a
-// refused run must not have executed.
 var migrationTexts = []string{
 	"CREATE TABLE lib_one ()", "DROP TABLE lib_one",
 	"CREATE TABLE app_one ()", "DROP TABLE app_one",
 }
 
-// newSets builds a migrator over the declared sets and the driver fake with
-// the lock capability, so lock and unlock calls are part of the script.
 func newSets(t *testing.T, sets []migrate.Set, responses ...sqltest.Response) (*migrate.Migrator, *sqltest.Recorder) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
@@ -60,7 +50,6 @@ func newSets(t *testing.T, sets []migrate.Set, responses ...sqltest.Response) (*
 	return m, rec
 }
 
-// script flattens the parts of a response sequence.
 func script(parts ...[]sqltest.Response) []sqltest.Response {
 	var out []sqltest.Response
 	for _, p := range parts {
@@ -71,14 +60,10 @@ func script(parts ...[]sqltest.Response) []sqltest.Response {
 
 func one(r ...sqltest.Response) []sqltest.Response { return r }
 
-// checked scripts one set's pre-flight: the history table's create and the
-// ordered read returning applied.
 func checked(applied ...[]driver.Value) []sqltest.Response {
 	return []sqltest.Response{created, history(applied...)}
 }
 
-// assertPrefixes checks that got has one text per want, in order, each
-// starting with its want.
 func assertPrefixes(t *testing.T, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {
@@ -91,8 +76,6 @@ func assertPrefixes(t *testing.T, got, want []string) {
 	}
 }
 
-// assertOneLock checks that the run took exactly one lock, under name, as
-// its first call, and released it as its last.
 func assertOneLock(t *testing.T, rec *sqltest.Recorder, name string) {
 	t.Helper()
 	calls := rec.Calls()
@@ -113,7 +96,6 @@ func assertOneLock(t *testing.T, rec *sqltest.Recorder, name string) {
 	}
 }
 
-// assertNoMigrationText checks that no set's up or down text ran.
 func assertNoMigrationText(t *testing.T, rec *sqltest.Recorder) {
 	t.Helper()
 	for _, text := range rec.SQL(sqltest.OpExec) {
@@ -123,11 +105,6 @@ func assertNoMigrationText(t *testing.T, rec *sqltest.Recorder) {
 	}
 }
 
-// TestNewValidation covers the checks New makes before any I/O: a database,
-// at least one set, a name on every set, no repeated name, no shared
-// history table (an empty table and the explicit default are the same
-// table), a table name that is a plain identifier, and each set's own
-// migration ordering.
 func TestNewValidation(t *testing.T) {
 	pool, _ := sqltest.Open(t)
 	db := sqlate.Wrap(pool, lockingDialect{})
@@ -164,9 +141,6 @@ func TestNewValidation(t *testing.T) {
 	}
 }
 
-// TestUpOrder proves Up takes one lock, creates and reads every set's
-// history before any migration runs, then applies the sets in declared
-// order, each over its own history table.
 func TestUpOrder(t *testing.T) {
 	responses := script(one(locked), checked(), checked(), one(step, step, step, step), one(unlocked))
 	m, rec := newSets(t, []migrate.Set{library, app}, responses...)
@@ -191,16 +165,12 @@ func TestUpOrder(t *testing.T) {
 	assertOneLock(t, rec, "migrate.schema_version")
 }
 
-// TestLockName proves the lock name defaults to "migrate." over the top
-// set's history table, and that Options.LockName overrides it.
 func TestLockName(t *testing.T) {
 	responses := script(one(locked), checked(), checked(), one(step, step, step, step), one(unlocked))
 	m, rec := newSets(t, []migrate.Set{app, library}, responses...)
 	if err := m.Up(context.Background()); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	// The sets are declared the other way round here, so the default names
-	// the library's table: the top set's, not the first set's.
 	assertOneLock(t, rec, "migrate.lib_schema_version")
 
 	pool, rec := sqltest.Open(t, script(one(locked), checked(), one(step, step), one(unlocked))...)
@@ -214,9 +184,6 @@ func TestLockName(t *testing.T) {
 	assertOneLock(t, rec, "acme.schema")
 }
 
-// TestNoLocker proves a dialect without the lock capability refuses a run
-// with ErrNoLocker before any call, and runs without a lock under
-// Options.Unlocked.
 func TestNoLocker(t *testing.T) {
 	pool, rec := sqltest.Open(t)
 	m, err := migrate.New(sqlate.Wrap(pool, sqltest.Dialect{}), []migrate.Set{library, app}, migrate.Options{})
@@ -248,8 +215,6 @@ func TestNoLocker(t *testing.T) {
 	}
 }
 
-// TestDown_RevertsTheTopSetOnly proves Migrator.Down reverts the top set
-// and leaves the sets below it applied, with no history table dropped.
 func TestDown_RevertsTheTopSetOnly(t *testing.T) {
 	responses := script(one(locked), checked(libApplied...), checked(appApplied...), one(step, step), one(unlocked))
 	m, rec := newSets(t, []migrate.Set{library, app}, responses...)
@@ -267,9 +232,6 @@ func TestDown_RevertsTheTopSetOnly(t *testing.T) {
 	})
 }
 
-// TestDown_RefusesALayerBelowAnAppliedOne proves a revert of the library
-// set is refused with ErrAboveApplied while the program's set is still
-// applied, naming both layers, with no migration text run.
 func TestDown_RefusesALayerBelowAnAppliedOne(t *testing.T) {
 	responses := script(one(locked), checked(libApplied...), checked(appApplied...), one(unlocked))
 	m, rec := newSets(t, []migrate.Set{library, app}, responses...)
@@ -290,9 +252,6 @@ func TestDown_RefusesALayerBelowAnAppliedOne(t *testing.T) {
 	}
 }
 
-// TestSteps_RefusesALayerAboveAPendingOne proves an apply on the program's
-// set is refused with ErrBelowPending while the library set still has
-// pending migrations, naming both layers, with no migration text run.
 func TestSteps_RefusesALayerAboveAPendingOne(t *testing.T) {
 	responses := script(one(locked), checked(), checked(), one(unlocked))
 	m, rec := newSets(t, []migrate.Set{library, app}, responses...)
@@ -313,9 +272,6 @@ func TestSteps_RefusesALayerAboveAPendingOne(t *testing.T) {
 	}
 }
 
-// TestResetOrder proves Reset reverts the sets in reverse declared order
-// and drops each set's history table once that set is reverted, all under
-// the one lock.
 func TestResetOrder(t *testing.T) {
 	responses := script(
 		one(locked), checked(libApplied...), checked(appApplied...),
@@ -338,8 +294,6 @@ func TestResetOrder(t *testing.T) {
 	assertOneLock(t, rec, "migrate.schema_version")
 }
 
-// TestUpStopsAtFailure proves a failing set stops the run before the sets
-// after it, the error names the set, and the lock is released.
 func TestUpStopsAtFailure(t *testing.T) {
 	responses := script(
 		one(locked), checked(), checked(),
@@ -365,11 +319,6 @@ func TestUpStopsAtFailure(t *testing.T) {
 	}
 }
 
-// TestDirtyRefusal proves every mutating verb refuses a dirty set before
-// any set runs, even when the dirty set is not the first: the library set
-// is clean and pending, the program's history has a dirty row, and no
-// migration text of either set runs. The error names the set, classifies as
-// ErrDirty, and carries the version.
 func TestDirtyRefusal(t *testing.T) {
 	dirty := [][]driver.Value{{int64(1), "app_one", true}}
 	for _, op := range []struct {
@@ -410,8 +359,6 @@ func TestDirtyRefusal(t *testing.T) {
 	}
 }
 
-// TestUnknownHistoryRefusal proves a history row the set does not carry
-// refuses the run, classified as ErrUnknownVersion and naming the set.
 func TestUnknownHistoryRefusal(t *testing.T) {
 	responses := script(one(locked), checked([]driver.Value{int64(1), "someone_elses", false}), one(unlocked))
 	m, rec := newSets(t, []migrate.Set{library}, responses...)
@@ -426,13 +373,9 @@ func TestUnknownHistoryRefusal(t *testing.T) {
 	}
 }
 
-// TestStatus proves Status reads each set in declared order without a lock,
-// two calls per set, and reports every field of SetStatus.
 func TestStatus(t *testing.T) {
 	ctx := context.Background()
 
-	// The library set at its head and the program's set with no history
-	// table: the read of a missing table is the existence check alone.
 	m, rec := newSets(t, []migrate.Set{library, app},
 		exists(true), history(libApplied...), exists(false))
 	got, err := m.Status(ctx)
@@ -458,8 +401,6 @@ func TestStatus(t *testing.T) {
 		t.Errorf("%d scripted responses unconsumed", rec.Pending())
 	}
 
-	// A partly applied set: the head is the applied version and the rest of
-	// the set is pending.
 	m, _ = newSets(t, []migrate.Set{two}, exists(true), history([]driver.Value{int64(1), "a", false}))
 	got, err = m.Status(ctx)
 	if err != nil {
@@ -469,14 +410,12 @@ func TestStatus(t *testing.T) {
 		t.Errorf("partial status = %+v, want version 1 of 2 with 2 pending", s)
 	}
 
-	// A dirty row is state Status reports, not a failure.
 	m, _ = newSets(t, []migrate.Set{library}, exists(true), history([]driver.Value{int64(1), "lib_one", true}))
 	got, err = m.Status(ctx)
 	if err != nil || len(got) != 1 || !got[0].Dirty || got[0].Version != 1 {
 		t.Errorf("dirty Status = %+v, %v; want version 1 dirty", got, err)
 	}
 
-	// A history row the set does not carry is an error naming the set.
 	m, _ = newSets(t, []migrate.Set{library}, exists(true), history([]driver.Value{int64(1), "other", false}))
 	_, err = m.Status(ctx)
 	se, ok := errors.AsType[*migrate.SetError](err)
@@ -485,9 +424,6 @@ func TestStatus(t *testing.T) {
 	}
 }
 
-// TestForce proves Layer.Force runs the named set's override under the
-// lock, that Layer reports a name the migrator does not hold, and that
-// Migrator.Force acts on the top set.
 func TestForce(t *testing.T) {
 	ctx := context.Background()
 	m, rec := newSets(t, []migrate.Set{app, library}, script(one(locked), one(created, step), one(unlocked))...)
@@ -510,7 +446,6 @@ func TestForce(t *testing.T) {
 		t.Error(`Layer("nope") reported a set the migrator does not hold`)
 	}
 
-	// Migrator.Force acts on the top set, the library here, not the first.
 	m, rec = newSets(t, []migrate.Set{app, library}, script(one(locked), one(created, step), one(unlocked))...)
 	if err := m.Force(ctx, 0); err != nil {
 		t.Fatalf("Migrator.Force: %v", err)
@@ -522,8 +457,6 @@ func TestForce(t *testing.T) {
 	})
 }
 
-// TestLayers proves Layers reports every set in declared order and that
-// Migrations and Version on the migrator read the top set.
 func TestLayers(t *testing.T) {
 	head := sqltest.Response{Columns: []string{"version", "dirty"}, Rows: [][]driver.Value{{int64(1), false}}}
 	m, rec := newSets(t, []migrate.Set{library, app}, exists(true), head)
@@ -560,9 +493,6 @@ func TestLayers(t *testing.T) {
 	}
 }
 
-// TestVerify_CoversEverySetInOrder proves Verify reports the first set's
-// fault and stops there: the library set is pending, so the program's set
-// is never read.
 func TestVerify_CoversEverySetInOrder(t *testing.T) {
 	m, rec := newSets(t, []migrate.Set{library, app}, exists(false))
 	err := m.Verify(context.Background())

@@ -16,8 +16,6 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// returningFiles is a command that reads its row back through a qualified
-// read, and an insert that reads it through an unqualified one.
 var returningFiles = fstest.MapFS{
 	"sql/rename.sql":    {Data: []byte("--| tier: standard\n--| returning: org_row\nUPDATE organization SET name = {{name}} WHERE id = {{id}}")},
 	"sql/org_row.sql":   {Data: []byte("--| tier: standard\nSELECT o.id, o.name, o.version FROM organization o WHERE o.id = {{id}}")},
@@ -60,7 +58,6 @@ func TestReturning_HasNoSingleStatementFormWhenTheDialectLacksTheCapability(t *t
 	}
 }
 
-// decliner implements query.Returner and declines every verb.
 type decliner struct{ sqltest.Dialect }
 
 func (decliner) Returning(query.Verb, string, []string) (string, bool) { return "", false }
@@ -75,8 +72,6 @@ func TestReturning_HasNoSingleStatementFormWhenTheDialectDeclines(t *testing.T) 
 	}
 }
 
-// recorder implements query.Returner, keeping what it was asked, and appends
-// the clause.
 type recorder struct {
 	sqltest.Dialect
 	verbs   *[]query.Verb
@@ -118,7 +113,6 @@ func TestReturning_PassesTheDialectTheExpandedBodyVerbAndColumns(t *testing.T) {
 	}
 }
 
-// injector implements query.Returner and writes a parameter of its own.
 type injector struct{ sqltest.Dialect }
 
 func (injector) Returning(_ query.Verb, body string, _ []string) (string, bool) {
@@ -250,7 +244,6 @@ func TestVerify_PreparesTheSingleStatementFormAndNamesItsFailure(t *testing.T) {
 	}
 }
 
-// orgVersion is the row org_row reads: the organization and its version.
 type orgVersion struct {
 	ID      string
 	Name    string
@@ -273,7 +266,6 @@ func orgVersionRows(n int) sqltest.Response {
 	return r
 }
 
-// rename is the rename command's handle compiled for d.
 func rename(t *testing.T, d sqlate.Dialect) query.Returning[orgVersion] {
 	t.Helper()
 	return catalog().MustCompile(returningFiles, "sql", d).Statement("rename").Returning(scanOrgVersion)
@@ -291,7 +283,7 @@ func TestReturningOne_Outcomes(t *testing.T) {
 	)
 	cases := []struct {
 		name             string
-		fallback, native *script // nil: the outcome does not arise on the form
+		fallback, native *script
 		check            func(t *testing.T, row orgVersion, changed bool, err error)
 	}{
 		{
@@ -425,7 +417,6 @@ func TestReturningOne_InsideATransactionOpensNone(t *testing.T) {
 		if _, _, err := r.One(ctx, tx, renameArgs); !errors.Is(err, query.ErrNotOneRow) {
 			t.Errorf("%s: err = %v, want ErrNotOneRow", f.name, err)
 		}
-		// The caller's transaction is the caller's to end.
 		_ = tx.Rollback()
 		if !slices.Equal(rec.Ops(), want) {
 			t.Errorf("%s: ops %v, want %v", f.name, rec.Ops(), want)
@@ -433,11 +424,8 @@ func TestReturningOne_InsideATransactionOpensNone(t *testing.T) {
 	}
 }
 
-// wrapped is a session that is neither a *sqlate.Tx nor a sqlate.Beginner.
 type wrapped struct{ sqlate.Session }
 
-// appDB is an application's own pool type, a sqlate.Beginner through the
-// *sqlate.DB it embeds.
 type appDB struct{ *sqlate.DB }
 
 func TestReturningOne_TheFallbackNeedsATransactionOrABeginner(t *testing.T) {

@@ -11,14 +11,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	_ "github.com/jackc/pgx/v5/stdlib" // registers the "pgx" database/sql driver
+	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/standards-lab/sqlate"
 	"github.com/standards-lab/sqlate/migrate"
 	"github.com/standards-lab/sqlate/postgres"
 )
 
-// timeout bounds each statement the package runs against the server, and
-// each attempt of the drop separately.
 const timeout = 30 * time.Second
 
 // Database is one test's throwaway database: the pool over it and the DSN
@@ -67,9 +65,6 @@ func Migrated(t testing.TB, env, prefix string, sets ...migrate.Set) *Database {
 	return d
 }
 
-// scratch creates the database <prefix>_test_<hex> over a connection to
-// admin and returns its name, registering its drop as a cleanup. The name
-// is quoted, so it reaches the server exactly as the DSN spells it.
 func scratch(t testing.TB, admin, prefix string) string {
 	t.Helper()
 	name := prefix + "_test_" + suffix(t)
@@ -81,9 +76,6 @@ func scratch(t testing.TB, admin, prefix string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if _, err := db.ExecContext(ctx, "CREATE DATABASE "+ident); err != nil {
-		// A create that timed out can still finish on the server, so the
-		// database is dropped if it exists, on a context of its own: ctx
-		// may be the one that expired.
 		dctx, dcancel := context.WithTimeout(context.Background(), timeout)
 		_, _ = db.ExecContext(dctx, "DROP DATABASE IF EXISTS "+ident+" WITH (FORCE)")
 		dcancel()
@@ -91,9 +83,6 @@ func scratch(t testing.TB, admin, prefix string) string {
 		t.Fatalf("create database %s: %v", name, err)
 	}
 	t.Cleanup(func() {
-		// WITH (FORCE) ends the database's other sessions, and the server
-		// can still report one closing, so the drop retries, each attempt
-		// with a deadline of its own so one stall does not use up the rest.
 		var err error
 		for attempt := range 4 {
 			if attempt > 0 {
@@ -114,8 +103,6 @@ func scratch(t testing.TB, admin, prefix string) string {
 	return name
 }
 
-// pool opens a pool on dsn and pings it. Its cleanup is registered after
-// the drop's, so it runs first: the pool closes before the database drops.
 func pool(t testing.TB, dsn string) *sql.DB {
 	t.Helper()
 	p, err := sql.Open("pgx", dsn)
@@ -131,7 +118,6 @@ func pool(t testing.TB, dsn string) *sql.DB {
 	return p
 }
 
-// databaseDSN returns admin with its database replaced by name.
 func databaseDSN(t testing.TB, admin, name string) string {
 	t.Helper()
 	u, err := url.Parse(admin)
@@ -142,8 +128,6 @@ func databaseDSN(t testing.TB, admin, name string) string {
 	return u.String()
 }
 
-// suffix returns eight random hex characters, so parallel tests and
-// packages never pick the same database name.
 func suffix(t testing.TB) string {
 	var b [4]byte
 	if _, err := rand.Read(b[:]); err != nil {
