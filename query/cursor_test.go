@@ -15,8 +15,6 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// member is the row of the composite-key base, whose key fields are both
-// declared not null, so its orderings can be continued by a cursor.
 type member struct {
 	Org  string
 	ID   string
@@ -44,8 +42,6 @@ func memberView(t *testing.T) query.Projection[member] {
 	return catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement("member").Project(scanMember)
 }
 
-// issue lists one page over the member base and returns the cursor it
-// issued, failing the test when it issued none.
 func issue(t *testing.T, sorts []query.Sort, filters ...query.Filter) query.Cursor {
 	t.Helper()
 	db, _ := session(t, sqltest.WithTotal(members("a", "b", "c"), 9))
@@ -61,8 +57,6 @@ func issue(t *testing.T, sorts []query.Sort, filters ...query.Filter) query.Curs
 
 func TestContinue_ContinuesFromThePagesLastItem(t *testing.T) {
 	c := issue(t, nil)
-	// The cursor's page takes no page number: the keyset predicate stands in
-	// for the offset, which stays 0.
 	db, rec := session(t, sqltest.WithTotal(members("c"), 9))
 	got, err := memberView(t).Continue(context.Background(), db, query.Directives{}, c, 2)
 	if err != nil {
@@ -73,8 +67,6 @@ func TestContinue_ContinuesFromThePagesLastItem(t *testing.T) {
 	}
 	keyset := "(q.org > CAST($1 AS uuid) OR (q.org = CAST($1 AS uuid) AND q.id > CAST($2 AS uuid)))"
 	calls := rec.Calls()
-	// One statement: the window counts under the request's filters alone,
-	// and the keyset predicate outside it narrows the page, not the total.
 	if len(calls) != 1 {
 		t.Fatalf("ops = %v, want the counted page alone", rec.Ops())
 	}
@@ -84,8 +76,6 @@ func TestContinue_ContinuesFromThePagesLastItem(t *testing.T) {
 	if got.Total != 9 {
 		t.Errorf("total = %d, want the window's 9", got.Total)
 	}
-	// The page's last item was ("o", "b"): each keyed value is bound once,
-	// and the disjunct that repeats it reuses its placeholder.
 	if a := calls[0].Args; len(a) != 4 || a[0] != "o" || a[1] != "b" || a[2] != 0 || a[3] != 3 {
 		t.Errorf("page args = %v", a)
 	}
@@ -133,9 +123,7 @@ func TestContinue_RefusesAnotherOrderingOrAnotherBase(t *testing.T) {
 		after query.Cursor
 	}{
 		"another direction": {descending, ascending},
-		// Sorting by the second key field first puts the keyed prefix in the
-		// other order, which the cursor records by name.
-		"another prefix": {[]query.Sort{{Field: "id"}}, ascending},
+		"another prefix":    {[]query.Sort{{Field: "id"}}, ascending},
 	}
 	for name, c := range cases {
 		db, _ := session(t)
@@ -149,8 +137,6 @@ func TestContinue_RefusesAnotherOrderingOrAnotherBase(t *testing.T) {
 		}
 	}
 
-	// The same key fields and types under another base: the cursor names the
-	// base it was issued for, so it is refused by name.
 	other := catalog().MustCompile(fstest.MapFS{
 		"sql/archive.sql": {Data: []byte("--| tier: standard\n--| key: org, id\n--| field: org uuid not null\n--| field: id uuid not null\nSELECT org, id FROM archive")},
 	}, "sql", sqltest.Dialect{}).Statement("archive").Project(query.Scalar[string])
@@ -165,11 +151,10 @@ func TestContinue_RefusesAnotherOrderingOrAnotherBase(t *testing.T) {
 func TestContinue_RefusesOtherFilters(t *testing.T) {
 	c := issue(t, nil, query.Filter{Field: "name", Op: query.OpEq, Value: "M"})
 	cases := map[string][]query.Filter{
-		"no filters":     nil,
-		"another value":  {{Field: "name", Op: query.OpEq, Value: "N"}},
-		"another op":     {{Field: "name", Op: query.OpNe, Value: "M"}},
-		"another filter": {{Field: "name", Op: query.OpEq, Value: "M"}, {Field: "org", Op: query.OpEq, Value: "o"}},
-		// A value with no JSON form cannot be shown to match.
+		"no filters":      nil,
+		"another value":   {{Field: "name", Op: query.OpEq, Value: "N"}},
+		"another op":      {{Field: "name", Op: query.OpNe, Value: "M"}},
+		"another filter":  {{Field: "name", Op: query.OpEq, Value: "M"}, {Field: "org", Op: query.OpEq, Value: "o"}},
 		"unrepresentable": {{Field: "name", Op: query.OpEq, Value: math.NaN()}},
 	}
 	for name, filters := range cases {
@@ -184,15 +169,12 @@ func TestContinue_RefusesOtherFilters(t *testing.T) {
 		}
 	}
 
-	// The same filters rebuilt as a new slice continue: the cursor compares
-	// their content, not their identity.
 	db, _ := session(t, sqltest.WithTotal(members("c"), 9))
 	same := []query.Filter{{Field: "name", Op: query.OpEq, Value: "M"}}
 	if _, err := memberView(t).Continue(context.Background(), db, query.Directives{Filters: same}, c, 2); err != nil {
 		t.Errorf("the same filters = %v, want the page", err)
 	}
 
-	// No filters and an empty filter slice are the same request.
 	unfiltered := issue(t, nil)
 	db, _ = session(t, sqltest.WithTotal(members("c"), 9))
 	if _, err := memberView(t).Continue(context.Background(), db, query.Directives{Filters: []query.Filter{}}, unfiltered, 2); err != nil {
@@ -201,8 +183,6 @@ func TestContinue_RefusesOtherFilters(t *testing.T) {
 }
 
 func TestList_FiltersWithNoSignatureIssueNoCursor(t *testing.T) {
-	// A NaN has no JSON form, so the filters cannot be bound into a cursor:
-	// the page still reports that a further page exists, without one.
 	db, _ := session(t, sqltest.WithTotal(members("a", "b", "c"), 9))
 	got, err := memberView(t).List(context.Background(), db, query.Directives{
 		Filters: []query.Filter{{Field: "name", Op: query.OpEq, Value: math.NaN()}},
@@ -217,11 +197,7 @@ func TestList_FiltersWithNoSignatureIssueNoCursor(t *testing.T) {
 
 func TestContinue_RefusesAnOrderingItCannotContinue(t *testing.T) {
 	c := issue(t, nil)
-	// A nullable field in the keyed prefix: the keyset predicate cannot
-	// compare it, so the sort cannot be continued.
 	nullable := []query.Sort{{Field: "name"}, {Field: "org"}, {Field: "id"}}
-	// Two directions across the keyed prefix: one comparison cannot serve
-	// both.
 	mixed := []query.Sort{{Field: "org"}, {Field: "id", Descending: true}}
 	for name, sorts := range map[string][]query.Sort{"nullable field": nullable, "mixed directions": mixed} {
 		db, rec := session(t)
@@ -239,8 +215,6 @@ func TestContinue_RefusesAnOrderingItCannotContinue(t *testing.T) {
 func TestContinue_RefusesTextItDidNotIssue(t *testing.T) {
 	issued := issue(t, nil)
 
-	// A type change under the same base, prefix, and direction: the keyed
-	// fields' declared types are bound into the cursor, not only carried in it.
 	retyped := catalog().MustCompile(fstest.MapFS{
 		"sql/member.sql": {Data: []byte("--| tier: standard\n--| key: org, id\n--| field: org uuid not null\n--| field: id text not null\n--| field: name text\n" + memberBase)},
 	}, "sql", sqltest.Dialect{}).Statement("member").Project(scanMember)
@@ -256,10 +230,6 @@ func TestContinue_RefusesTextItDidNotIssue(t *testing.T) {
 		"too short":         {memberView(t), "AQI", malformed},
 		"retyped field":     {retyped, issued, malformed},
 	}
-	// The cursor is opaque, so every single-character change to the text it
-	// issued is text it did not issue: refused as malformed, or as naming
-	// another base, ordering, or filters when the change reads as one. The
-	// last character is left out: it may carry bits that encode nothing.
 	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
 	for i := range len(issued) - 1 {
 		swap := alphabet[(strings.IndexByte(alphabet, issued[i])+1)%len(alphabet)]
@@ -280,8 +250,6 @@ func TestContinue_RefusesTextItDidNotIssue(t *testing.T) {
 }
 
 func TestList_KeyedColumnsAreMatchedInThePagesOwnCase(t *testing.T) {
-	// An engine folds an unquoted alias's case, so the keyed field is found
-	// case-insensitively when no column matches it exactly.
 	folded := sqltest.Response{Columns: []string{"ORG", "ID", "NAME"}, Rows: [][]driver.Value{
 		{"o", "a", "M"}, {"o", "b", "M"}, {"o", "c", "M"},
 	}}
@@ -301,8 +269,6 @@ func TestList_AKeyedFieldThePageDoesNotOutputIsTheContractsDefect(t *testing.T) 
 }
 
 func TestList_NullInAKeyedColumnIsTheBasesDefect(t *testing.T) {
-	// The page's last row carries a null where the contract declared the
-	// field not null, so no cursor can be issued from it.
 	db, _ := session(t, sqltest.WithTotal(members("a", nil, "c"), 9))
 	_, err := memberView(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err == nil {

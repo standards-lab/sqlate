@@ -25,14 +25,11 @@ type entity struct {
 	hidden    int //nolint:unused // proves unexported fields are skipped
 }
 
-// Identity is embedded by the types below. An embedded field takes the
-// name of its type, so the type is exported to be indexed at all.
 type Identity struct {
 	ID        string    `json:"id"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Audit is embedded by pointer, which contributes no column.
 type Audit struct {
 	Editor string `json:"editor"`
 }
@@ -58,7 +55,7 @@ type auditable struct {
 }
 
 func TestScanner_MatchesColumnsToTagsInRowOrder(t *testing.T) {
-	now := time.Now().UTC() // a scan returns times in UTC
+	now := time.Now().UTC()
 	db, rec := session(t, sqltest.Response{
 		Columns: []string{"name", "id", "nickname", "parent_id", "created_at", "plain"},
 		Rows:    [][]driver.Value{{"Acme", "a", "ac", nil, now, int64(7)}},
@@ -88,8 +85,6 @@ func TestScanner_UnknownColumnIsAnError(t *testing.T) {
 	}
 }
 
-// fakeRow is a Row that is not *sql.Rows: the shape of an adapter that
-// shows a scan fewer columns than the statement returns.
 type fakeRow struct {
 	cols []string
 	vals []any
@@ -108,7 +103,7 @@ func (r *fakeRow) Scan(dest ...any) error {
 }
 
 func TestScanner_ReadsAnyRow(t *testing.T) {
-	now := time.Now().UTC() // a scan returns times in UTC
+	now := time.Now().UTC()
 	row := &fakeRow{
 		cols: []string{"plain", "id", "created_at"},
 		vals: []any{int64(3), "a", now},
@@ -156,7 +151,7 @@ func TestArgsOf_BindsByColumnName(t *testing.T) {
 }
 
 func TestEmbedded_FieldsAreColumnsInBothDirections(t *testing.T) {
-	now := time.Now().UTC() // a scan returns times in UTC
+	now := time.Now().UTC()
 	db, rec := session(t, sqltest.Response{
 		Columns: []string{"name", "id", "created_at"},
 		Rows:    [][]driver.Value{{"Acme", "a", now}},
@@ -181,7 +176,7 @@ func TestEmbedded_FieldsAreColumnsInBothDirections(t *testing.T) {
 }
 
 func TestEmbedded_OuterFieldShadowsTheEmbeddedOne(t *testing.T) {
-	now := time.Now().UTC() // a scan returns times in UTC
+	now := time.Now().UTC()
 	db, _ := session(t, sqltest.Response{
 		Columns: []string{"id", "created_at"},
 		Rows:    [][]driver.Value{{"outer", now}},

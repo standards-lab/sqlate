@@ -34,14 +34,6 @@ type Returner interface {
 	Returning(verb Verb, body string, columns []string) (text string, ok bool)
 }
 
-// returnForm is a command's resolved returning declaration. read reads the
-// changed row back and is also the fallback's second step; verb is the
-// command's verb; columns are the read's bare column names in scan order;
-// native is the single-statement form the dialect rendered, nil when the
-// dialect declined or does not implement Returner. renderings caches the
-// single-statement form's expanded text by the lists' lengths, as
-// Statement.renderings does the command's own; it is nil when the form has
-// no expansion or there is no form.
 type returnForm struct {
 	read       Statement
 	verb       Verb
@@ -51,34 +43,17 @@ type returnForm struct {
 }
 
 var (
-	// leadingComment is a line or block comment at the start of a body,
-	// skipped when reading the statement's leading keyword.
 	leadingComment = regexp.MustCompile(`^(?:\s+|--[^\n]*(?:\n|$)|/\*(?s:.*?)\*/)+`)
-	// commandVerb is the leading keyword a returning command starts with,
-	// and the table it changes: the name after INSERT INTO or UPDATE, schema
-	// qualified or not, as written.
-	commandVerb = regexp.MustCompile(`(?i)^(insert\s+into|update)\s+([^\s(,;]*)`)
-	// readList is the SELECT list of a returning read: everything before its
-	// first FROM, each item then checked on its own.
-	readList = regexp.MustCompile(`(?is)^select\s+(.+?)\s+from\s`)
-	// readFrom is what follows a returning read's first FROM: the table it
-	// reads, schema qualified or not, and the word after it, the table's
-	// alias unless it is a keyword, with or without AS.
-	readFrom = regexp.MustCompile(`(?i)^\s*([^\s(),;]+)(?:\s+(?:as\s+)?([a-z_][a-z0-9_]*))?`)
-	// readColumn is one item of a returning read's SELECT list: a column,
-	// optionally qualified by a table or alias.
-	readColumn = regexp.MustCompile(`^(?:([a-z_][a-z0-9_]*)\.)?([a-z_][a-z0-9_]*)$`)
+	commandVerb    = regexp.MustCompile(`(?i)^(insert\s+into|update)\s+([^\s(,;]*)`)
+	readList       = regexp.MustCompile(`(?is)^select\s+(.+?)\s+from\s`)
+	readFrom       = regexp.MustCompile(`(?i)^\s*([^\s(),;]+)(?:\s+(?:as\s+)?([a-z_][a-z0-9_]*))?`)
+	readColumn     = regexp.MustCompile(`^(?:([a-z_][a-z0-9_]*)\.)?([a-z_][a-z0-9_]*)$`)
 )
 
-// stripLeading returns body without its leading whitespace and comments.
 func stripLeading(body string) string {
 	return body[len(leadingComment.FindString(body)):]
 }
 
-// commandVerbOf reads the verb of a returning command's body, INSERT INTO or
-// UPDATE, matched case-insensitively, and the table it changes, as written.
-// Anything else, DELETE or a leading WITH among them, is an error naming what
-// the body starts with.
 func commandVerbOf(body string) (Verb, string, error) {
 	rest := stripLeading(body)
 	m := commandVerb.FindStringSubmatch(rest)
@@ -98,17 +73,12 @@ func commandVerbOf(body string) (Verb, string, error) {
 	return Insert, m[2], nil
 }
 
-// fromKeywords are the words that may follow a read's FROM table and are
-// not its alias.
 var fromKeywords = []string{
 	"where", "join", "inner", "left", "right", "full", "cross", "natural",
 	"group", "order", "having", "limit", "offset", "fetch", "for", "window",
 	"union", "intersect", "except", "on", "using",
 }
 
-// readShape is what a returning read's body declares: the returned columns
-// in scan order, the qualifier every item carries (empty for none), and
-// the table after its first FROM with its alias (empty for none).
 type readShape struct {
 	columns   []string
 	qualifier string
@@ -116,10 +86,6 @@ type readShape struct {
 	alias     string
 }
 
-// readShapeOf reads the shape of a returning read's body: the body is
-// SELECT <c>, <c>, … FROM <table> …, each <c> a lowercase column or
-// table.column, every item under the same qualifier or none, no name twice.
-// The columns are the bare names, in the list's order.
 func readShapeOf(body string) (readShape, error) {
 	var shape readShape
 	text := stripLeading(body)
@@ -157,9 +123,6 @@ func readShapeOf(body string) (readShape, error) {
 	return shape, nil
 }
 
-// readsTarget checks that a returning read reads the table its command
-// changes: the read's FROM table is the command's target, compared as
-// written, and a qualifier on its columns is that table's alias or its name.
 func readsTarget(readName string, shape readShape, target string) error {
 	if shape.table != target {
 		return fmt.Errorf("returning read %q reads %q; the command changes %q", readName, shape.table, target)
@@ -173,13 +136,6 @@ func readsTarget(readName string, shape readShape, target string) error {
 	return nil
 }
 
-// resolveReturning resolves a command's returning declaration against the
-// statements compiled beside it. It checks the command's verb and the named
-// read and its shape, that the read reads the table the command changes,
-// and, when d implements Returner and accepts, compiles
-// the single-statement form, its parameters rewritten as the command's are.
-// sources holds, by name, every statement's body after include expansion
-// and its returning declaration.
 func resolveReturning(st *Statement, sources map[string]source, stmts map[string]Statement, d sqlate.Dialect) error {
 	readName, body := sources[st.name].returning, sources[st.name].body
 	if st.tier != TierStandard {
@@ -310,8 +266,6 @@ func (r Returning[T]) One(ctx context.Context, s sqlate.Session, args Args) (T, 
 	return zero, false, ErrTransactionRequired
 }
 
-// single runs the single-statement form. A returned row is the changed
-// row; when none is returned, the read reads the row as it is.
 func (r Returning[T]) single(ctx context.Context, s sqlate.Session, args Args) (T, bool, error) {
 	var zero T
 	form := r.cmd.returning
@@ -328,9 +282,6 @@ func (r Returning[T]) single(ctx context.Context, s sqlate.Session, args Args) (
 		if err := rows.Err(); err != nil {
 			return zero, false, mapErr(s, err)
 		}
-		// Next returning false has closed the row set unless the driver
-		// reports a further result set; Close releases it before the read,
-		// which may share the connection.
 		if err := rows.Close(); err != nil {
 			return zero, false, mapErr(s, err)
 		}
@@ -350,7 +301,6 @@ func (r Returning[T]) single(ctx context.Context, s sqlate.Session, args Args) (
 	return row, true, nil
 }
 
-// fallback runs the command and then its read, on tx.
 func (r Returning[T]) fallback(ctx context.Context, tx *sqlate.Tx, args Args) (T, bool, error) {
 	var zero T
 	n, err := r.cmd.Exec(ctx, tx, args)
@@ -370,8 +320,6 @@ func (r Returning[T]) fallback(ctx context.Context, tx *sqlate.Tx, args Args) (T
 	return row, n == 1, nil
 }
 
-// changedRow is the fallback's outcome carried out of the transaction One
-// opens: the row and whether the command changed it.
 type changedRow[T any] struct {
 	row     T
 	changed bool

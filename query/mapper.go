@@ -8,20 +8,6 @@ import (
 	"sync"
 )
 
-// The struct-tag mapper: an entity's tags are its binding and scan
-// contract, so a program writes neither scan functions nor Args literals.
-// A field's column name is its `db` tag, else its `json` tag's name, else
-// the field name lowercased; `db:"-"` excludes it. An untagged embedded
-// struct flattens: its fields become columns of the outer type, as if
-// declared there, and an outer field of the same name shadows one reached
-// through an embed. A tagged embedded struct is one column instead,
-// holding the whole embedded value; an embedded pointer contributes no
-// column; the embedded type must itself be exported, since an unexported
-// field is invisible to reflection. Column and parameter names coincide
-// with the API vocabulary by convention, since a base aliases its output
-// columns to the contract names, which is why the json tag is the usual
-// source and db the override.
-
 // Scanner returns the ScanFunc for T from its tags: each row's columns are
 // matched to fields by name, in the row's order, and scanned into a fresh
 // T. A column T has no field for is an error, so a SELECT list that grows
@@ -92,15 +78,8 @@ func (a Args) With(name string, v any) Args {
 	return out
 }
 
-var fieldCache sync.Map // reflect.Type → map[string][]int
+var fieldCache sync.Map
 
-// fieldsOf indexes a struct type's exported fields by column name, once
-// per type. Each name maps to the field's index path, which
-// reflect.Value.FieldByIndex resolves: an untagged embedded struct is
-// flattened, so the path reaches through it to the field it holds. A
-// tagged embedded field is one column holding the whole embedded value,
-// an embedded pointer contributes no column at all, and `db:"-"`
-// excludes a field or an embedded struct entirely.
 func fieldsOf(t reflect.Type) map[string][]int {
 	if m, ok := fieldCache.Load(t); ok {
 		return m.(map[string][]int)
@@ -137,10 +116,6 @@ func fieldsOf(t reflect.Type) map[string][]int {
 		}
 		m[name] = []int{i}
 	}
-	// This type's own fields are indexed above and the embedded ones
-	// below, so a name declared here shadows the same name reached
-	// through an embedded struct; between two embedded structs offering
-	// one name, the one declared first wins.
 	for _, i := range embedded {
 		for name, path := range fieldsOf(t.Field(i).Type) {
 			if _, taken := m[name]; taken {

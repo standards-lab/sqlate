@@ -29,19 +29,14 @@ func scanPerson(rows query.Row) (person, error) {
 	return p, err
 }
 
-// The base file ends with a semicolon, which the loader strips so the
-// statement composes as a derived table.
 var projectionFiles = fstest.MapFS{
 	"sql/person_view.sql":    {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\n--| field: name text\n--| field: age integer\n" + base + ";\n")},
 	"sql/no_contract.sql":    {Data: []byte("--| tier: standard\nSELECT 1")},
 	"sql/with_param.sql":     {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\nSELECT id FROM t WHERE tenant = {{tenant}}")},
 	"sql/two_params.sql":     {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\n--| field: name text\nSELECT id, name FROM t WHERE tenant = {{tenant}} AND region = {{region}}")},
 	"sql/expanded_param.sql": {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid\nSELECT id FROM t WHERE id IN ({{ids...}})")},
-	// A composite key whose fields are declared not null: the contract a
-	// cursor needs.
-	"sql/member.sql": {Data: []byte("--| tier: standard\n--| key: org, id\n--| field: org uuid not null\n--| field: id uuid not null\n--| field: name text\nSELECT org, id, name FROM member")},
-	// A cursorable base that binds a parameter of its own.
-	"sql/tenant_member.sql": {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid not null\nSELECT id FROM member WHERE tenant = {{tenant}}")},
+	"sql/member.sql":         {Data: []byte("--| tier: standard\n--| key: org, id\n--| field: org uuid not null\n--| field: id uuid not null\n--| field: name text\nSELECT org, id, name FROM member")},
+	"sql/tenant_member.sql":  {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid not null\nSELECT id FROM member WHERE tenant = {{tenant}}")},
 }
 
 func projection(t *testing.T) query.Projection[person] {
@@ -49,9 +44,6 @@ func projection(t *testing.T) query.Projection[person] {
 	return catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement("person_view").Project(scanPerson)
 }
 
-// counted is the page text a List or Continue sends under TotalExact: the
-// base filtered inside the window that counts it, then after, order, and
-// paging outside it.
 func counted(base, where, after, rest string) string {
 	return "SELECT * FROM (SELECT q.*, COUNT(*) OVER () AS sqlate_total FROM (" + base + ") q" + where + ") q" + after + rest
 }
@@ -76,7 +68,6 @@ func TestList_ComposesOneCountedPageOverTheBase(t *testing.T) {
 	if got.More || got.Next != "" {
 		t.Errorf("a short page reported more = %v, next = %q", got.More, got.Next)
 	}
-	// The total and the page are one statement, so they read one snapshot.
 	calls := rec.Calls()
 	if len(calls) != 1 {
 		t.Fatalf("ops = %v, want the counted page alone", rec.Ops())
@@ -122,7 +113,6 @@ func TestList_OperatorLowering(t *testing.T) {
 			if !strings.HasPrefix(page.SQL, counted(base, " WHERE "+c.want, "", " ORDER BY")) {
 				t.Errorf("sql = %q", page.SQL)
 			}
-			// The filter's values, then the paging bounds.
 			if len(page.Args) != len(c.args)+2 {
 				t.Errorf("args = %v, want %v then the paging bounds", page.Args, c.args)
 			}
@@ -143,10 +133,7 @@ func TestList_KeyIsTheTieBreakerUnlessSortedBy(t *testing.T) {
 	for i, want := range []string{
 		" ORDER BY q.id OFFSET $1 ROWS FETCH NEXT $2 ROWS ONLY",
 		" ORDER BY q.id DESC OFFSET $1 ROWS FETCH NEXT $2 ROWS ONLY",
-		// The sorts run in two directions, so the tie-breaker takes neither
-		// and the ordering cannot be continued by a cursor.
 		" ORDER BY q.age, q.name DESC, q.id OFFSET $1 ROWS FETCH NEXT $2 ROWS ONLY",
-		// One direction across the sorts, so the tie-breaker takes it too.
 		" ORDER BY q.name DESC, q.id DESC OFFSET $1 ROWS FETCH NEXT $2 ROWS ONLY",
 	} {
 		if got := pages[i]; !strings.HasSuffix(got, want) {
@@ -185,10 +172,8 @@ func TestList_DirectiveErrorsUnwrapToErrDirectivesBeforeAnyIO(t *testing.T) {
 		after query.Cursor
 		size  int
 	}{
-		"no cursor": {"", 5},
-		"size 0":    {"whatever", 0},
-		// person_view declares no field not null, so no ordering over it can
-		// be continued by a cursor.
+		"no cursor":          {"", 5},
+		"size 0":             {"whatever", 0},
 		"cursor unsupported": {"whatever", 5},
 	}
 	for name, c := range continued {
@@ -207,15 +192,11 @@ func TestList_DirectiveErrorsUnwrapToErrDirectivesBeforeAnyIO(t *testing.T) {
 	}
 }
 
-// dataException is a driver error that exposes an SQLSTATE, the shape an
-// engine's dialect classifies.
 type dataException struct{ code, msg string }
 
 func (e dataException) Error() string    { return e.msg }
 func (e dataException) SQLState() string { return e.code }
 
-// invalidValueDialect maps SQLSTATE class 22 to ErrInvalidValue the way an
-// engine sub-module does, over the stub dialect for everything else.
 type invalidValueDialect struct{ sqltest.Dialect }
 
 func (d invalidValueDialect) MapError(err error) error {
@@ -267,10 +248,7 @@ func TestVerify_ProbesEveryContractField(t *testing.T) {
 		t.Fatal(err)
 	}
 	fields := "SELECT q.id, q.name, q.age FROM (" + base + ") q WHERE q.id = CAST(NULL AS uuid) AND q.name = CAST(NULL AS text) AND q.age = CAST(NULL AS integer)"
-	// The cursor page probes the keyset predicate and the paging clause, so
-	// an engine's respelling of either is prepared at startup too.
 	cursor := "SELECT * FROM (" + base + ") q WHERE (q.id > CAST($1 AS uuid)) ORDER BY q.id OFFSET $2 ROWS FETCH NEXT $3 ROWS ONLY"
-	// The counted cursor page probes the window's layering with them.
 	countedCursor := counted(base, "", " WHERE (q.id > CAST($1 AS uuid))", " ORDER BY q.id OFFSET $2 ROWS FETCH NEXT $3 ROWS ONLY")
 	if got := rec.SQL(sqltest.OpPrepare); len(got) != 3 || got[0] != fields || got[1] != cursor || got[2] != countedCursor {
 		t.Errorf("probes = %q", got)
@@ -311,8 +289,6 @@ func TestProject_RequiresAContractAndNoExpandedParameter(t *testing.T) {
 			stmts.Statement(name).Project(scanPerson)
 		}()
 	}
-	// A base that binds parameters of its own, none of them expanded, is
-	// projectable: List, Continue, and One bind them from their base arguments.
 	stmts.Statement("with_param").Project(scanPerson)
 }
 
@@ -329,8 +305,6 @@ func TestProject_RefusesTheReservedTotalName(t *testing.T) {
 	stmts.Statement("v").Project(query.Scalar[string])
 }
 
-// tenantView is the projection over a base that binds one parameter of its
-// own, so the request's placeholders are numbered after the base's.
 func tenantView(t *testing.T, name string) query.Projection[string] {
 	t.Helper()
 	return catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement(name).Project(query.Scalar[string])
@@ -361,9 +335,6 @@ func TestList_BindsTheBasesOwnParametersBeforeTheRequests(t *testing.T) {
 		t.Errorf("page args = %v, want the base's value, the filter's, then the paging bounds", a)
 	}
 
-	// Continued, the keyset predicate sits outside the window and its value
-	// binds after the filter's and before the paging bounds: the text's
-	// order, which a dialect with positional placeholders reads.
 	view := tenantView(t, "tenant_member")
 	notZ := []query.Filter{{Field: "id", Op: query.OpNe, Value: "z"}}
 	db, _ = session(t, sqltest.WithTotal(ids("a", "b"), 2))
@@ -453,8 +424,6 @@ func TestList_TotalNoneSkipsTheCount(t *testing.T) {
 }
 
 func TestList_MoreReportsTheRowPastThePage(t *testing.T) {
-	// The page reads one row past its size: three rows for a page of two
-	// means a further page, and the extra row is not scanned.
 	db, rec := session(t, sqltest.WithTotal(people(3), 9))
 	got, err := projection(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})
 	if err != nil {
@@ -463,8 +432,6 @@ func TestList_MoreReportsTheRowPastThePage(t *testing.T) {
 	if !got.More || len(got.Items) != 2 || got.Items[1].ID != "b" {
 		t.Fatalf("List = %+v", got)
 	}
-	// person_view declares no field not null, so the page reports a further
-	// page without issuing a cursor for it.
 	if got.Next != "" {
 		t.Errorf("next = %q, want none over a nullable key", got.Next)
 	}
@@ -481,8 +448,6 @@ func TestList_ScannerNeverSeesTheTotalColumn(t *testing.T) {
 	}
 	db, _ := session(t, sqltest.WithTotal(people(2), 2))
 	view := catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement("person_view").Project(query.Scanner[row]())
-	// Scanner refuses a column it has no field for, so a page it reads
-	// shows it only the base's columns.
 	got, err := view.List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 5})
 	if err != nil || got.Total != 2 || len(got.Items) != 2 || got.Items[1].Age != 21 {
 		t.Fatalf("List = %+v, %v", got, err)
@@ -493,8 +458,6 @@ func TestList_TheScansDestinationsAreLeftAsGiven(t *testing.T) {
 	var spare []any
 	scan := func(rows query.Row) (person, error) {
 		var p person
-		// Spare capacity past the destinations: the count must not be
-		// appended into the caller's backing array.
 		dest := make([]any, 3, 4)
 		dest[0], dest[1], dest[2] = &p.ID, &p.Name, &p.Age
 		err := rows.Scan(dest...)
@@ -513,9 +476,6 @@ func TestList_TheScansDestinationsAreLeftAsGiven(t *testing.T) {
 }
 
 func TestList_ReadsTheTotalFromWithTotalsColumn(t *testing.T) {
-	// sqltest.WithTotal keeps its own copy of the reserved name; a counted
-	// read checks the last column's name, so a copy that drifted would fail
-	// here.
 	db, _ := session(t, sqltest.WithTotal(people(2), 7))
 	got, err := projection(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 5})
 	if err != nil || got.Total != 7 || len(got.Items) != 2 {
@@ -531,8 +491,6 @@ func TestList_RefusesACountedPageWithoutItsTotalColumnLast(t *testing.T) {
 		want string
 	}{
 		{
-			// An overlay that moved the count: the last column would be
-			// hidden from the scan and read as the total.
 			name: "count not last",
 			page: sqltest.Response{Columns: []string{"id", "sqlate_total", "name", "age"}, Rows: [][]driver.Value{{"a", int64(1), "P", int64(20)}}},
 			want: `query: person_view: a counted page's last column is "age", not sqlate_total`,
@@ -543,7 +501,6 @@ func TestList_RefusesACountedPageWithoutItsTotalColumnLast(t *testing.T) {
 			want: `query: person_view: a counted page's last column is "age", not sqlate_total`,
 		},
 		{
-			// A base that outputs the reserved name without declaring it.
 			name: "base outputs the name",
 			page: sqltest.WithTotal(sqltest.Response{Columns: []string{"id", "name", "age", "SQLATE_TOTAL"}, Rows: [][]driver.Value{{"a", "P", int64(20), int64(5)}}}, 1),
 			want: "query: person_view: the base outputs a column named sqlate_total, which the library reserves",
@@ -559,7 +516,6 @@ func TestList_RefusesACountedPageWithoutItsTotalColumnLast(t *testing.T) {
 			t.Errorf("%s: the refused page leaked its row set", c.name)
 		}
 	}
-	// Continue reads through the same check, naming its own base.
 	db, _ := session(t, members("c"))
 	_, err := memberView(t).Continue(ctx, db, query.Directives{}, issue(t, nil), 2)
 	if want := `query: member: a counted page's last column is "name", not sqlate_total`; err == nil || err.Error() != want {
@@ -575,8 +531,6 @@ func TestList_AWrongDestinationCountNamesTheVisibleColumns(t *testing.T) {
 	view := catalog().MustCompile(projectionFiles, "sql", sqltest.Dialect{}).Statement("person_view").Project(short)
 	db, _ := session(t, sqltest.WithTotal(people(1), 1))
 	_, err := view.List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 5})
-	// The same words database/sql uses over an uncounted page, with the
-	// count column left out of both sides.
 	if want := "sql: expected 3 destination arguments in Scan, not 2"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("err = %v, want %q", err, want)
 	}
@@ -598,8 +552,6 @@ func TestList_AScanThatDoesNotReadItsRowIsAnError(t *testing.T) {
 	if rec.RowsLeaked() != 0 {
 		t.Error("the failed page leaked its row set")
 	}
-	// Without the count there is nothing to read, and the scan is its own
-	// business.
 	db, _ = session(t, people(2))
 	if _, err := view.List(context.Background(), db, query.Directives{Total: query.TotalNone}, query.Page{Number: 1, Size: 5}); err != nil {
 		t.Errorf("TotalNone = %v", err)
@@ -609,13 +561,11 @@ func TestList_AScanThatDoesNotReadItsRowIsAnError(t *testing.T) {
 func TestList_AnEmptyPageCarriesATotalOnlyOnTheFirstPage(t *testing.T) {
 	p := projection(t)
 	ctx := context.Background()
-	// Nothing under the filters: the first page is empty and the total is 0.
 	db, _ := session(t, sqltest.WithTotal(people(0), 0))
 	got, err := p.List(ctx, db, query.Directives{}, query.Page{Number: 1, Size: 5})
 	if err != nil || got.Total != 0 || len(got.Items) != 0 || got.More {
 		t.Errorf("empty first page = %+v, %v; want total 0", got, err)
 	}
-	// Past the end, no row carries the count.
 	db, _ = session(t, sqltest.WithTotal(people(0), 0))
 	got, err = p.List(ctx, db, query.Directives{}, query.Page{Number: 3, Size: 5})
 	if err != nil || got.Total != query.NoTotal || len(got.Items) != 0 || got.More {
@@ -630,10 +580,6 @@ func TestList_AnEmptyPageCarriesATotalOnlyOnTheFirstPage(t *testing.T) {
 }
 
 func TestList_TheTotalAgreesWithThePage(t *testing.T) {
-	// Every page of a result of n rows, as an engine returns it: the rows
-	// from the offset, one past the size, each carrying n. Whenever a page
-	// reports a total, its items end at or before it and More says whether
-	// they end before it.
 	const size = 2
 	for n := range 6 {
 		table := people(n)

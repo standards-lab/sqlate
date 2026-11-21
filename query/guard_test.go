@@ -18,11 +18,8 @@ import (
 var guardFiles = fstest.MapFS{
 	"sql/edit.sql":    {Data: []byte("--| tier: standard\nUPDATE organization SET name = {{name}}, version = version + 1 WHERE id = {{id}} AND version = {{version}}")},
 	"sql/version.sql": {Data: []byte("--| tier: standard\nSELECT version FROM organization WHERE id = {{id}}")},
-	// The claim command's WHERE carries a predicate of its own, so a row at
-	// the expected version can still refuse the write; it reads its row back
-	// through item.
-	"sql/claim.sql": {Data: []byte("--| tier: standard\n--| returning: item\nUPDATE item SET owner = {{owner}}, version = version + 1 WHERE id = {{id}} AND version = {{version}} AND status = 'pending'")},
-	"sql/item.sql":  {Data: []byte("--| tier: standard\nSELECT id, status, version FROM item WHERE id = {{id}}")},
+	"sql/claim.sql":   {Data: []byte("--| tier: standard\n--| returning: item\nUPDATE item SET owner = {{owner}}, version = version + 1 WHERE id = {{id}} AND version = {{version}} AND status = 'pending'")},
+	"sql/item.sql":    {Data: []byte("--| tier: standard\nSELECT id, status, version FROM item WHERE id = {{id}}")},
 }
 
 type item struct {
@@ -43,8 +40,6 @@ func guard(t *testing.T) query.Guard {
 	return stmts.Statement("edit").Guarded(stmts.Statement("version"), "version")
 }
 
-// rowGuard is the claim guard compiled for d: sqltest.Dialect runs the
-// fallback, sqltest.ReturningDialect the single-statement form.
 func rowGuard(t *testing.T, d sqlate.Dialect) query.RowGuard[item] {
 	t.Helper()
 	stmts := catalog().MustCompile(guardFiles, "sql", d)
@@ -104,9 +99,6 @@ func TestGuard_CommandFailurePassesThroughMapped(t *testing.T) {
 	}
 }
 
-// forms are the two ways a returning command runs: the fallback, the
-// command and then its read in one transaction, and the single-statement
-// form of a dialect with query.Returner.
 var forms = []struct {
 	name    string
 	dialect sqlate.Dialect
@@ -116,7 +108,6 @@ var forms = []struct {
 	{"native", sqltest.ReturningDialect{}, true},
 }
 
-// statements counts the exec and query calls, the statements the engine ran.
 func statements(rec *sqltest.Recorder) int {
 	n := 0
 	for _, op := range rec.Ops() {
@@ -127,7 +118,6 @@ func statements(rec *sqltest.Recorder) int {
 	return n
 }
 
-// firstStatement is the first exec or query call, the command.
 func firstStatement(rec *sqltest.Recorder) sqltest.Call {
 	calls := rec.Calls()
 	i := slices.IndexFunc(calls, func(c sqltest.Call) bool { return c.Op == sqltest.OpExec || c.Op == sqltest.OpQuery })
@@ -142,7 +132,7 @@ func TestRowGuard_Outcomes(t *testing.T) {
 	cases := []struct {
 		name             string
 		fallback, native []sqltest.Response
-		statements       [2]int // fallback, native
+		statements       [2]int
 		check            func(t *testing.T, row item, err error)
 	}{
 		{

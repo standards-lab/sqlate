@@ -54,12 +54,8 @@ type Statement struct {
 	fields     []Field
 	dialect    sqlate.Dialect
 	catalog    *Catalog
-	// renderings caches an expanded statement's text by the lengths of its
-	// lists; nil for a statement with no expansion, whose text is final.
 	renderings *sync.Map
-	// returning is the resolved returning declaration of a command; nil for
-	// a statement that declares none.
-	returning *returnForm
+	returning  *returnForm
 }
 
 // Catalog is the catalog the statement compiled against.
@@ -177,7 +173,6 @@ func (st Statement) Exec(ctx context.Context, s sqlate.Session, args Args) (int6
 	return n, mapErr(s, err)
 }
 
-// query runs the statement for its rows.
 func (st Statement) query(ctx context.Context, s sqlate.Session, args Args) (*sql.Rows, error) {
 	text, values, err := st.bind(s, args)
 	if err != nil {
@@ -186,18 +181,10 @@ func (st Statement) query(ctx context.Context, s sqlate.Session, args Args) (*sq
 	return s.QueryContext(ctx, text, values...)
 }
 
-// bind checks the session against the transaction requirement and orders
-// args by the statement's parameters, an expanded parameter's list
-// flattened into consecutive values; for an expanded statement the text is
-// rendered for the lists' lengths, cached by them.
 func (st Statement) bind(s sqlate.Session, args Args) (string, []any, error) {
 	return st.bindForm(st.compiled, st.renderings, s, args)
 }
 
-// bindForm is bind over one compiled form of the statement and that form's
-// renderings cache: the statement's own, or a returning command's
-// single-statement form, which binds the same parameters under the same
-// transaction requirement.
 func (st Statement) bindForm(c compiled, renderings *sync.Map, s sqlate.Session, args Args) (string, []any, error) {
 	if st.txRequired {
 		if _, ok := s.(*sqlate.Tx); !ok {
@@ -237,9 +224,6 @@ func (st Statement) bindForm(c compiled, renderings *sync.Map, s sqlate.Session,
 	return text, values, nil
 }
 
-// mapErr routes an error that arose after a call returned (rows.Err, Scan,
-// RowsAffected) through the session's mapper, since the session's methods
-// cannot see it.
 func mapErr(s sqlate.Session, err error) error {
 	if err == nil {
 		return nil

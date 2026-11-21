@@ -330,7 +330,9 @@ standard spelling of the predicate is a chain of disjuncts, `(a > x) OR (a = x A
 engine may overlay it as a row-value comparison, `(a, b) > (x, y)`. A cursor is opaque,
 URL-safe text a caller relays unchanged. It records the base, the keyed fields, the direction,
 and the values, under a hash of those and each keyed field's declared type, so a cursor from
-before a contract change is refused. It also records the filters, so `Continue` under other
+before a contract change is refused. The hash is unkeyed and guards against accident, not
+forgery: a cursor's values re-enter the read only as bound parameters cast to the fields' types,
+so a forged cursor can at most select another page. It also records the filters, so `Continue` under other
 filters than the page that issued it is refused as a `CursorMismatch`. Filters with a value
 that has no JSON form, such as a float NaN, cannot be recorded, and their page reports `More`
 without a `Next`.
@@ -421,7 +423,9 @@ the lock: each refused `TryLock` pauses, from 25ms doubling to a 1s cap, and tri
 the wait ends with the context's error when the context ends, holding nothing. No statement
 stays open while a starter waits, so a holder's `CREATE INDEX CONCURRENTLY`, which waits for
 every open transaction, cannot deadlock with the waiter. A dialect with `Locker` alone waits in
-its blocking `Lock`. A dialect without `Locker` fails with `ErrNoLocker` unless
+its blocking `Lock`. The lock is released under a context that survives the run's cancellation;
+once the context has ended, the engine releases it with the discarded connection's session, and
+an unlock failure then is not reported. A dialect without `Locker` fails with `ErrNoLocker` unless
 `Options.Unlocked` opts out, in which case concurrent starters are unsafe. Inside the lock,
 every run that applies or reverts migrations creates and reads every set's history table first,
 so a dirty set or a history that does not match its set refuses the run before any migration

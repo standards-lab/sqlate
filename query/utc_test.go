@@ -11,8 +11,6 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// stamped holds every time destination kind Scanner converts, one of them
-// reached through an embedded struct.
 type stamped struct {
 	Identity
 	Updated  *time.Time          `json:"updated"`
@@ -25,12 +23,8 @@ type stamped struct {
 }
 
 func TestScanner_ReturnsTimesInUTC(t *testing.T) {
-	// A winter instant: London's wall clock (time.Local, from TestMain)
-	// reads as UTC's, offset zero, so only a comparison of whole values
-	// tells a value left in time.Local from one in time.UTC.
 	at := time.Date(2026, 1, 15, 12, 30, 0, 500, time.Local)
 	utc := time.Date(2026, 1, 15, 12, 30, 0, 500, time.UTC)
-	// A summer instant, an hour ahead of UTC on London's wall clock.
 	summer := time.Date(2026, 7, 1, 9, 0, 0, 0, time.Local)
 	summerUTC := time.Date(2026, 7, 1, 8, 0, 0, 0, time.UTC)
 	db, _ := session(t, sqltest.Response{
@@ -95,9 +89,6 @@ func TestScalar_ReturnsTimesInUTC(t *testing.T) {
 }
 
 func TestContinue_CarriesATimeKeyInUTC(t *testing.T) {
-	// The page's last item is keyed by a summer instant London's wall clock
-	// reads an hour ahead of UTC; the cursor carries it as UTC text, so the
-	// same row issues the same cursor on every host.
 	last := time.Date(2026, 7, 1, 9, 0, 0, 0, time.Local)
 	db, _ := session(t, sqltest.WithTotal(members(last.Add(-time.Hour), last, last.Add(time.Hour)), 9))
 	page, err := memberView(t).List(context.Background(), db, query.Directives{}, query.Page{Number: 1, Size: 2})

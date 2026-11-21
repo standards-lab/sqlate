@@ -12,7 +12,6 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// load parses one file through Load, the only public path to the scanner.
 func load(t *testing.T, text string) query.Statement {
 	t.Helper()
 	stmts, err := catalog().Compile(fstest.MapFS{"sql/s.sql": {Data: []byte(text)}}, "sql", sqltest.Dialect{})
@@ -51,8 +50,6 @@ func TestParams_Syntax(t *testing.T) {
 	}
 }
 
-// The header is not scanned and not sent: a {{ in a declaration's prose is
-// neither a parameter nor an error, and the engine receives the body only.
 func TestParams_HeaderIsNotScannedOrSent(t *testing.T) {
 	st := load(t, "--| tier: native\n--| native: postgres — binds {{key}} to pg_advisory_xact_lock\n-- prose\n\nSELECT pg_advisory_xact_lock({{key}})")
 	if st.Text() != "SELECT pg_advisory_xact_lock($1)" {
@@ -80,10 +77,6 @@ func TestParams_MalformedIsALoadError(t *testing.T) {
 	}
 }
 
-// An expanded parameter renders one placeholder per element of its list,
-// typed when declared so, the positions of every other parameter shifting
-// with it; the rendering is cached by the lists' lengths and Text is the
-// arity-one form Verify prepares.
 func TestExpansion_RendersOnePlaceholderPerElement(t *testing.T) {
 	stmt := load(t, "--| tier: standard\nSELECT 1 FROM t WHERE tenant = {{tenant}} AND id IN ({{ids...:uuid}}) AND status = {{status}}")
 	if got := stmt.Text(); got != "SELECT 1 FROM t WHERE tenant = $1 AND id IN (CAST($2 AS uuid)) AND status = $3" {

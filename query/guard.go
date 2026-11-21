@@ -73,9 +73,6 @@ func (g Guard) Run(ctx context.Context, s sqlate.Session, version int64, args Ar
 	if err != nil {
 		return 0, err
 	}
-	// Unreachable for a plain Guard, whose command matches on the key and
-	// the version alone: a row at the expected version would have matched
-	// the update. Kept for shape-consistency with RowGuard.Run.
 	if current == version {
 		return 0, fmt.Errorf("%w: version %d unchanged", ErrRefused, version)
 	}
