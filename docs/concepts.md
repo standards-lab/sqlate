@@ -22,9 +22,10 @@ SELECT id, code, name, version, created_at, updated_at
 FROM team
 ```
 
-`tier` is required on every file. `key` and `field` make this file a projection base, which a
-collection read wraps as a query; they are explained below. A plain `--` comment in the header is prose,
-skipped. The header ends at the first line that is neither blank, a comment, nor a declaration.
+`tier` is required on every statement and pattern. `key` and `field` make this file a projection
+base, which a collection read wraps as a query; they are explained below. A plain `--` comment in
+the header is prose, skipped. The header ends at the first line that is neither blank, a comment,
+nor a declaration.
 
 ## Parameters
 
@@ -140,9 +141,9 @@ query.Publish("app", files, "patterns").As("shared")
 
 ## Tiers and the native declaration
 
-Every file declares its tier. A standard file uses only standard SQL and runs on any engine. A
-native file uses one engine's own feature, and its `native` declaration names the feature and
-the port, the way the same effect is reached on other engines:
+Every statement and pattern declares its tier. A standard file uses only standard SQL and runs on
+any engine. A native file uses one engine's own feature, and its `native` declaration names the
+feature and the port, the way the same effect is reached on other engines:
 
 ```sql
 --| tier: native

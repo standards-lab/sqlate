@@ -5,7 +5,6 @@ roadmap tracks it as the backlog goal `second-providers` in `standards-lab/roadm
 
 The sub-module carries three parts of its own, each still open:
 
-- a dialect: bind-parameter rendering, error classification, the migrate lock, the version
-  statement, and the keyset predicate, as `postgres/doc.go` lists them.
+- a dialect: the parts `postgres/doc.go` lists, the `migrate.Catalog` implementation included.
 - a `sqlint.toml`.
 - an overlay for each library pattern the engine does not accept as written in standard SQL.

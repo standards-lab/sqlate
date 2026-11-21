@@ -96,9 +96,9 @@ Three conventions the library keeps are stricter than a reader might expect:
   through a sub-module's `go.mod`: pgx through `postgres`, the TOML parser through `sqlint`.
 - `sqltest` is a public package: the scripted driver the library's own tests run over is the
   one a consumer's tests run over too, so a unit test needs no database.
-- Every `.sql` file declares its tier, standard or native, and a native file names the engine
-  feature it uses and the port to other engines. The port list of a code base is one search for
-  `--| tier: native`.
+- Every statement and pattern declares its tier, standard or native, and a native file names
+  the engine feature it uses and the port to other engines. The port list of a code base is one
+  search for `--| tier: native`.
 
 ## Packages
 
@@ -137,6 +137,13 @@ moves it. The service builds from `compose/postgres/Dockerfile`, whose `FROM` li
 image pin and which carries its configuration and health check; `mise run currency` reports a
 pin behind its latest. `mise.toml` sets `SQLATE_DSN`, whose port follows the same variable. The
 integration tier is not part of CI.
+
+The compose PostgreSQL reports healthy once it accepts TCP connections to the app database. The
+probe goes over TCP, not the socket, because the first start's initialization runs a temporary
+server on the socket alone, which would report ready before the real server starts.
+
+`GO_MODULES` in `mise.toml` lists the module directories, kept in sync with the `go.work`
+use-list.
 
 ## License
 
