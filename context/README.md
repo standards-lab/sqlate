@@ -18,16 +18,21 @@ the code do not express.
 
 ## Capability map
 
-Every package is built: the session layer at the root, `header`, `query`, `migrate`, and
-`sqltest` in the base module, and the `postgres` and `sqlint` sub-modules. The README's
-Packages section lists them, the code and each package's `doc.go` are authoritative for the
-API, and the guide documents their use. Detail for what is unbuilt is added when it is about
-to be built.
-
-A second engine is a second sub-module, named for the engine. It carries its own dialect and
-`sqlint.toml`, plus an overlay for each library pattern it does not accept as written in
-standard SQL.
-
-## Notes
-
-- `dollar-quoting.md` — the `sqlint` linter's planned handling of PostgreSQL dollar-quoted strings.
+- **Session layer** (built): the root package wraps a plain `*sql.DB`, owns transactions, and
+  maps every driver error through the engine's dialect ([doc.go](../doc.go)).
+- **header** (built): reads the `--|` declaration header of an authored `.sql` file
+  ([header/doc.go](../header/doc.go)).
+- **query** (built): compiles authored statements against the pattern catalog and binds them to
+  typed handles ([query/doc.go](../query/doc.go)).
+- **migrate** (built): versions a schema over authored SQL under the engine's lock
+  ([migrate/doc.go](../migrate/doc.go)).
+- **sqltest** (built): the scripted `database/sql` driver for hermetic tests
+  ([sqltest/doc.go](../sqltest/doc.go)).
+- **postgres** (built): the PostgreSQL dialect sub-module, with `pgtest` for integration tests'
+  throwaway databases ([postgres/doc.go](../postgres/doc.go)).
+- **sqlint** (built): the conventions linter sub-module and its command
+  ([sqlint/doc.go](../sqlint/doc.go)).
+- **Dollar-quoted strings in sqlint** (planned): `sqlint` strips PostgreSQL dollar-quoted bodies
+  before it matches code ([dollar-quoting.md](dollar-quoting.md)).
+- **A second engine** (planned): a second engine sub-module beside `postgres`
+  ([second-engine.md](second-engine.md)).
