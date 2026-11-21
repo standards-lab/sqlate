@@ -33,9 +33,6 @@ func (drv) Open(string) (driver.Conn, error) {
 	return nil, errors.New("sqltest: open by DSN unsupported; use Open")
 }
 
-// conn implements the context-aware driver interfaces: exec, query,
-// prepare, begin with options, ping, and the named-value checker that
-// accepts every argument unconverted.
 type conn struct{ rec *Recorder }
 
 var (
@@ -125,8 +122,6 @@ var (
 
 func (s *stmt) Close() error { return nil }
 
-// NumInput returns -1 so database/sql skips its argument-count check; the
-// scripted driver does not parse SQL.
 func (s *stmt) NumInput() int { return -1 }
 
 func (s *stmt) CheckNamedValue(*driver.NamedValue) error { return nil }

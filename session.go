@@ -29,7 +29,8 @@ type Dialect interface {
 // *Tx, so the same statement handle runs against the pool or inside a
 // transaction. Every method classifies a connectivity failure and maps every
 // other driver error through the dialect; the dialect itself is not on the
-// interface, because runners never need it at request time.
+// interface, because runners never need it at request time. QueryRowContext
+// is left out: *sql.Row defers its error to Scan, where nothing can map it.
 type Session interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
@@ -109,10 +110,6 @@ func (d *DB) Dialect() Dialect { return d.dialect }
 // routes every other error through the dialect; nil stays nil.
 func (d *DB) MapError(err error) error { return mapError(d.dialect, err) }
 
-// mapError is the mapping both sessions share. A connectivity failure is
-// classified here, before the dialect, because it is the driver's and not
-// the engine's: the engine never saw the statement, so the dialect's
-// vocabulary does not apply to it.
 func mapError(dialect Dialect, err error) error {
 	if err == nil {
 		return nil
@@ -123,12 +120,6 @@ func mapError(dialect Dialect, err error) error {
 	return dialect.MapError(err)
 }
 
-// connectionFailed reports whether err is the driver failing to reach the
-// engine: a network error anywhere in the chain (a refused or reset
-// connection, a dial that timed out), or driver.ErrBadConn once
-// database/sql has exhausted its retries. A context deadline is excluded:
-// it implements net.Error but reports the caller's budget, not the
-// engine's reachability, and stays the dialect's to map.
 func connectionFailed(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 		return false

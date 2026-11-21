@@ -45,8 +45,8 @@ func TestWrap_PanicsOnNil(t *testing.T) {
 func TestDB_EveryMethodMaps(t *testing.T) {
 	ctx := context.Background()
 	db, rec := wrap(t,
-		sqltest.Response{Err: errDriver}, // exec
-		sqltest.Response{Err: errDriver}, // query
+		sqltest.Response{Err: errDriver},
+		sqltest.Response{Err: errDriver},
 	)
 	rec.FailPrepare = func(string) error { return errDriver }
 
@@ -219,8 +219,6 @@ func TestTransact_PanicRollsBackAndRepanics(t *testing.T) {
 	_, _ = db.Transact(context.Background(), func(*sqlate.Tx) (int, error) { panic("boom") }, nil)
 }
 
-// appDB is an application's own pool type, a sqlate.Beginner through the
-// *sqlate.DB it embeds.
 type appDB struct{ *sqlate.DB }
 
 func TestTransact_RunsTheUnitOnAnEmbeddingBeginner(t *testing.T) {
@@ -278,18 +276,14 @@ func TestConn_RunsOnThePoolAndWrapsAFailureAsConnectionFailed(t *testing.T) {
 	}
 }
 
-// A connectivity failure is the driver's, not the engine's: a network error
-// from any session call, or driver.ErrBadConn after database/sql's retries,
-// wraps ErrConnectionFailed before the dialect sees it, on the pool session
-// and inside a transaction alike, with the driver's error still reachable.
 func TestMapError_ClassifiesConnectivityBeforeTheDialect(t *testing.T) {
 	ctx := context.Background()
 	refused := &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}
 	db, rec := wrap(t,
-		sqltest.Response{Err: refused}, // pool exec
-		sqltest.Response{Err: refused}, // pool query
-		sqltest.Response{Err: refused}, // tx exec
-		sqltest.Response{Err: refused}, // tx query
+		sqltest.Response{Err: refused},
+		sqltest.Response{Err: refused},
+		sqltest.Response{Err: refused},
+		sqltest.Response{Err: refused},
 	)
 	rec.FailPrepare = func(string) error { return refused }
 	rec.FailCommit = refused
@@ -313,8 +307,6 @@ func TestMapError_ClassifiesConnectivityBeforeTheDialect(t *testing.T) {
 	connectionFailed(err)
 	_, err = db.PrepareContext(ctx, "SELECT 1")
 	connectionFailed(err)
-	// database/sql retries ErrBadConn on fresh connections before surfacing
-	// it, so it is asserted through the mapper rather than the driver.
 	connectionFailed(db.MapError(fmt.Errorf("query: %w", driver.ErrBadConn)))
 
 	tx, err := db.Begin(ctx, nil)
@@ -330,9 +322,6 @@ func TestMapError_ClassifiesConnectivityBeforeTheDialect(t *testing.T) {
 	connectionFailed(tx.Commit())
 }
 
-// A context deadline implements net.Error but reports the caller's budget,
-// not the engine's reachability: it is not a connectivity failure, and the
-// dialect maps it like any other error.
 func TestMapError_ContextDeadlineIsNotConnectivity(t *testing.T) {
 	db, _ := wrap(t)
 	for _, ctxErr := range []error{context.DeadlineExceeded, context.Canceled} {
@@ -346,9 +335,6 @@ func TestMapError_ContextDeadlineIsNotConnectivity(t *testing.T) {
 	}
 }
 
-// A ConstraintError's message names the most specific handle the driver
-// exposed: the constraint, the column when the violation carries no
-// constraint name, and the class alone when the driver exposed neither.
 func TestConstraintError_ErrorNamesTheHandleTheDriverExposed(t *testing.T) {
 	cases := []struct {
 		name string

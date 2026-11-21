@@ -61,7 +61,6 @@ func WithTotal(r Response, n int64) Response {
 	return out
 }
 
-// totalColumn is the name query reserves for a counted page's total.
 const totalColumn = "sqlate_total"
 
 // Recorder is the shared state behind every connection a connector hands
@@ -139,10 +138,6 @@ func (r *Recorder) record(c Call) {
 	r.calls = append(r.calls, c)
 }
 
-// next records the call, checks the arguments against the statement's
-// placeholders, and pops the next response, rejecting an empty queue and a
-// response of the wrong shape. The call is recorded even when it fails, so
-// the log shows what ran.
 func (r *Recorder) next(op Op, query string, args []driver.NamedValue) (Response, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -168,7 +163,6 @@ func (r *Recorder) next(op Op, query string, args []driver.NamedValue) (Response
 	return resp, nil
 }
 
-// fits checks the response's shape against the call that consumed it.
 func (resp Response) fits(op Op) error {
 	switch op {
 	case OpExec:
@@ -195,8 +189,6 @@ func (resp Response) fits(op Op) error {
 
 var placeholder = regexp.MustCompile(`\$([0-9]+)`)
 
-// placeholders returns the argument count a statement binds: the highest $N
-// in its text, the stub dialect's placeholder form.
 func placeholders(query string) int {
 	max := 0
 	for _, m := range placeholder.FindAllStringSubmatch(query, -1) {

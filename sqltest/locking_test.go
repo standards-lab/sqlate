@@ -10,13 +10,10 @@ import (
 	"github.com/standards-lab/sqlate/sqltest"
 )
 
-// flag scripts the one boolean row a try-lock or unlock statement reads.
 func flag(b bool) sqltest.Response {
 	return sqltest.Response{Columns: []string{"ok"}, Rows: [][]driver.Value{{b}}}
 }
 
-// pinned opens a pool over the script and pins one connection, as a lock
-// protocol does.
 func pinned(t *testing.T, responses ...sqltest.Response) (*sql.Conn, *sqltest.Recorder) {
 	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
