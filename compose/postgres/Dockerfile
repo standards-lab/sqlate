@@ -1,4 +1,4 @@
-# See docs/features.md
+# See README.md
 FROM postgres:19.0-alpine
 
 ENV POSTGRES_USER=app \

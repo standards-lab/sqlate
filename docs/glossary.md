@@ -11,7 +11,7 @@ SQL as written, never sent as written.
 - **Header**: a `.sql` file's leading `--|` declarations. The compiler reads the header and
   the engine never sees it.
 - **Declaration**: one `--| key: value` line of the header, such as `tier`, `native`, `port`,
-  `transaction`, `key`, or `field`. A long value folds onto following lines written
+  `transaction`, `returning`, `alternate`, `key`, or `field`. A long value folds onto following lines written
   `--| [key]: more`.
 - **Body**: what follows the header; what the engine receives.
 - **Tier**: the portability a file declares. A standard file uses only standard SQL and runs on

@@ -100,7 +100,7 @@ The keys `query` and `migrate` accept:
 | `transaction` | migrations | `none`: the migration runs outside a transaction; `required` or absent keeps one. |
 | `key` | projection bases | The identity column and sort tie-breaker: one declared field, or several separated by commas (`id` or `org, id`), each named once. |
 | `returning` | statements | Optional, on a standard-tier `INSERT INTO` or `UPDATE` only: the name of the statement in the same directory that reads the changed row back. |
-| `field` | projection bases | One per column a request may filter or sort by: `<name> <sql type>`, with an optional trailing `not null`, matched case-insensitively, for a column that never holds a null. |
+| `field` | projection bases | One per column a request may filter or sort by: `<name> <sql type>`, with an optional trailing `not null`, matched case-insensitively, for a column that never holds a null; a misspelled suffix that leaves `not` or `null` in the type is a load error. |
 
 ## query: authored statements
 
@@ -229,7 +229,8 @@ minted in the program, and the read finds the row by it.
 
 An entity's tags are its scan and binding contract, so a program writes neither scan functions
 nor argument literals. A field's column name is its `db` tag, else its `json` tag's name, else
-the field name lowercased; `db:"-"` excludes it.
+the field name lowercased; `db:"-"` excludes it. A base aliases its output columns to the
+contract's names, so the `json` tag is the usual source and `db` the override.
 
 An untagged embedded struct flattens: its fields become columns of the outer type, as if
 declared there, so a read model that embeds a shared identity or audit type restates none of its
@@ -313,9 +314,10 @@ trailing column, `sqlate_total`, which the scan never sees; a base may declare n
 name, in any case, and `Project` panics on one. A base that outputs an undeclared column of that
 name is refused when the page is read, as is a page whose last column is not the count. A scan
 that returns without calling `Scan` is an error, since the page's total would go unread, and a
-scan given the wrong number of destinations is told the count of the columns it sees. The window reads every filtered row before paging,
-where the plan under `TotalNone` can stop early along an index, so a caller walking a large
-collection by cursor reads the total once and declines it after.
+scan given the wrong number of destinations is told the count of the columns it sees. The window
+reads every filtered row before paging, where the plan under `TotalNone` can stop early along an
+index, so a caller walking a large collection by cursor reads the total once and declines it
+after.
 
 The key makes the ordering total. After the caller's sorts, the read appends every key field
 the sorts do not name, in header order, so a composite key tie-breaks in the order its header
@@ -334,8 +336,8 @@ before a contract change is refused. The hash is unkeyed and guards against acci
 forgery: a cursor's values re-enter the read only as bound parameters cast to the fields' types,
 so a forged cursor can at most select another page. A cursor also records the filters, so
 `Continue` under other filters than the page that issued it is refused as a `CursorMismatch`.
-Filters with a value that has no JSON form, such as a float NaN, cannot be recorded, and their page reports `More`
-without a `Next`.
+Filters with a value that has no JSON form, such as a float NaN, cannot be recorded, and their
+page reports `More` without a `Next`.
 
 Every error a request's declarations can cause unwraps to `ErrDirectives`, so a caller's
 check for a bad request is one `errors.Is`:
@@ -636,9 +638,6 @@ agrees with its total when writes commit between the statement and the caller, w
 read as its own statement does not; that it agrees under concurrent writers; and that the
 counted page scans its base once under one window while the uncounted page keeps the key's
 index order. `mise run acceptance` runs them against a compose PostgreSQL and tears it down.
-The compose PostgreSQL reports healthy once it accepts TCP connections to the app database. The
-probe goes over TCP, not the socket, because the first start's initialization runs a temporary
-server on the socket alone, which would report ready before the real server starts.
 
 ### pgtest: a test's throwaway database
 

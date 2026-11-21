@@ -3,7 +3,7 @@
 The judgement calls the standards-reviewer applies to sqlate, beyond what `mise run check` enforces.
 
 - A change that alters documented behavior updates the guide, `README.md` and `docs/`, in the same change.
-- `architecture/standards/go-elemental/principles/dependencies.md`: the bottom-up line and no provider in a base, across the three modules' `go.mod` files.
+- `architecture/standards/go-elemental/principles/dependencies.md`: the three modules' `go.mod` files.
 - `architecture/standards/go-elemental/principles/tests-and-docs.md`: the doc.go inventory of every package, and the unit tier over `sqltest`.
 - `architecture/standards/go-elemental/principles/topology-and-naming.md`: the base module and the `postgres` and `sqlint` sub-modules, and their tags.
 - `architecture/standards/go-elemental/principles/release-and-ci.md`: the check, currency, and a changelog per module.
@@ -14,5 +14,5 @@ The judgement calls the standards-reviewer applies to sqlate, beyond what `mise 
 - `architecture/principles/service-tiers.md`: the `Dialect` boundary between the base module and each engine sub-module.
 - `architecture/principles/tool-beside-library.md`: the `sqlint` package and its command.
 - `architecture/principles/validation-first.md`: authored SQL, `sqlint.Load` and `migrate.New`.
-- `architecture/principles/comments.md` governs Go source, tests, scripts, and every configuration file (TOML, YAML, `.gitignore`, Dockerfile, compose), not just exported API; a SQL file's header is its package documentation and its template metadata.
-- `architecture/principles/context-architecture.md`: the guide and each `doc.go` are the homes.
+- `architecture/principles/comments.md`: every comment; a `.sql` file's `--|` header is also its template metadata.
+- `architecture/principles/context-architecture.md`: the guide, `README.md` and `docs/`, and each `doc.go`.
