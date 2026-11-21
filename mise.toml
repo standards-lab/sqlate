@@ -1,4 +1,8 @@
+[settings]
+task.run_auto_install = false
+
 [tools]
+"github:standards-lab/claude-plugins" = { version = "0.22.0", version_prefix = "marathon/v" }
 go = "1.27.4"
 golangci-lint = "2.15.0"
 jq = "1.8.2"
@@ -9,10 +13,19 @@ GO_MODULES = ". postgres sqlint"
 SQLATE_DSN = "postgres://app:app@127.0.0.1:{{ get_env(name='POSTGRES_PORT', default='5433') }}/app?sslmode=disable"
 
 [tasks.check]
-description = "Build, vet, format, fix, tidy, test, and lint every module, then sqlint the repository under the committed go.work, through which it resolves the modules sqlint.toml names; writes nothing"
+description = "Build, vet, format, fix, tidy, test, and lint every module, then sqlint the repository under the committed go.work, through which it resolves the modules sqlint.toml names, then run lint-context and lint-references; writes nothing"
 run = '''
 set -eu
 export GOWORK=off
+fail=0
+run_lint() {
+  if ! command -v "$1" >/dev/null; then
+    echo "FAIL: $1 is not on PATH; run mise install" >&2
+    fail=1
+    return
+  fi
+  "$1" || fail=1
+}
 for mod in $GO_MODULES; do
   echo "check: $mod"
   cd "$MISE_PROJECT_ROOT/$mod"
@@ -28,6 +41,9 @@ done
 echo "check: sqlint"
 cd "$MISE_PROJECT_ROOT"
 env -u GOWORK go run github.com/standards-lab/sqlate/sqlint/cmd/sqlint .
+run_lint lint-context
+run_lint lint-references
+exit "$fail"
 '''
 
 [tasks.currency]
