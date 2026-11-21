@@ -4,17 +4,12 @@ golangci-lint = "2.15.0"
 jq = "1.8.2"
 "aqua:google/go-containerregistry" = "0.22.1"
 
-# Space-separated list of module directories, kept in sync with the go.work
-# use-list. "." is the base module; postgres and sqlint are the sub-modules.
 [env]
 GO_MODULES = ". postgres sqlint"
-# The compose stack's PostgreSQL, whose port follows POSTGRES_PORT as
-# compose.yml's does.
 SQLATE_DSN = "postgres://app:app@127.0.0.1:{{ get_env(name='POSTGRES_PORT', default='5433') }}/app?sslmode=disable"
 
-# The one check: read-only and deterministic, stopping at the first failure.
 [tasks.check]
-description = "Build, vet, format, fix, tidy, test, and lint every module, then sqlint the repository; writes nothing"
+description = "Build, vet, format, fix, tidy, test, and lint every module, then sqlint the repository under the committed go.work, through which it resolves the modules sqlint.toml names; writes nothing"
 run = '''
 set -eu
 export GOWORK=off
@@ -30,25 +25,20 @@ for mod in $GO_MODULES; do
   go test -race ./...
   golangci-lint run ./...
 done
-# sqlint resolves the modules sqlint.toml names with go list -m, which the
-# base module reaches only through the committed go.work, so it runs with
-# the workspace on.
 echo "check: sqlint"
 cd "$MISE_PROJECT_ROOT"
 env -u GOWORK go run github.com/standards-lab/sqlate/sqlint/cmd/sqlint .
 '''
 
-# Currency: report what trails its latest, and the convenience that upgrades it.
 [tasks.currency]
 description = "Report every requirement, Go version, tool, action pin, and image tag behind its latest; writes nothing"
 run = "scripts/currency.sh"
 
 [tasks.upgrade]
-description = "Upgrade every module's go directive and direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
+description = "Upgrade every module's go directive (to the current Go minor, with no toolchain line) and direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
 run = '''
 set -eu
 export GOWORK=off
-# The go directive follows the current Go minor, with no toolchain line.
 go_minor=$(mise latest go | cut -d. -f1,2)
 for mod in $GO_MODULES; do
   cd "$MISE_PROJECT_ROOT/$mod"
@@ -61,7 +51,6 @@ cd "$MISE_PROJECT_ROOT"
 mise upgrade --bump --local
 '''
 
-# Maintenance.
 [tasks.tidy]
 description = "Run go mod tidy across all modules"
 run = '''
@@ -72,7 +61,6 @@ for mod in $GO_MODULES; do
 done
 '''
 
-# Verification.
 [tasks.fmt]
 description = "Format all Go source"
 run = "gofmt -w ."
@@ -109,7 +97,6 @@ for mod in $GO_MODULES; do
 done
 '''
 
-# Testing.
 [tasks.test]
 description = "Run the unit tier across all modules"
 run = '''
@@ -133,8 +120,6 @@ mise run db:up
 mise run integration
 '''
 
-# The development stack: compose.yml's PostgreSQL, whose data lives in a named
-# volume that db:down keeps and db:reset drops.
 [tasks."db:up"]
 description = "Build and start the compose PostgreSQL and wait until it is healthy"
 run = "docker compose up -d --wait --build"

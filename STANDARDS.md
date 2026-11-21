@@ -14,4 +14,5 @@ The judgement calls the standards-reviewer applies to sqlate, beyond what `mise 
 - `architecture/principles/service-tiers.md`: the `Dialect` boundary between the base module and each engine sub-module.
 - `architecture/principles/tool-beside-library.md`: the `sqlint` package and its command.
 - `architecture/principles/validation-first.md`: authored SQL, `sqlint.Load` and `migrate.New`.
+- `architecture/principles/comments.md` governs Go source, tests, scripts, and every configuration file (TOML, YAML, `.gitignore`, Dockerfile, compose), not just exported API; a SQL file's header is its package documentation and its template metadata.
 - `architecture/principles/context-architecture.md`: the guide and each `doc.go` are the homes.

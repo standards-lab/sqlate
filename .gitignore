@@ -1,18 +1,8 @@
-# go.work and go.work.sum are committed; this repo is multi-module by design.
-
-# Marathon session plan files.
 .claude/plans/
-
-# marathon's task and session briefs.
 .claude/briefs/
-
-# Per-machine mise overrides.
 mise.local.toml
-
-# Build output.
 bin/
 
-# Editor and OS.
 *.swp
 *.swo
 *~

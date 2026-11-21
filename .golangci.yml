@@ -1,15 +1,17 @@
-# golangci-lint v2 configuration, run per module by `mise run check`.
+# golangci-lint v2 configuration, run per module by `mise run check`: the standard set plus
+# testpackage and nolintlint.
+# See architecture/standards/go-elemental/principles/tests-and-docs.md
+# See architecture/principles/comments.md
 version: "2"
 
 linters:
-  # The standard set (errcheck, govet, ineffassign, staticcheck, unused),
-  # plus testpackage, which keeps tests black-box. Its skip regexp is
-  # narrowed to export_test.go, the one white-box file allowed: it exports a
-  # clock or probe hook the API cannot reach deterministically, and the
-  # tests that use it stay in the external test package.
   default: standard
   enable:
+    - nolintlint
     - testpackage
   settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     testpackage:
-      skip-regexp: 'export_test\.go'
+      skip-regexp: export_test\.go
