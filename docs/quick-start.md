@@ -12,7 +12,7 @@ A tutorial that builds a working program from an empty directory:
 
 The library is used on its own, over a plain `*sql.DB`. Every
 file is written in full at the step that needs it, and every block is taken from a program
-that compiles, runs against PostgreSQL 18, and passes its tests. The [concepts](concepts.md)
+that compiles, runs against PostgreSQL 19, and passes its tests. The [concepts](concepts.md)
 document explains the grammar the files use, and the [features](features.md) document
 explains each mechanism.
 
@@ -76,14 +76,14 @@ mise trust && mise install
 
 ## 2. Start PostgreSQL
 
-`compose/postgres/Dockerfile` builds PostgreSQL 18 with the user, password, and database the
+`compose/postgres/Dockerfile` builds PostgreSQL 19 with the user, password, and database the
 connection string names, and a health check the `db:up` task waits on. Its `FROM` line is the
 image's one pin.
 
 `compose/postgres/Dockerfile`:
 
 ```dockerfile
-FROM postgres:18.7-alpine
+FROM postgres:19.0-alpine
 
 ENV POSTGRES_USER=app \
     POSTGRES_PASSWORD=app \
