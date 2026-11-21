@@ -18,7 +18,6 @@ func main() {
 	var lines []string
 	cfg, err := sqlint.Load(fsys)
 	if err != nil {
-		// Each line of a configuration error begins with the file's name.
 		lines = append(lines, strings.Split(err.Error(), "\n")...)
 	}
 	if cfg != nil {

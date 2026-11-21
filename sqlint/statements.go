@@ -9,13 +9,8 @@ import (
 	"github.com/standards-lab/sqlate/header"
 )
 
-// verbNamed catches a file named for its SQL verb rather than its
-// operation; delete is both a verb and a command and is allowed.
 var verbNamed = regexp.MustCompile(`^(insert|select|update|upsert|merge)(_|\.)`)
 
-// lintStatements compiles a statement directory the way a program does,
-// against the resolved catalog, then applies the rules the compiler
-// leaves to review.
 func (l *linter) lintStatements(dir string, on map[string]bool) {
 	if l.catalog != nil {
 		if _, err := l.catalog.Compile(l.fsys, dir, stubDialect{}); err != nil {
@@ -25,8 +20,6 @@ func (l *linter) lintStatements(dir string, on map[string]bool) {
 	l.lintFiles(dir, on)
 }
 
-// lintFiles applies the per-file rules of a statement or pattern
-// directory under its switches.
 func (l *linter) lintFiles(dir string, on map[string]bool) {
 	entries, _ := fs.ReadDir(l.fsys, dir)
 	for _, e := range entries {
@@ -40,7 +33,7 @@ func (l *linter) lintFiles(dir string, on map[string]bool) {
 		text, _ := fs.ReadFile(l.fsys, p)
 		h, err := header.Parse(string(text))
 		if err != nil {
-			continue // reported by the compile or the catalog
+			continue
 		}
 		tier, _ := h.Get("tier")
 		l.lintBody(p, string(text), h.End(), on["delimiter"], on["native_forms"] && tier == "standard", on["guard"])

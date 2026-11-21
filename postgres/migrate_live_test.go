@@ -1,9 +1,5 @@
 //go:build integration
 
-// The live-engine acceptance proofs for migrate: the cases a mature library
-// has met, run against the live PostgreSQL named by SQLATE_DSN. Each
-// proof owns its object names and drops them on exit, so the proofs run in
-// any order and survive an aborted run. `mise run integration`.
 package postgres_test
 
 import (
@@ -24,8 +20,6 @@ import (
 	"github.com/standards-lab/sqlate/postgres"
 )
 
-// scratch drops the named objects now and at cleanup: the history table
-// and every table or index a proof creates.
 func scratch(t testing.TB, db *sqlate.DB, history string, tables ...string) {
 	t.Helper()
 	drop := func() {
@@ -70,10 +64,6 @@ func indexValid(t testing.TB, db *sqlate.DB, index string) (exists, valid bool) 
 	return true, valid
 }
 
-// Proof: non-transactional DDL. CREATE INDEX CONCURRENTLY refuses a
-// transaction block (SQLSTATE 25001); the "-- transaction: none" opt-out
-// runs it under autocommit on the pinned connection, and the history row
-// goes dirty → clean around it.
 func TestLive_NonTransactionalDDL(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -110,9 +100,6 @@ func TestLive_NonTransactionalDDL(t *testing.T) {
 	}
 }
 
-// Proof: forcing a set from an empty history to its head writes the whole
-// prefix, so the history reads back as current and Verify, Status, and a
-// later Down all accept it.
 func TestLive_ForceFromEmptyWritesThePrefix(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -144,11 +131,6 @@ func TestLive_ForceFromEmptyWritesThePrefix(t *testing.T) {
 	}
 }
 
-// Proof: dirty state and force, with the orphan PostgreSQL leaves behind. A
-// unique index built CONCURRENTLY over duplicate rows fails after the
-// catalog entry exists, so the index remains INVALID: the history row is
-// dirty, every run refuses, Verify reports it, and the repair is drop the
-// orphan, Force the previous version, fix the data, and re-run.
 func TestLive_DirtyStateAndForce(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -178,7 +160,6 @@ func TestLive_DirtyStateAndForce(t *testing.T) {
 		t.Errorf("second Up = %v, want the discovered DirtyError", err)
 	}
 
-	// The repair, as an operator would do it.
 	if _, err := db.ExecContext(ctx, "DROP INDEX live_dirty_uq"); err != nil {
 		t.Fatal(err)
 	}
@@ -199,16 +180,11 @@ func TestLive_DirtyStateAndForce(t *testing.T) {
 	}
 }
 
-// slowSet is a set whose first migration holds its transaction open long
-// enough for a second starter to collide with it.
 var slowSet = []migrate.Migration{
 	{Version: 1, Name: "slow", Up: "SELECT pg_sleep(0.4)", Down: "SELECT 1", Transactional: true},
 	{Version: 2, Name: "table", Up: "CREATE TABLE live_race (x int)", Down: "DROP TABLE live_race", Transactional: true},
 }
 
-// Proof: concurrent starters in one process. Four migrators over one pool
-// start together; the lock serializes them, every Up succeeds, and the
-// history and the schema each show one application.
 func TestLive_ConcurrentStartersInProcess(t *testing.T) {
 	db := live(t)
 	scratch(t, db, "live_race_history", "live_race")
@@ -228,9 +204,6 @@ func TestLive_ConcurrentStartersInProcess(t *testing.T) {
 	assertAppliedOnce(t, db, "live_race_history", len(slowSet))
 }
 
-// Proof: the unlocked negative. The same race without the lock: every
-// starter reads an empty history and applies; the collision surfaces as
-// duplicate_table (42P07) or a duplicate history row (23505) in all but one.
 func TestLive_UnlockedStartersCollide(t *testing.T) {
 	db := live(t)
 	scratch(t, db, "live_race_history", "live_race")
@@ -258,9 +231,6 @@ func TestLive_UnlockedStartersCollide(t *testing.T) {
 	t.Logf("unlocked: %d of 4 starters collided", failed)
 }
 
-// Proof: concurrent starters across processes. The test binary re-executes
-// itself four times, each child a process with its own pool running Up on
-// the same history; the advisory lock serializes them across sessions.
 func TestLive_ConcurrentStartersAcrossProcesses(t *testing.T) {
 	db := live(t)
 	scratch(t, db, "live_race_history", "live_race")
@@ -285,7 +255,6 @@ func TestLive_ConcurrentStartersAcrossProcesses(t *testing.T) {
 	assertAppliedOnce(t, db, "live_race_history", len(slowSet))
 }
 
-// TestLive_Helper is the child process of the cross-process proof.
 func TestLive_Helper(t *testing.T) {
 	if os.Getenv("SQLATE_HELPER") != "starter" {
 		t.Skip("helper")
@@ -333,11 +302,6 @@ func assertAppliedOnce(t testing.TB, db *sqlate.DB, history string, want int) {
 	}
 }
 
-// Proof: the cancelled-context run. A migration sleeping past the deadline
-// is cancelled mid-statement: Up returns the cancellation and nothing else
-// (pgx discards the connection, so the rollback and the unlock on it cannot
-// succeed and are not reported), nothing is recorded, no advisory lock
-// survives, and the next run proceeds at once.
 func TestLive_CancelledContext(t *testing.T) {
 	db := live(t)
 	scratch(t, db, "live_cancel_history")
@@ -365,8 +329,6 @@ func TestLive_CancelledContext(t *testing.T) {
 		t.Errorf("%d advisory locks held after the cancelled run", n)
 	}
 
-	// The lock is free: a fresh run over a fast set completes well within
-	// the time the cancelled sleep would still be holding it.
 	fast := migrator(t, db, "live_cancel_history", []migrate.Migration{{Version: 1, Name: "slow", Up: "SELECT 1", Transactional: true}}, migrate.Options{})
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel2()
@@ -375,9 +337,6 @@ func TestLive_CancelledContext(t *testing.T) {
 	}
 }
 
-// The multi-set fixtures: a lower set and an upper set whose table holds a
-// foreign key into the lower set's table, the shape a library's set and the
-// program's set over it take.
 const (
 	lowerHistory = "live_ms_lower_history"
 	upperHistory = "live_ms_upper_history"
@@ -388,10 +347,6 @@ var lowerMigrations = []migrate.Migration{
 	{Version: 2, Name: "column", Up: "ALTER TABLE live_ms_lower ADD COLUMN note text", Down: "ALTER TABLE live_ms_lower DROP COLUMN note", Transactional: true},
 }
 
-// rehearsal is the upgrade rehearsal's fixture: a third migration over the
-// lower set's two, so a set that carries it stands for a later version of
-// the library applied over an installed database. It adds an index, an
-// object that reverts in its own transaction without touching the tables.
 var rehearsal = migrate.Migration{
 	Version: 3, Name: "rehearsal",
 	Up:            "CREATE INDEX live_ms_lower_rehearsal ON live_ms_lower (name)",
@@ -412,10 +367,8 @@ var upperSet = migrate.Set{Name: "upper", Table: upperHistory, Migrations: []mig
 	{Version: 2, Name: "index", Up: "CREATE INDEX live_ms_upper_lower_ix ON live_ms_upper (lower_id)", Down: "DROP INDEX live_ms_upper_lower_ix", Transactional: true},
 }}
 
-// multiset returns the two sets in canonical order, lower first.
 func multiset(rehearsed bool) []migrate.Set { return []migrate.Set{lowerSet(rehearsed), upperSet} }
 
-// scratchMultiset drops every object the multi-set proofs create, now and at cleanup.
 func scratchMultiset(t testing.TB, db *sqlate.DB) {
 	t.Helper()
 	scratch(t, db, upperHistory, "live_ms_upper")
@@ -424,7 +377,6 @@ func scratchMultiset(t testing.TB, db *sqlate.DB) {
 	scratch(t, db, "live_probe_history")
 }
 
-// count returns a one-row integer query's value.
 func count(t testing.TB, db *sqlate.DB, q string, args ...any) int {
 	t.Helper()
 	rows, err := db.QueryContext(context.Background(), q, args...)
@@ -439,7 +391,6 @@ func count(t testing.TB, db *sqlate.DB, q string, args ...any) int {
 	return n
 }
 
-// text returns a one-row text query's value.
 func text(t testing.TB, db *sqlate.DB, q string, args ...any) string {
 	t.Helper()
 	rows, err := db.QueryContext(context.Background(), q, args...)
@@ -454,8 +405,6 @@ func text(t testing.TB, db *sqlate.DB, q string, args ...any) string {
 	return s
 }
 
-// relationExists reports whether name resolves to a relation on the search
-// path. to_regclass yields NULL for a missing relation, which matches no oid.
 func relationExists(t testing.TB, db *sqlate.DB, name string) bool {
 	t.Helper()
 	return count(t, db, "SELECT COUNT(*) FROM pg_class WHERE oid = to_regclass($1)", name) == 1
@@ -470,8 +419,6 @@ func assertRelations(t testing.TB, db *sqlate.DB, want bool, names ...string) {
 	}
 }
 
-// assertClean checks Status reports every set at the given version, with
-// nothing pending and nothing dirty.
 func assertClean(t testing.TB, m *migrate.Migrator, versions ...int) {
 	t.Helper()
 	sets, err := m.Status(context.Background())
@@ -488,9 +435,6 @@ func assertClean(t testing.TB, m *migrate.Migrator, versions ...int) {
 	}
 }
 
-// assertReverted checks Status reports every set fully reverted: version 0,
-// all of its migrations pending (the set's count, given per set in declared
-// order), and clean.
 func assertReverted(t testing.TB, m *migrate.Migrator, migrations ...int) {
 	t.Helper()
 	sets, err := m.Status(context.Background())
@@ -507,7 +451,6 @@ func assertReverted(t testing.TB, m *migrate.Migrator, migrations ...int) {
 	}
 }
 
-// seedRows writes a row in each table, the upper one referencing the lower one.
 func seedRows(t testing.TB, db *sqlate.DB) {
 	t.Helper()
 	ctx := context.Background()
@@ -521,8 +464,6 @@ func seedRows(t testing.TB, db *sqlate.DB) {
 	}
 }
 
-// assertDependentObjects checks err is a SetError naming set over SQLSTATE
-// 2BP01, classified as sqlate.ErrDependentObjects.
 func assertDependentObjects(t testing.TB, what string, err error, set string) {
 	t.Helper()
 	var se *migrate.SetError
@@ -534,10 +475,6 @@ func assertDependentObjects(t testing.TB, what string, err error, set string) {
 	}
 }
 
-// Proof: fresh replay. Up on an empty database applies both sets and Status
-// reports them clean; Reset leaves neither the sets' objects nor their
-// history tables; Up again replays every set from zero, so a row written
-// between the runs does not survive.
 func TestLive_MultisetFreshReplay(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -582,11 +519,6 @@ func TestLive_MultisetFreshReplay(t *testing.T) {
 	}
 }
 
-// Proof: the upgrade rehearsal. A database installed at lower version 2
-// holds rows; a migrator over the set with the rehearsal as version 3, on a
-// second pool as a restarted process would open, applies only the fixture;
-// the rows and the earlier history rows survive untouched; and the older
-// binary's view of the newer history is ErrUnknownVersion.
 func TestLive_MultisetUpgradeAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -603,7 +535,6 @@ func TestLive_MultisetUpgradeAfterRestart(t *testing.T) {
 	rowsBefore := count(t, db, "SELECT (SELECT COUNT(*) FROM live_ms_lower) + (SELECT COUNT(*) FROM live_ms_upper)")
 	appliedAt := text(t, db, "SELECT applied_at::text FROM "+lowerHistory+" WHERE version = 1")
 
-	// The restart: a second pool over the same database.
 	restarted := live(t)
 	upgraded := migratorOver(t, restarted, multiset(true), migrate.Options{})
 	status, err := upgraded.Status(ctx)
@@ -623,34 +554,17 @@ func TestLive_MultisetUpgradeAfterRestart(t *testing.T) {
 	if n := count(t, restarted, "SELECT COUNT(*) FROM "+lowerHistory); n != 3 {
 		t.Errorf("lower history holds %d rows after the upgrade, want 3", n)
 	}
-	// Only the fixture was applied: row 1 keeps the applied_at of the install.
 	if got := text(t, restarted, "SELECT applied_at::text FROM "+lowerHistory+" WHERE version = 1"); got != appliedAt {
 		t.Errorf("version 1 applied_at = %s after the upgrade, was %s: the upgrade re-applied it", got, appliedAt)
 	}
 	if rowsAfter := count(t, restarted, "SELECT (SELECT COUNT(*) FROM live_ms_lower) + (SELECT COUNT(*) FROM live_ms_upper)"); rowsAfter != rowsBefore {
 		t.Errorf("%d rows after the upgrade, %d before", rowsAfter, rowsBefore)
 	}
-	// The older binary, over the two-migration set, sees a history row it does not carry.
 	if err := installed.Verify(ctx); !errors.Is(err, migrate.ErrUnknownVersion) {
 		t.Errorf("the installed binary's Verify over the upgraded history = %v, want ErrUnknownVersion", err)
 	}
 }
 
-// Proof: reset order across foreign keys. With a row in live_ms_upper
-// referencing live_ms_lower, Reset succeeds because the upper set reverts
-// first. A migrator holding both sets refuses to revert the lower one while
-// the upper has applied migrations, before the engine is touched
-// (ErrAboveApplied). A migrator declared in the wrong order, and one holding
-// the lower set alone, reach the engine and are refused there: a SetError
-// naming the lower set over SQLSTATE 2BP01, classified as
-// sqlate.ErrDependentObjects.
-//
-// Finding: the refusal stops the set at the migration that fails, and the
-// migrations above it are already reverted. The lower set runs with the
-// rehearsal as version 3: the wrong-order reset drops the index (3) and the
-// column (2) in their own transactions and then fails at version 1's DROP
-// TABLE, so the lower head is 1 afterwards. The history stays consistent
-// with the schema, and the right order succeeds after.
 func TestLive_MultisetResetOrderAcrossForeignKeys(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -703,14 +617,8 @@ func TestLive_MultisetResetOrderAcrossForeignKeys(t *testing.T) {
 	assertRelations(t, db, false, objects...)
 }
 
-// gateName is the advisory lock the test holds so a starter's first
-// migration blocks inside its run, holding the migrator's lock, until the
-// test has seen the second starter wait.
 const gateName = "live.gate"
 
-// gateSet is a set whose one migration creates a table and then waits on the
-// gate inside its transaction. The two statements run as one text: migrate
-// hands a zero-argument Exec to pgx, which runs it over the simple protocol.
 var gateSet = migrate.Set{
 	Name:  "gate",
 	Table: "live_gate_history",
@@ -723,9 +631,6 @@ var gateSet = migrate.Set{
 	}},
 }
 
-// holdGate takes the gate on a pinned connection and returns the release,
-// which cleanup also runs, so a failed wait does not leave the starters
-// blocked behind the gate while the pool's Close waits for them.
 func holdGate(t *testing.T, db *sqlate.DB) func() {
 	t.Helper()
 	ctx := context.Background()
@@ -749,8 +654,6 @@ func holdGate(t *testing.T, db *sqlate.DB) func() {
 	return release
 }
 
-// waitForWaiters polls pg_stat_activity, scoped to the test's database,
-// until n backends wait on a lock.
 func waitForWaiters(t *testing.T, db *sqlate.DB, n int) {
 	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
@@ -766,15 +669,6 @@ func waitForWaiters(t *testing.T, db *sqlate.DB, n int) {
 	}
 }
 
-// waitForQueue polls pg_stat_activity, scoped to the test's database, until
-// one starter waits on the gate inside its run, holding the migrator's lock,
-// and another waits for that lock: refused by a try-lock it polls, or, on a
-// dialect migrate cannot poll, blocked in the lock statement. A polling
-// waiter is idle between attempts, and pg_stat_activity keeps an idle
-// backend's last statement, so only a try-lock issued after the wait began
-// counts: the waiter retries within a second, while a backend left idle
-// after an earlier try-lock never does. The gate holder's own lock
-// statement is idle, so it never counts as the waiter.
 func waitForQueue(t *testing.T, db *sqlate.DB) {
 	t.Helper()
 	const (
@@ -793,8 +687,6 @@ func waitForQueue(t *testing.T, db *sqlate.DB) {
 	}
 }
 
-// startBoth releases two starters through a barrier and runs each one's Up,
-// returning the two errors once both have ended.
 func startBoth(ctx context.Context, a, b *migrate.Migrator) (errA, errB error) {
 	var start, done sync.WaitGroup
 	start.Add(1)
@@ -811,17 +703,6 @@ func startBoth(ctx context.Context, a, b *migrate.Migrator) (errA, errB error) {
 	return errA, errB
 }
 
-// Proof: two starters serialize under one lock. Two migrators over the gate
-// set and both real sets start Up together on one empty database. The first
-// to take the lock blocks on the gate inside its first migration; the test
-// sees the second waiting for the migrator's lock before it releases the
-// gate. Both succeed, every migration is applied once, and each history
-// holds one row per migration. The control runs the same race Unlocked: the
-// second starter then waits on the first's transaction instead and fails
-// with a duplicate object, which is what the lock prevents. Postgres reports
-// it as a unique violation on the catalog's own index (23505) when the
-// second CREATE TABLE waited on the first's transaction, or as 42P07 when the
-// first had committed before the check.
 func TestLive_MultisetStartersSerialize(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -851,8 +732,6 @@ func TestLive_MultisetStartersSerialize(t *testing.T) {
 		}
 	}
 
-	// Revert every set with the history tables left in place, so the
-	// control's two preflights find them and do not race on creating them.
 	layers := a.Layers()
 	for _, layer := range slices.Backward(layers) {
 		if err := layer.Down(ctx, len(layer.Migrations())); err != nil {
@@ -863,7 +742,6 @@ func TestLive_MultisetStartersSerialize(t *testing.T) {
 	assertRelations(t, db, true, "live_gate_history", lowerHistory, upperHistory)
 	assertRelations(t, db, false, "live_gate", "live_ms_lower", "live_ms_upper")
 
-	// The control: the same race without the lock.
 	release = holdGate(t, db)
 	a = migratorOver(t, db, sets, migrate.Options{Unlocked: true})
 	b = migratorOver(t, db, sets, migrate.Options{Unlocked: true})
@@ -883,7 +761,6 @@ func TestLive_MultisetStartersSerialize(t *testing.T) {
 		t.Errorf("the unlocked loser failed with %v, want a duplicate object (SQLSTATE 42P07 or 23505)", failed)
 	}
 	t.Logf("the unlocked loser failed with SQLSTATE %s: %v", sqlState(failed), failed)
-	// The winner still applied everything once.
 	for table, want := range histories {
 		if n := count(t, db, "SELECT COUNT(*) FROM "+table); n != want {
 			t.Errorf("after the control %s holds %d rows, want %d", table, n, want)
@@ -891,15 +768,6 @@ func TestLive_MultisetStartersSerialize(t *testing.T) {
 	}
 }
 
-// Proof: dirty refusal on the engine, across sets. A non-transactional
-// migration whose statement fails leaves its history row dirty. A migrator
-// holding the lower set below the dirty set refuses every mutating verb,
-// its own and its layers', with a SetError naming the dirty set and the
-// version, classified as ErrDirty, before the lower set runs. Status and the
-// probe layer's Verify report it; the migrator's Verify reports the first
-// fault in declared order, which is the lower set's pending migrations. Force to version 0, the operator's statement that
-// nothing of the set is applied, clears the mark, and Reset then leaves no
-// history table.
 func TestLive_MultisetDirtyRefusal(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -937,9 +805,6 @@ func TestLive_MultisetDirtyRefusal(t *testing.T) {
 			t.Errorf("%s over a dirty set = %v, want ErrDirty naming set probe at version 1", name, err)
 		}
 	}
-	// Verify reports the first fault in declared order, so the lower set,
-	// never applied, faults as pending before the probe is reached; the
-	// probe's own layer reports the dirty row.
 	var se *migrate.SetError
 	if err := m.Verify(ctx); !errors.Is(err, migrate.ErrPending) || !errors.As(err, &se) || se.Set != "lower" {
 		t.Errorf("Verify over a pending lower set and a dirty probe = %v, want ErrPending naming set lower first", err)
@@ -948,7 +813,6 @@ func TestLive_MultisetDirtyRefusal(t *testing.T) {
 	if err := probeLayer.Verify(ctx); !errors.Is(err, migrate.ErrDirty) || !errors.As(err, &se) || se.Set != "probe" || !errors.As(err, &de) || de.Version != 1 {
 		t.Errorf("the probe layer's Verify = %v, want ErrDirty naming set probe at version 1", err)
 	}
-	// Nothing of the lower set ran; preflight created its history table and left it empty.
 	assertRelations(t, db, false, "live_ms_lower")
 	status, err := m.Status(ctx)
 	if err != nil {
@@ -961,8 +825,8 @@ func TestLive_MultisetDirtyRefusal(t *testing.T) {
 		t.Errorf("probe status = %+v, want version 1 dirty", p)
 	}
 
-	if err := m.Force(ctx, 0); err != nil { // probe is the top set
-		t.Fatalf("Force: %v", err)
+	if err := m.Force(ctx, 0); err != nil {
+		t.Fatalf("Force on probe, the top set: %v", err)
 	}
 	if status, _ := m.Status(ctx); status[1].Dirty || status[1].Version != 0 {
 		t.Errorf("probe status after Force = %+v, want version 0 clean", status[1])
@@ -971,7 +835,6 @@ func TestLive_MultisetDirtyRefusal(t *testing.T) {
 		t.Fatalf("Reset after Force: %v", err)
 	}
 	assertRelations(t, db, false, "live_probe_history", lowerHistory)
-	// Up applies the lower set and dirties the probe again.
 	err = m.Up(ctx)
 	if !errors.As(err, &se) || se.Set != "probe" || !errors.As(err, &de) || de.Version != 1 {
 		t.Errorf("Up after the reset = %v, want the probe's DirtyError again", err)
@@ -979,12 +842,6 @@ func TestLive_MultisetDirtyRefusal(t *testing.T) {
 	assertRelations(t, db, true, "live_ms_lower")
 }
 
-// Proof: the history existence check is schema-qualified. A table of the
-// history's name in another schema satisfies migrate.StandardCatalog's
-// unqualified form and not the dialect's; the migrator's reads over the pool
-// (Version, Status, Verify) therefore report an absent history rather than
-// reading a table the current schema does not hold, and Up creates the real
-// one in the current schema, leaving the decoy untouched.
 func TestLive_HistoryExistsIsSchemaQualified(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -999,7 +856,6 @@ func TestLive_HistoryExistsIsSchemaQualified(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// The decoy is visible to the unqualified form and invisible to the qualified one.
 	if n := count(t, db, migrate.StandardCatalog{}.HistoryExists("$1"), history); n != 1 {
 		t.Fatalf("the standard existence check counts %d, want 1: the decoy is not visible and this proof proves nothing", n)
 	}
@@ -1033,13 +889,6 @@ func TestLive_HistoryExistsIsSchemaQualified(t *testing.T) {
 	}
 }
 
-// Proof: a history table created before v0.5.0, its applied_at a timestamp
-// without time zone, is altered in place on the next Up. The column becomes
-// timestamp with time zone, each stored wall clock is read as UTC whatever
-// the session's zone (Asia/Tokyo here, nine hours from UTC, so a conversion
-// through the session's zone would move the instant), the default still
-// stamps new rows, and a second Up finds the table current and leaves it
-// alone.
 func TestLive_HistoryUpgradeKeepsEachInstant(t *testing.T) {
 	ctx := context.Background()
 	db := liveIn(t, "Asia/Tokyo")
@@ -1088,8 +937,6 @@ func TestLive_HistoryUpgradeKeepsEachInstant(t *testing.T) {
 	}
 }
 
-// Proof: a history the dialect creates is timestamp with time zone from
-// the start, and the outdated check does not report it.
 func TestLive_HistoryIsCreatedTimeZoneAware(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -1107,16 +954,6 @@ func TestLive_HistoryIsCreatedTimeZoneAware(t *testing.T) {
 	}
 }
 
-// Proof: a concurrent index build does not deadlock the waiter. The first
-// starter to take the lock creates a table and blocks on the gate inside
-// that migration; the test sees the second waiting for the migrator's lock,
-// then releases the gate, and the holder runs CREATE INDEX CONCURRENTLY,
-// which waits for every transaction open when it starts. A waiter blocked in
-// pg_advisory_lock holds its statement open, so the build and the waiter
-// wait on each other and postgres aborts one with deadlock_detected (40P01);
-// migrate polls pg_try_advisory_lock instead, leaving nothing open while it
-// waits. Both starters succeed, each migration is applied once, and the
-// index exists and is valid.
 func TestLive_ConcurrentIndexBuildDoesNotDeadlockTheWaiter(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)

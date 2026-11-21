@@ -6,30 +6,14 @@ import (
 	"strings"
 )
 
-// guardInclude matches an include of one of the guard protocol's two
-// patterns under any namespace, the way the loader parses an include; the
-// library publishes them, and an engine overlay or another source may
-// respell them, so the name and not the namespace identifies them.
 var guardInclude = regexp.MustCompile(`\{\{>\s*[a-z_][a-z0-9_]*\.(guard_where|guard_set)\s*\}\}`)
 
-// setClause matches the SET keyword, which marks a statement as one that
-// assigns columns: the guarded command, and not the guard's check or a
-// guarded delete, neither of which has a version to advance.
 var setClause = regexp.MustCompile(`(?i)\bSET\b`)
 
-// lintBody checks the body's lines: the reserved delimiter in a comment or
-// a literal, the engine's native forms in a standard-tier file, and the
-// guard protocol's two includes appearing together. A form is matched
-// against the line's code only, string literals and the comment tail
-// stripped first, because whether text is data or syntax is a property of
-// SQL, not of the engine, and a per-line expression cannot track quote
-// state. The guard check spans the body, since the includes sit on
-// different lines of a command, and reports on the include that is
-// present.
 func (l *linter) lintBody(p, text string, end int, delimiter, forms, guard bool) {
 	line := 1 + strings.Count(text[:end], "\n")
 	inBlock := false
-	var whereLine, setLine int // the first guard_where and guard_set includes, 0 for none
+	var firstGuardWhereLine, firstGuardSetLine int
 	hasSet := false
 	for ln := range strings.SplitSeq(text[end:], "\n") {
 		if delimiter {
@@ -52,30 +36,24 @@ func (l *linter) lintBody(p, text string, end int, delimiter, forms, guard bool)
 		if guard {
 			for _, m := range guardInclude.FindAllStringSubmatch(code, -1) {
 				switch {
-				case m[1] == "guard_where" && whereLine == 0:
-					whereLine = line
-				case m[1] == "guard_set" && setLine == 0:
-					setLine = line
+				case m[1] == "guard_where" && firstGuardWhereLine == 0:
+					firstGuardWhereLine = line
+				case m[1] == "guard_set" && firstGuardSetLine == 0:
+					firstGuardSetLine = line
 				}
 			}
 			hasSet = hasSet || setClause.MatchString(code)
 		}
 		line++
 	}
-	// A guarded command advances the version it checks and checks the
-	// version it advances; the guard's check and a guarded delete include
-	// the predicate alone, and have no SET list.
-	if whereLine > 0 && setLine == 0 && hasSet {
-		l.report(p, whereLine, "includes guard_where in a SET statement without guard_set; a guarded command advances the version it checks")
+	if firstGuardWhereLine > 0 && firstGuardSetLine == 0 && hasSet {
+		l.report(p, firstGuardWhereLine, "includes guard_where in a SET statement without guard_set; a guarded command advances the version it checks")
 	}
-	if setLine > 0 && whereLine == 0 {
-		l.report(p, setLine, "includes guard_set without guard_where; a guarded command checks the version it advances")
+	if firstGuardSetLine > 0 && firstGuardWhereLine == 0 {
+		l.report(p, firstGuardSetLine, "includes guard_set without guard_where; a guarded command checks the version it advances")
 	}
 }
 
-// inLiteral reports a {{ inside a single-quoted literal on one line,
-// tracking the quote state so a closed literal followed by a parameter is
-// not one.
 func inLiteral(line string) bool {
 	open := false
 	for i := 0; i < len(line); i++ {
@@ -89,12 +67,6 @@ func inLiteral(line string) bool {
 	return false
 }
 
-// codeOnly returns the line with every single-quoted literal and
-// double-quoted identifier emptied, the line-comment tail removed, and
-// block-comment text removed (inBlock records an open block comment
-// across lines), so a form matches syntax and never data, a name, or
-// prose. A quote doubled inside a literal ('it”s') closes and reopens,
-// which empties it all the same.
 func codeOnly(line string, inBlock bool) (string, bool) {
 	var b strings.Builder
 	var quote byte

@@ -1,8 +1,5 @@
 //go:build integration
 
-// The live proof of pgtest runs against the PostgreSQL named by SQLATE_DSN
-// (the compose stack: `mise run db:up`, then `mise run integration`) and
-// skips when it is unset, the module's live-test convention.
 package pgtest_test
 
 import (
@@ -20,9 +17,6 @@ import (
 
 const env = "SQLATE_DSN"
 
-// Proof: Migrated creates <prefix>_test_<hex>, applies the set to it, and
-// the database is dropped when the test that made it ends, even with a
-// session of another pool still open on it.
 func TestLive_MigratedDroppedWithSessionOpen(t *testing.T) {
 	admin := os.Getenv(env)
 	if admin == "" {
@@ -65,8 +59,6 @@ func TestLive_MigratedDroppedWithSessionOpen(t *testing.T) {
 			t.Fatalf("the migrated table is not usable: %v", err)
 		}
 
-		// A second pool, outside pgtest's cleanup, holds a session open on
-		// the database past the end of the subtest.
 		held, err = sql.Open("pgx", d.DSN)
 		if err != nil {
 			t.Fatal(err)
@@ -85,13 +77,11 @@ func TestLive_MigratedDroppedWithSessionOpen(t *testing.T) {
 	if exists(t, admin, name) {
 		t.Errorf("database %s still exists after its test's cleanup", name)
 	}
-	// The drop ended the held session rather than waiting for it.
 	if err := conn.PingContext(ctx); err == nil {
 		t.Error("the held session survived the drop")
 	}
 }
 
-// exists reports whether the server admin connects to has the database.
 func exists(t testing.TB, admin, name string) bool {
 	t.Helper()
 	db, err := sql.Open("pgx", admin)

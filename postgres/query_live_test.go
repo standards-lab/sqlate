@@ -1,9 +1,5 @@
 //go:build integration
 
-// Live proofs for the projection and the guard against the compose
-// PostgreSQL: the engine parses request values through the contract's
-// declared types, a value it cannot read is an InvalidValueError, and the
-// guard's three outcomes hold against real rows. `mise run integration`.
 package postgres_test
 
 import (
@@ -42,7 +38,6 @@ func scanRow(rows query.Row) (row, error) {
 	return r, err
 }
 
-// liveQ creates the proofs' table with three rows and drops it at cleanup.
 func liveQ(t testing.TB, db *sqlate.DB) {
 	t.Helper()
 	ctx := context.Background()
@@ -56,7 +51,6 @@ func liveQ(t testing.TB, db *sqlate.DB) {
 	}
 }
 
-// liveStatements compiles the proofs' files over the engine's patterns.
 func liveStatements(db *sqlate.DB) *query.Statements {
 	return query.MustCatalog(postgres.Patterns()).MustCompile(liveFiles, "sql", db.Dialect())
 }
@@ -71,8 +65,6 @@ func TestLive_ProjectionAndGuard(t *testing.T) {
 		t.Fatalf("Verify: %v", err)
 	}
 
-	// Request values arrive as text and the engine parses them by the
-	// contract's types: "2" as integer, an RFC 3339 date as timestamp.
 	c, err := view.List(ctx, db, query.Directives{
 		Sort:    []query.Sort{{Field: "n", Descending: true}},
 		Filters: []query.Filter{{Field: "n", Op: query.OpGe, Value: "2"}, {Field: "at", Op: query.OpIsNotNull}},
@@ -83,14 +75,10 @@ func TestLive_ProjectionAndGuard(t *testing.T) {
 	c, err = view.List(ctx, db, query.Directives{
 		Filters: []query.Filter{{Field: "at", Op: query.OpLt, Value: "2026-02-01T00:00:00Z"}, {Field: "name", Op: query.OpIn, Value: []any{"a", "b", "c"}}},
 	}, query.Page{Number: 2, Size: 2})
-	// A page past the end has no row to carry the count, so it reports
-	// none rather than a count its statement never read.
 	if err != nil || c.Total != query.NoTotal || len(c.Items) != 0 || c.More {
 		t.Fatalf("page past the end: List = %+v, %v; want no items and NoTotal", c, err)
 	}
 
-	// A value the engine cannot read as the field's type is the request's
-	// fault, classified through the dialect's class-22 mapping.
 	for _, f := range []query.Filter{
 		{Field: "id", Op: query.OpEq, Value: "not-a-uuid"},
 		{Field: "n", Op: query.OpGt, Value: "many"},
@@ -139,9 +127,6 @@ type pageRow struct {
 	N       int64
 }
 
-// recorder is the session the cursor proof reads through: *sqlate.DB with
-// every query's text kept, so the proof can say which spelling of the keyset
-// predicate the engine ran.
 type recorder struct {
 	*sqlate.DB
 	queries []string
@@ -152,12 +137,6 @@ func (r *recorder) QueryContext(ctx context.Context, q string, args ...any) (*sq
 	return r.DB.QueryContext(ctx, q, args...)
 }
 
-// Proof: cursor paging end to end through the engine's row-value overlay. A
-// walk by cursor over a two-column keyed prefix (text, then the uuid key)
-// yields the rows of the offset read in the same order with no gap or
-// repeat, the total holds on every page, the last page issues no cursor, the
-// descending walk continues with the opposite comparison, and a cursor from
-// another ordering is refused before any SQL.
 func TestLive_CursorPagingThroughTheOverlay(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -210,8 +189,6 @@ func TestLive_CursorPagingThroughTheOverlay(t *testing.T) {
 	if !slices.Equal(walked, whole.Items) {
 		t.Errorf("cursor walk = %v\nwant the offset read %v", walked, whole.Items)
 	}
-	// Each continued page is one statement carrying both the row-value
-	// keyset predicate and the window that counts its total.
 	const rowValue = "(q.grp, q.id) > (CAST($1 AS text), CAST($2 AS uuid))"
 	continued := 0
 	for _, q := range rec.queries {
@@ -223,8 +200,6 @@ func TestLive_CursorPagingThroughTheOverlay(t *testing.T) {
 		t.Errorf("%d queries carried the row-value keyset predicate and the window count, want 2 (pages 2 and 3):\n%s", continued, strings.Join(rec.queries, "\n"))
 	}
 
-	// Descending: the keyed prefix takes the sort's direction and the
-	// comparison flips.
 	desc := []query.Sort{{Field: "grp", Descending: true}}
 	wholeDesc, err := pages.List(ctx, db, query.Directives{Sort: desc}, query.Page{Number: 1, Size: 10})
 	if err != nil {
@@ -264,15 +239,6 @@ func scanVersioned(rows query.Row) (versioned, error) {
 	return v, err
 }
 
-// Proof: the typed guard's three outcomes against real rows, on both forms
-// of the returning command: the engine's RETURNING, and the command then its
-// read under a dialect that hides the capability. The publish command
-// carries a predicate of its own beyond the key and the version (n > 1), so
-// a row at the expected version can still refuse the write: no row is
-// sql.ErrNoRows, another version is ErrVersionMismatch with both versions in
-// its text, and the expected version refused by the command's own predicate
-// is a *RefusedError carrying the row the handle read back. A hit returns
-// the changed row at its new version.
 func TestLive_RowGuardThreeWay(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -291,11 +257,11 @@ func TestLive_RowGuardThreeWay(t *testing.T) {
 			}
 			view := stmts.Statement("view").Project(scanRow)
 			publish := stmts.Statement("publish").Returning(scanVersioned).Guarded("version", func(v versioned) int64 { return v.Version })
-			a, err := view.One(ctx, db, "name", "a") // n = 1: the command's own predicate refuses it
+			refusedByPredicate, err := view.One(ctx, db, "name", "a")
 			if err != nil {
 				t.Fatal(err)
 			}
-			c, err := view.One(ctx, db, "name", "c") // n = 3
+			publishable, err := view.One(ctx, db, "name", "c")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -303,23 +269,23 @@ func TestLive_RowGuardThreeWay(t *testing.T) {
 			if _, err := publish.Run(ctx, db, 1, query.Args{"id": "00000000-0000-0000-0000-000000000000", "name": "x"}); !errors.Is(err, sql.ErrNoRows) {
 				t.Errorf("no row = %v, want sql.ErrNoRows", err)
 			}
-			_, err = publish.Run(ctx, db, 7, query.Args{"id": a.ID, "name": "x"})
+			_, err = publish.Run(ctx, db, 7, query.Args{"id": refusedByPredicate.ID, "name": "x"})
 			if !errors.Is(err, query.ErrVersionMismatch) || !strings.Contains(err.Error(), "expected 7, current 1") {
 				t.Errorf("another version = %v, want ErrVersionMismatch expected 7, current 1", err)
 			}
-			_, err = publish.Run(ctx, db, 1, query.Args{"id": a.ID, "name": "x"})
+			_, err = publish.Run(ctx, db, 1, query.Args{"id": refusedByPredicate.ID, "name": "x"})
 			var refused *query.RefusedError[versioned]
-			if !errors.As(err, &refused) || !errors.Is(err, query.ErrRefused) || refused.Version != 1 || refused.Row.ID != a.ID || refused.Row.Name != "a" || refused.Row.N != 1 || refused.Row.Version != 1 {
+			if !errors.As(err, &refused) || !errors.Is(err, query.ErrRefused) || refused.Version != 1 || refused.Row.ID != refusedByPredicate.ID || refused.Row.Name != "a" || refused.Row.N != 1 || refused.Row.Version != 1 {
 				t.Errorf("refused at the expected version = %v (%+v), want a RefusedError carrying row a at version 1", err, refused)
 			}
-			hit, err := publish.Run(ctx, db, 1, query.Args{"id": c.ID, "name": "C"})
-			if err != nil || hit.ID != c.ID || hit.Name != "C" || hit.Version != 2 {
+			hit, err := publish.Run(ctx, db, 1, query.Args{"id": publishable.ID, "name": "C"})
+			if err != nil || hit.ID != publishable.ID || hit.Name != "C" || hit.Version != 2 {
 				t.Fatalf("hit = %+v, %v, want row c named C at version 2", hit, err)
 			}
-			if got, _ := view.One(ctx, db, "id", c.ID); got.Name != "C" {
+			if got, _ := view.One(ctx, db, "id", publishable.ID); got.Name != "C" {
 				t.Errorf("the hit did not persist: %+v", got)
 			}
-			if got, _ := view.One(ctx, db, "id", a.ID); got.Name != "a" {
+			if got, _ := view.One(ctx, db, "id", refusedByPredicate.ID); got.Name != "a" {
 				t.Errorf("the refused write changed the row: %+v", got)
 			}
 		})
@@ -331,11 +297,6 @@ var probeFiles = fstest.MapFS{
 	"sql/mistyped.sql":   {Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid not null\n--| field: n text\nSELECT id, n FROM live_q")},
 }
 
-// Proof: the field-contract probe. A base whose SQL prepares but whose
-// declared contract names a field it does not output, or declares a type
-// the engine cannot compare its column against, fails Verify at startup:
-// the misspelled field as an undefined column (42703), the mistyped one as
-// an operator the engine does not have (42883).
 func TestLive_TypeProbe(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -358,9 +319,6 @@ func TestLive_TypeProbe(t *testing.T) {
 	}
 }
 
-// Identity is the sub-struct the embedded-scan proof shares between
-// entities. It is exported because the mapper reaches an embedded struct
-// through an exported field only.
 type Identity struct {
 	ID        string
 	CreatedAt sql.NullTime `db:"at"`
@@ -372,10 +330,6 @@ type entity struct {
 	N    int64
 }
 
-// Proof: an untagged embedded struct flattens into the outer type's columns
-// against a real multi-column row: id and at (through its db tag) land in
-// the embedded Identity, name and n in the entity itself, both through the
-// row handle and through the projection.
 func TestLive_EmbeddedStructScan(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -401,13 +355,6 @@ func TestLive_EmbeddedStructScan(t *testing.T) {
 	}
 }
 
-// Proof: the not-null violation's column. The engine names the column and
-// the table on a null in a NOT NULL column and no constraint, so
-// ConstraintError.Column is the consumer's handle to the field; a named
-// constraint, the primary key here, fills Constraint instead. PostgreSQL 18
-// records a NOT NULL as a named constraint in pg_constraint
-// (live_q_name_not_null), and its error report still leaves the constraint
-// name out.
 func TestLive_NotNullNamesTheColumn(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)
@@ -429,7 +376,6 @@ func TestLive_NotNullNamesTheColumn(t *testing.T) {
 	}
 	t.Logf("not-null: %v", err)
 
-	// The contrast: a named constraint fills Constraint.
 	_, err = db.ExecContext(ctx, "INSERT INTO live_q (id, name, n) SELECT id, 'dup', 9 FROM live_q LIMIT 1")
 	if !errors.As(err, &ce) || !errors.Is(err, sqlate.ErrUniqueViolation) || ce.Constraint != "live_q_pkey" {
 		t.Errorf("duplicate key = %v, want a ConstraintError naming live_q_pkey", err)
@@ -437,13 +383,6 @@ func TestLive_NotNullNamesTheColumn(t *testing.T) {
 	t.Logf("unique: %v", err)
 }
 
-// Proof: a timestamp with time zone read through Scanner and Scalar is in
-// time.UTC while time.Local is not (Europe/London, from TestMain). pgx
-// delivers the column in time.Local: in summer London's wall clock is an
-// hour ahead and the driver's value prints as BST, while in winter it prints
-// as GMT and only a comparison of whole values tells it from UTC. The proof
-// first checks that the driver's own value is not in UTC, so it cannot pass
-// vacuously.
 func TestLive_ScanReturnsTimesInUTC(t *testing.T) {
 	ctx := context.Background()
 	db := live(t)

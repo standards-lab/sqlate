@@ -1,10 +1,5 @@
 //go:build integration
 
-// The live-engine acceptance proofs run against the PostgreSQL named by
-// SQLATE_DSN (the compose stack: `mise run db:up`, then
-// `mise run integration`) and skip when it is unset. They are not
-// part of the unit tier: each is a proof the engine alone can give,
-// demonstrated in the session that establishes the claim.
 package postgres_test
 
 import (
@@ -21,15 +16,11 @@ import (
 	"github.com/standards-lab/sqlate/postgres"
 )
 
-// live opens a session over the live database, or skips.
 func live(t testing.TB) *sqlate.DB {
 	t.Helper()
 	return liveIn(t, "")
 }
 
-// liveIn is live with every session's TimeZone set to zone, or the
-// server's default when zone is empty: a runtime parameter pgx sends at
-// connect.
 func liveIn(t testing.TB, zone string) *sqlate.DB {
 	t.Helper()
 	dsn := os.Getenv("SQLATE_DSN")
@@ -54,7 +45,6 @@ func liveIn(t testing.TB, zone string) *sqlate.DB {
 	return sqlate.Wrap(pool, postgres.Dialect{})
 }
 
-// sqlState reads the SQLSTATE of a driver error, or "".
 func sqlState(err error) string {
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok {
 		return pgErr.Code
@@ -62,8 +52,6 @@ func sqlState(err error) string {
 	return ""
 }
 
-// Proof: the server-version statement runs on the engine and reads its
-// version.
 func TestLive_ServerVersion(t *testing.T) {
 	db := live(t)
 	rows, err := db.QueryContext(context.Background(), postgres.Dialect{}.ServerVersion())

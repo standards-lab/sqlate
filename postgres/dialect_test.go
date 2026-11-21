@@ -39,8 +39,6 @@ func TestDialect_ReturningDeclinesAnUnknownVerb(t *testing.T) {
 	}
 }
 
-// A body ending in a line comment keeps the clause: it starts on a line of
-// its own, outside the comment.
 func TestDialect_ReturningAfterATrailingLineComment(t *testing.T) {
 	body := "UPDATE item SET status = 'x' WHERE id = {{id}} -- the key"
 	got, ok := (postgres.Dialect{}).Returning(query.Update, body, []string{"id"})
@@ -54,8 +52,6 @@ var returningFiles = fstest.MapFS{
 	"sql/create_item.sql": {Data: []byte("--| tier: standard\n--| returning: item_by_id\nINSERT INTO item (id, a, b) VALUES ({{id}}, {{a}}, {{b}})")},
 }
 
-// Compiled through query, the command's single-statement form carries the
-// read's bare columns and the engine's placeholders.
 func TestDialect_ReturningCompilesThroughQuery(t *testing.T) {
 	stmts := query.MustCatalog(postgres.Patterns()).MustCompile(returningFiles, "sql", postgres.Dialect{})
 	st := stmts.Statement("create_item")

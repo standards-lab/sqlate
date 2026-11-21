@@ -595,6 +595,8 @@ package rather than the command.
 | anything else | the error unchanged, `sql.ErrNoRows` included |
 
 Each `ConstraintError` carries the constraint, table, and column names the server reports.
+PostgreSQL 19 records a `NOT NULL` as a named constraint in `pg_constraint`, yet its not-null
+violation still reports no constraint name, so `Column` remains that error's handle.
 
 `Lock` and `Unlock` implement `sqlate.Locker` over `pg_advisory_lock` and `pg_advisory_unlock`
 on a pinned connection. The name enters the engine's key space through `hashtext`, so locks are
@@ -634,6 +636,9 @@ agrees with its total when writes commit between the statement and the caller, w
 read as its own statement does not; that it agrees under concurrent writers; and that the
 counted page scans its base once under one window while the uncounted page keeps the key's
 index order. `mise run acceptance` runs them against a compose PostgreSQL and tears it down.
+The compose PostgreSQL reports healthy once it accepts TCP connections to the app database. The
+probe goes over TCP, not the socket, because the first start's initialization runs a temporary
+server on the socket alone, which would report ready before the real server starts.
 
 ### pgtest: a test's throwaway database
 
@@ -647,5 +652,6 @@ under the PostgreSQL dialect, and `Database.Session()` wraps the pool under `Dia
 
 When the test ends the pool is closed and the database dropped `WITH (FORCE)`, so a session
 still open on it, such as a started process's pool, is ended rather than holding the drop back;
-the drop is retried while the server reports a session still closing. The package imports
+the drop is retried while the server reports a session still closing. A create that fails is
+followed by a drop too, since one that timed out can still finish on the server. The package imports
 `testing`, so only test files import it.

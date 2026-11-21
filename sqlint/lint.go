@@ -28,7 +28,6 @@ func (f Finding) String() string {
 	return fmt.Sprintf("%s: %s", f.Path, f.Message)
 }
 
-// linter is one run over one tree.
 type linter struct {
 	fsys     fs.FS
 	cfg      *Config
@@ -38,8 +37,6 @@ type linter struct {
 	findings []Finding
 }
 
-// form is one native form the engine declared: the name the finding
-// reports and the expression that recognizes it.
 type form struct {
 	name string
 	re   *regexp.Regexp
@@ -85,9 +82,6 @@ func (l *linter) report(p string, line int, msg string) {
 	l.findings = append(l.findings, Finding{Path: p, Line: line, Message: msg})
 }
 
-// locate turns a source or engine value into a filesystem and a base
-// path: a module path through the resolver, anything else a directory of
-// the tree.
 func (l *linter) locate(value string) (fs.FS, string, error) {
 	if isModulePath(value) {
 		fsys, err := l.resolve(value)
@@ -99,16 +93,6 @@ func (l *linter) locate(value string) (fs.FS, string, error) {
 	return l.fsys, value, nil
 }
 
-// resolveSources builds the catalog the statement directories compile
-// against: each namespace's source, and for the library its engine
-// overlay. A producer, a module or a directory that contains its own
-// configuration, names its pattern directory in its export; a bare
-// directory is the pattern files themselves. The library's own namespace,
-// query.Namespace, always resolves to the patterns the query package
-// embeds: the path of a sources.sql entry is not read, and only its
-// overlay, when declared, is resolved as for any other source. A source
-// that does not resolve is a finding against the configuration; the
-// catalog is built from the rest.
 func (l *linter) resolveSources() {
 	var sources []query.Source
 	names := make([]string, 0, len(l.cfg.Sources))
@@ -153,9 +137,6 @@ func (l *linter) resolveSources() {
 	l.catalog = catalog
 }
 
-// source returns the base source of namespace ns, the library's embedded
-// patterns for query.Namespace and otherwise the patterns value names, and
-// false after reporting a value that does not resolve.
 func (l *linter) source(ns, value string) (query.Source, bool) {
 	if ns == query.Namespace {
 		return query.Patterns(), true
@@ -181,10 +162,6 @@ func (l *linter) source(ns, value string) (query.Source, bool) {
 	return query.Publish(ns, fsys, dir), true
 }
 
-// resolveEngine reads the native forms the configured engine declares and
-// compiles each; an engine is always a producer, since a consumer never
-// defines one. A malformed expression is a finding against the
-// configuration, before any file is read.
 func (l *linter) resolveEngine() {
 	if l.cfg.Engine == "" {
 		return
