@@ -820,6 +820,40 @@ in the repository declares pgvector. The listing is a test: the root check resol
 through the committed `go.work`, so the check fails when sqlint refuses the module's export or
 a form does not compile.
 
+### A space per dimension on one column
+
+An application that stores embeddings of several models, each with its own dimension, keeps them
+in one untyped `vector` column and a `space` column naming the model. Each space gets a partial
+HNSW index over the column cast to its dimension, with the operator class of its metric:
+
+```sql
+CREATE TABLE item (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    space integer NOT NULL,
+    embedding vector NOT NULL
+);
+
+CREATE INDEX item_space1_l2 ON item
+    USING hnsw ((embedding::vector(3)) vector_l2_ops) WHERE space = 1;
+CREATE INDEX item_space2_cosine ON item
+    USING hnsw ((embedding::vector(4)) vector_cosine_ops) WHERE space = 2;
+```
+
+A query uses a space's index only when it repeats both the cast and the space predicate, ordering
+by the cast column with the metric's operator under a `LIMIT`:
+
+```sql
+SELECT id FROM item WHERE space = 1 ORDER BY embedding::vector(3) <-> $1 LIMIT 5;
+```
+
+Without the cast, `ORDER BY embedding <-> $1` does not match the index's expression, and the
+engine scans the space's rows instead. The cast also checks the dimension: an insert into an
+indexed space computes the index's expression, so a vector of the wrong dimension fails with
+`expected 3 dimensions` and the row is not written. A space with no index accepts any dimension.
+
+The operator and the operator class come from the module's metric table, so a program builds
+both statements from a `Metric` rather than spelling them.
+
 ### An image with pgvector
 
 The official PostgreSQL image does not ship pgvector, so sqlate's compose image builds it from
@@ -872,3 +906,16 @@ semver tag, read from the repository's tags since pgvector publishes no GitHub r
 trailing `ARG` is reported as `compose/postgres/Dockerfile: pgvector/pgvector 0.8.6 -> 0.8.7`
 and fails currency; a lookup that fails fails it too. Other `ARG`s are not read. `mise run
 upgrade` does not move the `ARG`; it is raised by hand.
+
+### The integration tier
+
+The module's integration tier, behind the `integration` build tag, runs against the compose
+image through `SQLATE_DSN` and `pgtest`, with a throwaway database per test. It proves that a
+declaration of `pgvector.Extension` in `migrate.Options.Extensions` installs `vector` at the
+image's default version, that `Extensions` then reports it current and `Verify` passes, and that
+a removal is refused while a `vector` column depends on the extension and succeeds once a set
+migration drops the column. For the per-space recipe, with one space per metric of the table, it
+proves that a query repeating the cast and the space predicate plans an index scan on its
+space's index, that the same query without the cast uses none of them, and that an insert of the
+wrong dimension into an indexed space fails. `mise run integration` runs this tier with the
+`postgres` module's, and `mise run acceptance` starts the stack, runs both, and drops it.

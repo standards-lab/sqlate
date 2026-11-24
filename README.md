@@ -118,7 +118,7 @@ Three conventions the library keeps are stricter than a reader might expect:
 - `postgres/pgvector` (sub-module) names the pgvector extension: its catalog name, `vector`, and
   the metric table of the `vector` type, each metric's distance operator and index operator
   class. Its `sqlint.toml` exports pgvector's native forms. It imports only the standard
-  library.
+  library; its tests take `postgres` for `pgtest`.
 - `sqlint` (sub-module) is the conventions linter as a package, with the command at
   `sqlint/cmd/sqlint`.
 
@@ -134,7 +134,7 @@ mise run upgrade       # upgrade every module's go directive and requirements, a
 mise run db:up         # build and start the compose PostgreSQL and wait until it is healthy
 mise run db:down       # stop PostgreSQL, keeping its data
 mise run db:reset      # stop PostgreSQL and drop its data
-mise run integration   # run the integration tier against the running PostgreSQL
+mise run integration   # run the integration tier of postgres and postgres/pgvector against the running PostgreSQL
 mise run acceptance    # run db:up and integration, then db:reset whatever the result
 ```
 
@@ -144,8 +144,12 @@ image pin and which carries its configuration and health check. On that image it
 from source at `ARG PGVECTOR_VERSION`, the extension's one version pin
 ([the image](docs/features.md#an-image-with-pgvector)). `mise run currency` reports either pin
 behind its latest: the `FROM` tag against the image's tags, and the `ARG` against the highest
-semver tag of the GitHub repository its `ADD` line fetches. `mise.toml` sets `SQLATE_DSN`, whose port follows the same variable. The
-integration tier is not part of CI.
+semver tag of the GitHub repository its `ADD` line fetches. `mise.toml` sets `SQLATE_DSN`, whose port follows the same variable.
+
+The integration tier covers two modules, `postgres` and `postgres/pgvector`, each behind the
+`integration` build tag; `mise run integration` runs both against the running PostgreSQL, and
+`mise run acceptance` starts the stack, runs both, and drops it. The tier runs on a developer's
+machine, not in CI.
 
 The compose PostgreSQL reports healthy once it accepts TCP connections to the app database. The
 probe goes over TCP, not the socket, because the first start's initialization runs a temporary
