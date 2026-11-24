@@ -46,8 +46,10 @@ type ExtensionCatalog interface {
 // installed version (empty when not installed), the default version the
 // database offers (empty when it does not offer the extension), and whether
 // the declaration is pending. An active declaration is pending while its
-// installed version is not the default, which covers a missing extension; a
-// removed one is pending while it is still installed.
+// extension is missing but offered, or installed behind the default with an
+// update path to it; an extension the database does not offer, or one with
+// no update path, is not pending. A removed declaration is pending while
+// its extension is still installed.
 type ExtensionStatus struct {
 	Name      string
 	Removed   bool
@@ -93,7 +95,7 @@ func (m *Migrator) Extensions(ctx context.Context) ([]ExtensionStatus, error) {
 		if e.Removed {
 			s.Pending = st.installed != ""
 		} else {
-			s.Pending = st.installed == "" || st.installed != st.def
+			s.Pending = st.def != "" && (st.installed == "" || st.installed != st.def && st.path)
 		}
 		out = append(out, s)
 	}

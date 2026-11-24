@@ -472,8 +472,9 @@ the engine's statements as text, as `Catalog` does, and quotes the name itself:
 `Extensions(ctx)` reads each declaration's state on the pool, without the lock. Each
 `ExtensionStatus` has `Name`, `Removed`, `Installed` (empty when not installed), `Default` (empty
 when the database does not offer the extension), and `Pending`. An active declaration is pending
-while its installed version is not the default, which covers a missing extension; a removed one
-is pending while it is still installed. An extension the database does not offer reports an empty
+while its extension is missing but offered, or installed behind the default with an update path to
+it; an extension the database does not offer, or one with no update path, is not pending. A
+removed declaration is pending while it is still installed. An extension the database does not offer reports an empty
 `Default` and is not an error.
 
 **Errors.** `ErrNoLocker`, `ErrDirty` (`DirtyError`), `ErrPending` (`PendingError`, the

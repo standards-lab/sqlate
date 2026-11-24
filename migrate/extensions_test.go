@@ -80,8 +80,10 @@ func TestExtensions_ReportsEachDeclarationInOrderOnThePool(t *testing.T) {
 		{Name: "pg_trgm"},
 		{Name: "absent"},
 		{Name: "newer"},
+		{Name: "stranded"},
 		{Name: "old", Removed: true},
 		{Name: "gone", Removed: true},
+		{Name: "orphan", Removed: true},
 	}
 	m, rec := newExtensionMigrator(t, declared,
 		state("1.4", "1.8", true),
@@ -89,8 +91,10 @@ func TestExtensions_ReportsEachDeclarationInOrderOnThePool(t *testing.T) {
 		state(nil, "1.6", false),
 		state(nil, nil, false),
 		state("2.0", "1.8", false),
+		state("1.1", "1.8", false),
 		state("1.0", "1.0", false),
 		state(nil, "1.2", false),
+		state("0.9", nil, false),
 	)
 	got, err := m.Extensions(context.Background())
 	if err != nil {
@@ -100,10 +104,12 @@ func TestExtensions_ReportsEachDeclarationInOrderOnThePool(t *testing.T) {
 		{Name: "hstore", Installed: "1.4", Default: "1.8", Pending: true},
 		{Name: "citext", Installed: "1.6", Default: "1.6"},
 		{Name: "pg_trgm", Default: "1.6", Pending: true},
-		{Name: "absent", Pending: true},
-		{Name: "newer", Installed: "2.0", Default: "1.8", Pending: true},
+		{Name: "absent"},
+		{Name: "newer", Installed: "2.0", Default: "1.8"},
+		{Name: "stranded", Installed: "1.1", Default: "1.8"},
 		{Name: "old", Removed: true, Installed: "1.0", Default: "1.0", Pending: true},
 		{Name: "gone", Removed: true, Default: "1.2"},
+		{Name: "orphan", Removed: true, Installed: "0.9", Pending: true},
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("Extensions =\n%+v\nwant\n%+v", got, want)
@@ -127,7 +133,7 @@ func TestExtensions_NoRowReadsAsNeitherInstalledNorOffered(t *testing.T) {
 		t.Fatalf("Extensions: %v", err)
 	}
 	want := []migrate.ExtensionStatus{
-		{Name: "hstore", Pending: true},
+		{Name: "hstore"},
 		{Name: "citext", Removed: true},
 	}
 	if !slices.Equal(got, want) {
