@@ -12,6 +12,8 @@
 //     variable is unset
 //   - [Migrated], which is Create with migration sets applied through the
 //     migrate package under the PostgreSQL dialect
+//   - [MigratedWith], which is Migrated with the caller's migrate.Options,
+//     such as extension declarations
 //   - [Database.Session], which wraps the pool under postgres.Dialect
 //
 // It imports testing, so it belongs only in a consumer's test builds: a

@@ -6,6 +6,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -220,5 +221,37 @@ func TestTryLock_WrapsTheDriverError(t *testing.T) {
 	got, err := (postgres.Dialect{}).TryLock(context.Background(), conn, "app.sweep")
 	if got || !errors.Is(err, boom) || !strings.Contains(err.Error(), "app.sweep") {
 		t.Errorf("TryLock = %v, %v; want false and the driver error naming the lock", got, err)
+	}
+}
+
+func TestDialect_ActivateExtensionCreatesThenUpdatesTheQuotedName(t *testing.T) {
+	got := (postgres.Dialect{}).ActivateExtension(`hs"tore`)
+	want := []string{`CREATE EXTENSION IF NOT EXISTS "hs""tore"`, `ALTER EXTENSION "hs""tore" UPDATE`}
+	if !slices.Equal(got, want) {
+		t.Errorf("ActivateExtension = %q, want %q", got, want)
+	}
+}
+
+func TestDialect_RemoveExtensionDropsTheQuotedNameRestricted(t *testing.T) {
+	got := (postgres.Dialect{}).RemoveExtension(`hs"tore`)
+	if want := `DROP EXTENSION IF EXISTS "hs""tore" RESTRICT`; got != want {
+		t.Errorf("RemoveExtension = %q, want %q", got, want)
+	}
+}
+
+func TestDialect_ExtensionStateBindsTheNameAtTheParam(t *testing.T) {
+	got := (postgres.Dialect{}).ExtensionState("$7")
+	for _, want := range []string{
+		"SELECT a.installed_version, a.default_version, ",
+		"FROM pg_available_extensions a WHERE a.name = $7",
+		"pg_extension_update_paths(a.name)",
+		"p.source = a.installed_version AND p.target = a.default_version AND p.path IS NOT NULL",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("ExtensionState = %q, want it to contain %q", got, want)
+		}
+	}
+	if strings.Count(got, "$") != 1 {
+		t.Errorf("ExtensionState = %q, want exactly one bind parameter", got)
 	}
 }

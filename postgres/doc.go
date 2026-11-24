@@ -7,6 +7,8 @@
 //   - the statement that reads the server's version
 //   - its spelling of the keyset predicate a cursor continues by
 //   - its migrate.Catalog implementation, the history protocol's engine half
+//   - its migrate.ExtensionCatalog implementation, the statements that read,
+//     activate, and remove an extension
 //
 // It is a sub-module so the driver it names, pgx, enters a consumer's build only
 // through this import, made once where it opens its pool; a consumer opens
@@ -68,6 +70,17 @@
 // spans every schema on the search path, so a same-named table in an
 // unrelated schema would satisfy the check even though the current
 // schema's own history table does not exist.
+//
+// # Extensions
+//
+// [Dialect.ExtensionState], [Dialect.ActivateExtension], and
+// [Dialect.RemoveExtension] implement migrate.ExtensionCatalog. The state
+// read joins pg_available_extensions, for the installed and default
+// versions, to pg_extension_update_paths, for whether a path leads from
+// one to the other. Activation is CREATE EXTENSION IF NOT EXISTS then
+// ALTER EXTENSION UPDATE; removal is DROP EXTENSION IF EXISTS with
+// RESTRICT, refused with 2BP01 while an object depends on the extension.
+// Each statement quotes the name as an identifier.
 //
 // # Native forms
 //

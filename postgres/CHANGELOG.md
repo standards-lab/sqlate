@@ -7,6 +7,21 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Added
+
+- `Dialect.ExtensionState`, `Dialect.ActivateExtension`, and `Dialect.RemoveExtension`, the
+  statements of the `migrate.ExtensionCatalog` capability. The state read joins
+  `pg_available_extensions`, for the installed and default versions, to
+  `pg_extension_update_paths`, for whether a path leads from one to the other. Activation is
+  `CREATE EXTENSION IF NOT EXISTS` then `ALTER EXTENSION ... UPDATE`; removal is
+  `DROP EXTENSION IF EXISTS ... RESTRICT`. Each quotes the name as an identifier.
+- `pgtest.MigratedWith(t, env, prefix, opts, sets...)`, which is `Migrated` under the caller's
+  `migrate.Options`; `Migrated` is `MigratedWith` under empty options.
+- Live proofs of the extension stage against PostgreSQL 19: an extension installed behind its
+  default is pending until `Up` updates it, one the image lacks refuses `Up` before any set, a
+  removal waits for a set migration to drop the column depending on it, `Reset` leaves an
+  extension installed, and two concurrent `Up` runs activate an extension once.
+
 ## [v0.8.0] - 2026-11-17
 
 ### Added

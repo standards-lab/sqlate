@@ -690,6 +690,18 @@ is altered on the next `Up`, `Steps`, `Down`, `Reset`, or `Force`. The column be
 `ServerVersion` returns `SELECT version()`, the statement an administrative read runs to report
 the engine's version.
 
+`ExtensionState`, `ActivateExtension`, and `RemoveExtension` implement `migrate.ExtensionCatalog`,
+so a migrator under `postgres.Dialect{}` accepts extension declarations. `ExtensionState` reads
+`pg_available_extensions` for the name bound at `$1`: its `installed_version` and
+`default_version`, and an update path that is true when `pg_extension_update_paths` lists a
+path from the installed version to the default. The path is irrelevant once the installed version
+is the default, and false when nothing is installed. An extension the server does not offer
+yields no row. `ActivateExtension` is `CREATE EXTENSION IF NOT EXISTS` and then
+`ALTER EXTENSION ... UPDATE`, so a missing extension is created at its default version and an
+older one is updated to it. `RemoveExtension` is `DROP EXTENSION IF EXISTS ... RESTRICT`, whose
+refusal while an object depends on the extension is SQLSTATE 2BP01, `sqlate.ErrDependentObjects`
+through `MapError`. Each statement quotes the name as an identifier.
+
 `postgres.Patterns()` is the library's patterns with one overlaid: the keyset predicate a
 cursor continues by, spelled as the row-value comparison `(a, b) > (x, y)` in place of the
 standard chain of disjuncts. The engine accepts every other library pattern as written. A
@@ -704,7 +716,11 @@ The module's `sqlint.toml` exports the engine's native forms and the overlay dir
 integration tier, behind the `integration` build tag, is the proofs only an engine can give:
 non-transactional DDL, dirty state and repair, concurrent starters in one process and across
 processes, the cancelled context, request values parsed by the engine, and both forms of a
-returning command returning the same row. For the total, they prove that a counted page
+returning command returning the same row. For extensions, they prove that an extension installed
+behind its default is pending until `Up` updates it, that an extension the image lacks refuses
+`Up` before any set, that a removal waits for a set migration to drop the column depending on
+it, that `Reset` leaves an extension installed, and that two concurrent `Up` runs activate an
+extension once. For the total, they prove that a counted page
 agrees with its total when writes commit between the statement and the caller, where a count
 read as its own statement does not; that it agrees under concurrent writers; and that the
 counted page scans its base once under one window while the uncounted page keeps the key's
@@ -719,6 +735,9 @@ fails the test when `env` is unset. It returns a `*Database` holding a pinged po
 database (`Pool`) and the admin DSN pointed at it (`DSN`), which a test hands to a process it
 starts. `Migrated(t, env, prefix, sets...)` is `Create` with the `migrate.Set`s applied in order
 under the PostgreSQL dialect, and `Database.Session()` wraps the pool under `Dialect`.
+`MigratedWith(t, env, prefix, opts, sets...)` is `Migrated` under the caller's
+`migrate.Options`, so a test can declare extensions, name the lock, or take the migrator's log;
+`Migrated` is `MigratedWith` under empty options.
 
 When the test ends the pool is closed and the database dropped `WITH (FORCE)`, so a session
 still open on it, such as a started process's pool, is ended rather than holding the drop back;

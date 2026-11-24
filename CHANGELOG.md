@@ -7,6 +7,47 @@ module only; the `postgres` and `sqlint` sub-modules each keep their own.
 
 ## [Unreleased]
 
+## [v0.8.0] - 2026-11-24
+
+The migrator manages database extensions: a program declares them by name, and `Up` activates
+them at the image's default version before any set and removes the ones declared removed after
+every set.
+
+### Added
+
+- `migrate.Extension` and `migrate.Options.Extensions`, the declarations: each a distinct,
+  non-empty `Name` with no version, since the version is the default the database offers, and a
+  `Removed` flag for an extension the migrator drops instead of activating. `New` refuses an
+  empty or repeated name, and any declaration on a dialect without the capability. Deleting a
+  declaration only stops the migrator from managing the extension; it is never dropped.
+- `migrate.ExtensionCatalog`, the dialect capability that returns the engine's statements as
+  text: `ExtensionState(param)`, the query that reads an extension's installed version, the
+  default version the database offers, and whether an update path leads from one to the other;
+  `ActivateExtension(name)`, the statements that create the extension and update it to its
+  default; and `RemoveExtension(name)`, the statement that drops it with `RESTRICT`.
+- `Migrator.Extensions(ctx)`, which reads an `ExtensionStatus` per declaration, in declared
+  order, on the pool and without the lock: `Name`, `Removed`, `Installed`, `Default`, and
+  `Pending`. An active declaration is pending while its extension is missing but offered, or
+  installed behind the default with an update path to it; a removed one while it is still
+  installed.
+- The extension stage in `Up` and a positive `Steps`, on the migrator or on a layer. Inside the
+  run's lock, after every set's history is checked, every active declaration is checked before
+  any is activated, and each missing or older one is activated in its own transaction, in
+  declared order, before any set, logged as `extension activated`. One already at its default
+  runs no statement.
+- Removal in `Up` alone: after every set, each removed declaration still installed is dropped
+  in its own transaction, in declared order, logged as `extension removed`. An object still
+  depending on the extension fails the run over the dialect's mapped error, and a later set
+  migration that drops the object lets the next `Up` remove it. `Steps`, `Down`, `Reset`, and
+  `Force` never remove, and `Reset` leaves every extension installed.
+- `Verify` checks every declaration before any set, without the lock, with the verdicts `Up`
+  and `Extensions` reach.
+- The error types: `ExtensionError`, naming the extension, over `ErrExtensionUnavailable` (an
+  extension the database does not offer), `ErrNoUpdatePath` (`NoUpdatePathError`, an installed
+  version with no update path to the default, naming both), or `ErrPending`
+  (`ExtensionPendingError`, a declaration the database does not match yet), or over the mapped
+  driver error of a failed activation or removal.
+
 ## [v0.7.0] - 2026-11-11
 
 A transaction's configuration is the standard library's `*sql.TxOptions`, passed as a trailing
@@ -282,7 +323,8 @@ experiment's library packages.
 - `sqltest`, the scripted `database/sql` driver every consumer's unit tier runs over: `Open`,
   `Recorder`, `Response`, and the stub `Dialect`.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/v0.8.0...HEAD
+[v0.8.0]: https://github.com/standards-lab/sqlate/compare/v0.7.0...v0.8.0
 [v0.7.0]: https://github.com/standards-lab/sqlate/compare/v0.6.1...v0.7.0
 [v0.6.1]: https://github.com/standards-lab/sqlate/compare/v0.6.0...v0.6.1
 [v0.6.0]: https://github.com/standards-lab/sqlate/compare/v0.5.0...v0.6.0
