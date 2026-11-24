@@ -52,8 +52,7 @@ type Migrator struct {
 	opts           Options
 	locker         sqlate.Locker
 	after          func(time.Duration) <-chan time.Time
-	extensions     []Extension
-	extCatalog     ExtensionCatalog
+	extensions     ExtensionCatalog
 	extensionQuery string
 }
 
@@ -117,14 +116,15 @@ func New(db *sqlate.DB, sets []Set, opts Options) (*Migrator, error) {
 			sql:        history(table, db.Dialect().Placeholder, catalog),
 		})
 	}
-	extCatalog, _ := db.Dialect().(ExtensionCatalog)
-	if err := validateExtensions(opts.Extensions, extCatalog); err != nil {
+	extensions, _ := db.Dialect().(ExtensionCatalog)
+	if err := validateExtensions(opts.Extensions, extensions); err != nil {
 		return nil, err
 	}
 	var extensionQuery string
-	if extCatalog != nil {
-		extensionQuery = extCatalog.ExtensionState(db.Dialect().Placeholder(1))
+	if extensions != nil {
+		extensionQuery = extensions.ExtensionState(db.Dialect().Placeholder(1))
 	}
+	opts.Extensions = slices.Clone(opts.Extensions)
 	if opts.LockName == "" {
 		opts.LockName = "migrate." + layers[len(layers)-1].table
 	}
@@ -134,8 +134,7 @@ func New(db *sqlate.DB, sets []Set, opts Options) (*Migrator, error) {
 		opts:           opts,
 		locker:         locker,
 		after:          time.After,
-		extensions:     slices.Clone(opts.Extensions),
-		extCatalog:     extCatalog,
+		extensions:     extensions,
 		extensionQuery: extensionQuery,
 	}, nil
 }

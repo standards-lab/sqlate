@@ -11,7 +11,8 @@ var (
 	ErrNoLocker = errors.New("migrate: dialect has no lock capability")
 	// ErrDirty is the class a *DirtyError unwraps to.
 	ErrDirty = errors.New("migrate: schema is dirty")
-	// ErrPending is the class a *PendingError unwraps to.
+	// ErrPending is the class a *PendingError and an *ExtensionPendingError
+	// unwrap to.
 	ErrPending = errors.New("migrate: migrations pending")
 	// ErrUnknownVersion is the class an *UnknownVersionError unwraps to.
 	ErrUnknownVersion = errors.New("migrate: history does not match the migration set")

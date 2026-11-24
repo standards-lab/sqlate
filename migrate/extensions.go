@@ -85,8 +85,8 @@ func validateExtensions(declared []Extension, catalog ExtensionCatalog) error {
 // An extension the database does not offer reports an empty Default and is
 // not an error.
 func (m *Migrator) Extensions(ctx context.Context) ([]ExtensionStatus, error) {
-	out := make([]ExtensionStatus, 0, len(m.extensions))
-	for _, e := range m.extensions {
+	out := make([]ExtensionStatus, 0, len(m.opts.Extensions))
+	for _, e := range m.opts.Extensions {
 		st, err := m.extensionState(ctx, m.db, e)
 		if err != nil {
 			return nil, err
@@ -128,7 +128,7 @@ func classify(e Extension, st extensionState) error {
 }
 
 func (m *Migrator) verifyExtensions(ctx context.Context) error {
-	for _, e := range m.extensions {
+	for _, e := range m.opts.Extensions {
 		st, err := m.extensionState(ctx, m.db, e)
 		if err != nil {
 			return err
@@ -146,7 +146,7 @@ func (m *Migrator) activateExtensions(ctx context.Context, conn *sql.Conn) error
 		st extensionState
 	}
 	var due []activation
-	for _, e := range m.extensions {
+	for _, e := range m.opts.Extensions {
 		if e.Removed {
 			continue
 		}
@@ -164,7 +164,7 @@ func (m *Migrator) activateExtensions(ctx context.Context, conn *sql.Conn) error
 	}
 	for _, a := range due {
 		err := m.inTx(ctx, conn, func(tx *sql.Tx) error {
-			for _, stmt := range m.extCatalog.ActivateExtension(a.e.Name) {
+			for _, stmt := range m.extensions.ActivateExtension(a.e.Name) {
 				if _, err := tx.ExecContext(ctx, stmt); err != nil {
 					return err
 				}
@@ -184,7 +184,7 @@ func (m *Migrator) activateExtensions(ctx context.Context, conn *sql.Conn) error
 }
 
 func (m *Migrator) removeExtensions(ctx context.Context, conn *sql.Conn) error {
-	for _, e := range m.extensions {
+	for _, e := range m.opts.Extensions {
 		if !e.Removed {
 			continue
 		}
@@ -196,7 +196,7 @@ func (m *Migrator) removeExtensions(ctx context.Context, conn *sql.Conn) error {
 			continue
 		}
 		err = m.inTx(ctx, conn, func(tx *sql.Tx) error {
-			_, err := tx.ExecContext(ctx, m.extCatalog.RemoveExtension(e.Name))
+			_, err := tx.ExecContext(ctx, m.extensions.RemoveExtension(e.Name))
 			return err
 		})
 		if err != nil {
