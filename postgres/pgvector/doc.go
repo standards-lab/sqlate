@@ -8,9 +8,9 @@
 //   - [L2], [Cosine], and [InnerProduct], the three metrics
 //   - [Metrics], the metric table, in that order
 //
-// The table covers the vector type only. It imports only the standard
-// library, so a module that builds queries over pgvector depends on the
-// names here without depending on a driver.
+// The table covers the vector type only. The package imports only the
+// standard library, so a module that builds queries over pgvector depends
+// on the names here without depending on a driver.
 //
 // # Native forms
 //
