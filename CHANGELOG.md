@@ -37,9 +37,9 @@ every set.
   runs no statement.
 - Removal in `Up` alone: after every set, each removed declaration still installed is dropped
   in its own transaction, in declared order, logged as `extension removed`. An object still
-  depending on the extension fails the run over the dialect's mapped error, and a later set
-  migration that drops the object lets the next `Up` remove it. `Steps`, `Down`, `Reset`, and
-  `Force` never remove, and `Reset` leaves every extension installed.
+  depending on the extension fails the run with the driver's error mapped through the dialect,
+  and a later set migration that drops the object lets the next `Up` remove it. `Steps`, `Down`,
+  `Reset`, and `Force` never remove, and `Reset` leaves every extension installed.
 - `Verify` checks every declaration before any set, without the lock, with the verdicts `Up`
   and `Extensions` reach.
 - The error types: `ExtensionError`, naming the extension, over `ErrExtensionUnavailable` (an

@@ -107,12 +107,13 @@ Three conventions the library keeps are stricter than a reader might expect:
 - `header` reads the `--|` declaration header of a `.sql` file.
 - `query` compiles authored statements against the pattern catalog and binds them to typed
   values: rows, projections with request directives, and guards.
-- `migrate` versions a schema over authored SQL under the engine's lock, and replaces a
-  third-party migration dependency.
+- `migrate` versions a schema over authored SQL, and reconciles the extensions an application
+  declares, under the engine's lock, and replaces a third-party migration dependency.
 - `sqltest` is the scripted `database/sql` driver for hermetic tests.
 - `postgres` (sub-module) is the PostgreSQL dialect: placeholders, error classification, the
-  advisory lock, extension management, and the engine's native forms. Its `pgtest` package gives an integration test
-  its own throwaway database, migrated or empty, dropped when the test ends.
+  advisory lock, the extension statements, and the engine's native forms. Its `pgtest` package
+  gives an integration test its own throwaway database, migrated or empty, dropped when the test
+  ends.
 - `sqlint` (sub-module) is the conventions linter as a package, with the command at
   `sqlint/cmd/sqlint`.
 

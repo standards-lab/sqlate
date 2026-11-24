@@ -415,10 +415,10 @@ set acts on that set. `Up`, `Verify`, `Reset`, and `Status` cover every set.
 **Layers.** `Layers()` returns a `Layer` handle on every set in declared order, and
 `Layer(name)` returns the one named, reporting whether it exists. A `Layer` has `Name`, `Table`,
 `Migrations`, `Version`, `Verify`, `Status`, `Steps`, `Down`, and `Force`, each acting on that
-set alone; `Layer.Verify` and `Layer.Status` read no extension. The ordering between sets holds for every verb that runs migrations: a revert is
-refused with `ErrAboveApplied` while a set above has applied migrations, and an apply is refused
-with `ErrBelowPending` while a set below has pending ones. The top set's `Down` and `Steps` on
-the migrator follow the same rule.
+set alone; `Layer.Verify` and `Layer.Status` read no extension. The ordering between sets holds
+for every verb that runs migrations: a revert is refused with `ErrAboveApplied` while a set above
+has applied migrations, and an apply is refused with `ErrBelowPending` while a set below has
+pending ones. The top set's `Down` and `Steps` on the migrator follow the same rule.
 
 **The lock.** A run pins one connection, takes the dialect's named lock on it, does its work,
 and releases the lock, so concurrent starters of the same program, in one process or across
@@ -460,13 +460,13 @@ default the database image offers. `New` refuses an empty or repeated name, and 
 declaration when the dialect lacks the `ExtensionCatalog` capability. That capability returns
 the engine's statements as text, as `Catalog` does, and quotes the name itself:
 
-- `ExtensionState(param)` is the query that reads one extension, its name bound at `param`, as
+- `ExtensionState(param)` returns the query that reads one extension, its name bound at `param`, as
   one row of three columns: the installed version (NULL when not installed), the default version
   the database offers (NULL when it does not offer the extension), and whether an update path
   leads from the installed version to the default. No row reads as neither installed nor offered.
-- `ActivateExtension(name)` is the statements that create the extension when it does not exist
+- `ActivateExtension(name)` returns the statements that create the extension when it does not exist
   and then update it to its default.
-- `RemoveExtension(name)` is the statement that drops the extension when it exists, with
+- `RemoveExtension(name)` returns the statement that drops the extension when it exists, with
   `RESTRICT`.
 
 `Extensions(ctx)` reads each declaration's state on the pool, without the lock. Each
@@ -474,24 +474,24 @@ the engine's statements as text, as `Catalog` does, and quotes the name itself:
 when the database does not offer the extension), and `Pending`. An active declaration is pending
 while its extension is missing but offered, or installed behind the default with an update path to
 it; an extension the database does not offer, or one with no update path, is not pending. A
-removed declaration is pending while it is still installed. An extension the database does not offer reports an empty
-`Default` and is not an error.
+removed declaration is pending while it is still installed. An extension the database does not
+offer is not an error.
 
 `Up` and a positive `Steps`, on the migrator or on a layer, activate the declarations. The stage
 runs inside the run's lock, on its pinned connection, or without the lock under `Unlocked`, as
 the sets do. It comes after every set's history is checked and after a layer's ordering refusal,
 and before any migration runs. It reads every active declaration first, skipping removed ones,
-and refuses the run before activating any. An extension the database does not offer fails with
-an `*ExtensionError` over `ErrExtensionUnavailable`. An installed version that differs from the
-default with no update path to it, which covers one newer than the default, fails with an
-`*ExtensionError` over a `*NoUpdatePathError` naming both versions. Once every declaration passes,
-a declaration already at the default runs no statement, so a pre-installed database passes under
-a role that cannot create extensions. Each missing or older one runs `ActivateExtension`'s
-statements in its own transaction, in declared order, and is logged through `Options.Logger` as
-`extension activated` with its name, the default version, and the installed version it came
-from. A failed activation stops the run with an `*ExtensionError` over the mapped driver error,
-leaving the activations before it in place and no set applied. `Down`, a negative `Steps`,
-`Reset`, and `Force` do not run the stage.
+and refuses the run, if any fails, before activating any. An extension the database does not
+offer fails with an `*ExtensionError` over `ErrExtensionUnavailable`. An installed version that
+differs from the default with no update path to it, which covers one newer than the default,
+fails with an `*ExtensionError` over a `*NoUpdatePathError` naming both versions. Once every
+declaration passes, a declaration already at the default runs no statement, so a pre-installed
+database passes under a role that cannot create extensions. Each missing or older one runs
+`ActivateExtension`'s statements in its own transaction, in declared order, and is logged
+through `Options.Logger` as `extension activated` with its name, the default version, and the
+installed version it came from. A failed activation stops the run with an `*ExtensionError` over
+the mapped driver error, leaving the activations before it in place and no set applied. `Down`,
+a negative `Steps`, `Reset`, and `Force` do not run the stage.
 
 `Up` alone removes. After every set is applied, it reads each removed declaration in declared
 order, on the same pinned connection and inside the same lock, or without the lock under
@@ -504,8 +504,7 @@ driver's error mapped through the dialect; the sets stay applied, the drops befo
 place, and no later declaration is dropped. A set migration that drops the dependent object lets
 the next `Up` remove the extension. `Steps`, positive or negative, `Down`, `Reset`, and `Force`
 never remove. Deleting a declaration only stops the migrator from managing the extension: it is
-never dropped, and an extension no declaration names runs no statement. `Reset` leaves every
-extension installed.
+never dropped, and an extension no declaration names runs no statement.
 
 `Verify` checks the declarations before any set, on the pool and without the lock, in declared
 order, and returns the first fault as an `*ExtensionError` naming the extension. An active
@@ -515,8 +514,8 @@ removed declaration still installed, are over an `*ExtensionPendingError`, so th
 version with no update path to the default is over a `*NoUpdatePathError`; neither is
 `ErrPending`, since `Up` would refuse them rather than resolve them. A declaration at its default,
 and a removed one not installed, pass. Once every declaration passes, `Verify` checks the sets.
-These verdicts match `Up`'s checks and `Extensions`' `Pending`. `Layer.Verify` and `Status` read
-no extension.
+These verdicts match `Up`'s checks and `Extensions`' `Pending`. The migrator's `Status` reads no
+extension.
 
 **Errors.** `ErrNoLocker`, `ErrDirty` (`DirtyError`), `ErrPending` (`PendingError`, the
 unapplied versions), `ErrUnknownVersion` (`UnknownVersionError`, an applied row the set does
@@ -693,9 +692,9 @@ the engine's version.
 `ExtensionState`, `ActivateExtension`, and `RemoveExtension` implement `migrate.ExtensionCatalog`,
 so a migrator under `postgres.Dialect{}` accepts extension declarations. `ExtensionState` reads
 `pg_available_extensions` for the name bound at `$1`: its `installed_version` and
-`default_version`, and an update path that is true when `pg_extension_update_paths` lists a
-path from the installed version to the default. The path is irrelevant once the installed version
-is the default, and false when nothing is installed. An extension the server does not offer
+`default_version`, and an update-path flag, true when `pg_extension_update_paths` lists a path
+from the installed version to the default. The flag is irrelevant once the installed version is
+the default, and false when nothing is installed. An extension the server does not offer
 yields no row. `ActivateExtension` is `CREATE EXTENSION IF NOT EXISTS` and then
 `ALTER EXTENSION ... UPDATE`, so a missing extension is created at its default version and an
 older one is updated to it. `RemoveExtension` is `DROP EXTENSION IF EXISTS ... RESTRICT`, whose
@@ -720,11 +719,11 @@ returning command returning the same row. For extensions, they prove that an ext
 behind its default is pending until `Up` updates it, that an extension the image lacks refuses
 `Up` before any set, that a removal waits for a set migration to drop the column depending on
 it, that `Reset` leaves an extension installed, and that two concurrent `Up` runs activate an
-extension once. For the total, they prove that a counted page
-agrees with its total when writes commit between the statement and the caller, where a count
-read as its own statement does not; that it agrees under concurrent writers; and that the
-counted page scans its base once under one window while the uncounted page keeps the key's
-index order. `mise run acceptance` runs them against a compose PostgreSQL and tears it down.
+extension once. For the total, they prove that a counted page agrees with its total when writes
+commit between the statement and the caller, where a count read as its own statement does not;
+that it agrees under concurrent writers; and that the counted page scans its base once under one
+window while the uncounted page keeps the key's index order. `mise run acceptance` runs them
+against a compose PostgreSQL and tears it down.
 
 ### pgtest: a test's throwaway database
 
