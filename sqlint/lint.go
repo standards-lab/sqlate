@@ -39,14 +39,16 @@ type linter struct {
 
 type form struct {
 	name string
+	from string
 	re   *regexp.Regexp
 }
 
 // Lint walks fsys under cfg and returns every finding, in walk order. A
 // nil cfg is the defaults. resolve turns a module path into its root
 // filesystem; nil refuses every module path. A source or engine that does
-// not resolve is a finding against File; the rest of the tree is linted
-// with what did.
+// not resolve is a finding against File, as is an extension that does
+// not resolve or exports neither native forms nor a reason; the rest of
+// the tree is linted with what did.
 func Lint(fsys fs.FS, cfg *Config, resolve Resolver) []Finding {
 	if cfg == nil {
 		cfg = defaults()
@@ -57,6 +59,7 @@ func Lint(fsys fs.FS, cfg *Config, resolve Resolver) []Finding {
 	l := &linter{fsys: fsys, cfg: cfg, resolve: resolve}
 	l.resolveSources()
 	l.resolveEngine()
+	l.resolveExtensions()
 	_ = fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
 		if err != nil || !d.IsDir() {
 			return nil
@@ -166,27 +169,52 @@ func (l *linter) resolveEngine() {
 	if l.cfg.Engine == "" {
 		return
 	}
-	fsys, base, err := l.locate(l.cfg.Engine)
+	if export, ok := l.producer("engine: ", l.cfg.Engine); ok {
+		l.addForms("engine: ", "", export.NativeForms)
+	}
+}
+
+func (l *linter) resolveExtensions() {
+	for _, ext := range l.cfg.Extensions {
+		prefix := "extensions: " + ext + ": "
+		export, ok := l.producer(prefix, ext)
+		if !ok {
+			continue
+		}
+		if export.NativeForms == nil || (len(export.NativeForms) == 0 && export.Reason == "") {
+			l.report(File, 0, fmt.Sprintf("extensions: %s exports neither native forms nor a reason", ext))
+			continue
+		}
+		l.addForms(prefix, ext, export.NativeForms)
+	}
+}
+
+func (l *linter) producer(prefix, value string) (Export, bool) {
+	fsys, base, err := l.locate(value)
 	if err != nil {
-		l.report(File, 0, fmt.Sprintf("engine: %v", err))
-		return
+		l.report(File, 0, prefix+err.Error())
+		return Export{}, false
 	}
 	export, err := readExport(fsys, base)
 	if err != nil {
-		l.report(File, 0, fmt.Sprintf("engine: %v", err))
-		return
+		l.report(File, 0, prefix+err.Error())
+		return Export{}, false
 	}
-	names := make([]string, 0, len(export.NativeForms))
-	for name := range export.NativeForms {
+	return export, true
+}
+
+func (l *linter) addForms(prefix, from string, forms map[string]string) {
+	names := make([]string, 0, len(forms))
+	for name := range forms {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		re, err := regexp.Compile(export.NativeForms[name])
+		re, err := regexp.Compile(forms[name])
 		if err != nil {
-			l.report(File, 0, fmt.Sprintf("engine: native_forms.%s: %v", name, err))
+			l.report(File, 0, fmt.Sprintf("%snative_forms.%s: %v", prefix, name, err))
 			continue
 		}
-		l.forms = append(l.forms, form{name: name, re: re})
+		l.forms = append(l.forms, form{name: name, from: from, re: re})
 	}
 }

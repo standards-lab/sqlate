@@ -7,6 +7,28 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Added
+
+- An `extensions` key in `sqlint.toml` lists the modules whose exported native forms join the
+  engine's, read into `Config.Extensions`. Each entry is found as the engine is, a module path
+  through the `Resolver` or a directory of the tree. `Load` refuses an `extensions` that is not a
+  list of strings, an empty entry, an entry listed twice, and any `extensions` without an `engine`.
+- `[export] reason`, read into `Export.Reason`: an extension module that names no forms declares
+  `native_forms = {}` beside a reason saying why.
+- `Lint` reports against `sqlint.toml` an entry that does not resolve or has no `sqlint.toml`
+  (`extensions: <entry>: …`), a module that exports neither native forms nor a reason
+  (`extensions: <entry> exports neither native forms nor a reason`), and a form whose
+  expression does not compile (`extensions: <entry>: native_forms.<name>: …`).
+- A finding from an extension's form names the entry beside the form:
+  `"<=>" (cosine_distance, from <entry>) in a standard-tier file; declare the tier native and
+  name the port`. Findings from the engine's forms are unchanged.
+
+### Changed
+
+- The `sqlate` requirement is v0.8.0.
+
+Requires `github.com/standards-lab/sqlate v0.8.0`.
+
 ## [v0.4.0] - 2026-11-11
 
 ### Changed

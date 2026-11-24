@@ -8,8 +8,8 @@
 //   - a file is named for its operation and not its SQL verb
 //   - the parameter delimiter does not appear inside a comment or a string
 //     literal
-//   - a standard-tier file uses no native form the configured engine
-//     declares
+//   - a standard-tier file uses no native form the configured engine or
+//     an accepted extension declares
 //   - a statement that includes one of the guard protocol's patterns
 //     includes both: guard_set beside guard_where in a SET statement, and
 //     guard_where beside guard_set

@@ -7,6 +7,8 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.9.0] - 2026-11-24
+
 ### Added
 
 - `Dialect.ExtensionState`, `Dialect.ActivateExtension`, and `Dialect.RemoveExtension`, the
@@ -21,6 +23,12 @@ changelog covers this sub-module only; the base module keeps its own.
   default is pending until `Up` updates it, one the image lacks refuses `Up` before any set, a
   removal waits for a set migration to drop the column depending on it, `Reset` leaves an
   extension installed, and two concurrent `Up` runs activate an extension once.
+
+### Changed
+
+- The `sqlate` requirement is v0.8.0, whose `migrate.ExtensionCatalog` the dialect implements.
+
+Requires `github.com/standards-lab/sqlate v0.8.0`.
 
 ## [v0.8.0] - 2026-11-17
 
@@ -157,7 +165,8 @@ The first release of the PostgreSQL dialect, against `github.com/standards-lab/s
 - The integration tier: the migrate and query proofs against a live engine, behind the
   `integration` build tag.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/postgres/v0.8.0...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/postgres/v0.9.0...HEAD
+[v0.9.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.8.0...postgres/v0.9.0
 [v0.8.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.7.0...postgres/v0.8.0
 [v0.7.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.6.0...postgres/v0.7.0
 [v0.6.0]: https://github.com/standards-lab/sqlate/compare/postgres/v0.5.0...postgres/v0.6.0
