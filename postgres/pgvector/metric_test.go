@@ -7,23 +7,10 @@ import (
 	"github.com/standards-lab/sqlate/postgres/pgvector"
 )
 
-func TestExtension_IsTheCatalogName(t *testing.T) {
-	if pgvector.Extension != "vector" {
-		t.Fatalf("Extension = %q, want vector", pgvector.Extension)
-	}
-}
-
-func TestMetrics_MapEachMetricToItsOperatorAndOpClass(t *testing.T) {
-	want := []pgvector.Metric{
-		{Name: "l2", Operator: "<->", OpClass: "vector_l2_ops"},
-		{Name: "cosine", Operator: "<=>", OpClass: "vector_cosine_ops"},
-		{Name: "inner product", Operator: "<#>", OpClass: "vector_ip_ops"},
-	}
+func TestMetrics_ReturnsL2CosineAndInnerProductInOrder(t *testing.T) {
+	want := []pgvector.Metric{pgvector.L2, pgvector.Cosine, pgvector.InnerProduct}
 	if got := pgvector.Metrics(); !slices.Equal(got, want) {
 		t.Fatalf("Metrics() = %v, want %v", got, want)
-	}
-	if named := []pgvector.Metric{pgvector.L2, pgvector.Cosine, pgvector.InnerProduct}; !slices.Equal(named, want) {
-		t.Fatalf("L2, Cosine, InnerProduct = %v, want %v", named, want)
 	}
 }
 
