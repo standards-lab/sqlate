@@ -169,37 +169,38 @@ func (l *linter) resolveEngine() {
 	if l.cfg.Engine == "" {
 		return
 	}
-	fsys, base, err := l.locate(l.cfg.Engine)
-	if err != nil {
-		l.report(File, 0, fmt.Sprintf("engine: %v", err))
-		return
+	if export, ok := l.producer("engine: ", l.cfg.Engine); ok {
+		l.addForms("engine: ", "", export.NativeForms)
 	}
-	export, err := readExport(fsys, base)
-	if err != nil {
-		l.report(File, 0, fmt.Sprintf("engine: %v", err))
-		return
-	}
-	l.addForms("engine: ", "", export.NativeForms)
 }
 
 func (l *linter) resolveExtensions() {
 	for _, ext := range l.cfg.Extensions {
-		fsys, base, err := l.locate(ext)
-		if err != nil {
-			l.report(File, 0, fmt.Sprintf("extensions: %s: %v", ext, err))
+		prefix := "extensions: " + ext + ": "
+		export, ok := l.producer(prefix, ext)
+		if !ok {
 			continue
 		}
-		export, err := readExport(fsys, base)
-		if err != nil {
-			l.report(File, 0, fmt.Sprintf("extensions: %s: %v", ext, err))
-			continue
-		}
-		if len(export.NativeForms) == 0 && (export.NativeForms == nil || export.Reason == "") {
+		if export.NativeForms == nil || (len(export.NativeForms) == 0 && export.Reason == "") {
 			l.report(File, 0, fmt.Sprintf("extensions: %s exports neither native forms nor a reason", ext))
 			continue
 		}
-		l.addForms("extensions: "+ext+": ", ext, export.NativeForms)
+		l.addForms(prefix, ext, export.NativeForms)
 	}
+}
+
+func (l *linter) producer(prefix, value string) (Export, bool) {
+	fsys, base, err := l.locate(value)
+	if err != nil {
+		l.report(File, 0, prefix+err.Error())
+		return Export{}, false
+	}
+	export, err := readExport(fsys, base)
+	if err != nil {
+		l.report(File, 0, prefix+err.Error())
+		return Export{}, false
+	}
+	return export, true
 }
 
 func (l *linter) addForms(prefix, from string, forms map[string]string) {
