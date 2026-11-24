@@ -391,32 +391,34 @@ m, err := migrate.New(db, []migrate.Set{
 
 **The migrator.** `New(db, sets, options)` validates the sets (at least one, names and history
 tables distinct, and in each set versions positive and strictly increasing, names and up texts
-present) and takes the lock capability and the `Catalog` from the dialect when it has them. It
-performs no I/O. `Options` has defaults for every field: `LockName` (`migrate.<table>`, over the
-top set's table), `Unlocked`, and `Logger`.
+present), validates the extension declarations, and takes the lock capability, the `Catalog`,
+and the `ExtensionCatalog` from the dialect when it has them. It performs no I/O. `Options` has
+defaults for every field: `LockName` (`migrate.<table>`, over the top set's table), `Unlocked`,
+`Logger`, and `Extensions`.
 
 A method that names no set acts on the top set, the last one declared, so a migrator over one
 set acts on that set. `Up`, `Verify`, `Reset`, and `Status` cover every set.
 
 | Method | Sets | Effect |
 |---|---|---|
-| `Up(ctx)` | every | Applies every pending migration, sets in declared order. |
+| `Up(ctx)` | every | Activates the declared extensions, applies every pending migration, sets in declared order, then removes the extensions declared removed. |
 | `Down(ctx, n)` | top | Reverts the n most recently applied; a migration without down text is `ErrNoDown`. |
-| `Steps(ctx, n)` | top | Applies the next n when positive, reverts the last -n when negative; fewer remaining is not an error. |
+| `Steps(ctx, n)` | top | Applies the next n when positive, after activating the declared extensions as `Up` does but removing none, reverts the last -n when negative; fewer remaining is not an error. |
 | `Force(ctx, version)` | top | Sets the history to the version as an operator override: every migration through it recorded clean, those above it removed, a dirty row cleared; nothing runs against the schema. |
-| `Reset(ctx)` | every | Reverts every set in reverse declared order and drops each set's history table once that set is reverted, so a later `Up` replays every set from zero. |
-| `Verify(ctx)` | every | Checks, without the lock, that each history is a clean, complete prefix of its set, and returns the first fault. |
+| `Reset(ctx)` | every | Reverts every set in reverse declared order and drops each set's history table once that set is reverted, so a later `Up` replays every set from zero; extensions stay installed. |
+| `Verify(ctx)` | every | Checks, without the lock, every extension declaration and then that each history is a clean, complete prefix of its set, and returns the first fault. |
 | `Status(ctx)` | every | Reads, without the lock, a `SetStatus` per set: `Name`, `Table`, `Version` (the highest applied), `Latest`, `Pending`, and `Dirty`. |
 | `Version(ctx)` | top | Reads the history's head: the highest applied version and whether it is dirty. |
+| `Extensions(ctx)` | none | Reads, without the lock, an `ExtensionStatus` per extension declaration, in declared order. |
 | `Migrations()` | top | Returns a copy of the set's migrations. |
 
 **Layers.** `Layers()` returns a `Layer` handle on every set in declared order, and
 `Layer(name)` returns the one named, reporting whether it exists. A `Layer` has `Name`, `Table`,
 `Migrations`, `Version`, `Verify`, `Status`, `Steps`, `Down`, and `Force`, each acting on that
-set alone. The ordering between sets holds for every verb that runs migrations: a revert is
-refused with `ErrAboveApplied` while a set above has applied migrations, and an apply is refused
-with `ErrBelowPending` while a set below has pending ones. The top set's `Down` and `Steps` on
-the migrator follow the same rule.
+set alone; `Layer.Verify` and `Layer.Status` read no extension. The ordering between sets holds
+for every verb that runs migrations: a revert is refused with `ErrAboveApplied` while a set above
+has applied migrations, and an apply is refused with `ErrBelowPending` while a set below has
+pending ones. The top set's `Down` and `Steps` on the migrator follow the same rule.
 
 **The lock.** A run pins one connection, takes the dialect's named lock on it, does its work,
 and releases the lock, so concurrent starters of the same program, in one process or across
@@ -452,11 +454,79 @@ name in every schema, so the `postgres` dialect implements `Catalog` itself. The
 then checks the table after creating it, before reading it, and alters it in place only when
 the check reports it outdated, so a current table is never rewritten.
 
+**Extensions.** `Options.Extensions` declares, in order, the database extensions the migrator
+manages. An `Extension` has a `Name` and a `Removed` flag and no version: the version is the
+default the database image offers. `New` refuses an empty or repeated name, and refuses any
+declaration when the dialect lacks the `ExtensionCatalog` capability. That capability returns
+the engine's statements as text, as `Catalog` does, and quotes the name itself:
+
+- `ExtensionState(param)` returns the query that reads one extension, its name bound at `param`, as
+  one row of three columns: the installed version (NULL when not installed), the default version
+  the database offers (NULL when it does not offer the extension), and whether an update path
+  leads from the installed version to the default. No row reads as neither installed nor offered.
+- `ActivateExtension(name)` returns the statements that create the extension when it does not exist
+  and then update it to its default.
+- `RemoveExtension(name)` returns the statement that drops the extension when it exists, with
+  `RESTRICT`.
+
+`Extensions(ctx)` reads each declaration's state on the pool, without the lock. Each
+`ExtensionStatus` has `Name`, `Removed`, `Installed` (empty when not installed), `Default` (empty
+when the database does not offer the extension), and `Pending`. An active declaration is pending
+while its extension is missing but offered, or installed behind the default with an update path to
+it; an extension the database does not offer, or one with no update path, is not pending. A
+removed declaration is pending while it is still installed. An extension the database does not
+offer is not an error.
+
+`Up` and a positive `Steps`, on the migrator or on a layer, activate the declarations. The stage
+runs inside the run's lock, on its pinned connection, or without the lock under `Unlocked`, as
+the sets do. It comes after every set's history is checked and after a layer's ordering refusal,
+and before any migration runs. It reads every active declaration first, skipping removed ones,
+and refuses the run, if any fails, before activating any. An extension the database does not
+offer fails with an `*ExtensionError` over `ErrExtensionUnavailable`. An installed version that
+differs from the default with no update path to it, which covers one newer than the default,
+fails with an `*ExtensionError` over a `*NoUpdatePathError` naming both versions. Once every
+declaration passes, a declaration already at the default runs no statement, so a pre-installed
+database passes under a role that cannot create extensions. Each missing or older one runs
+`ActivateExtension`'s statements in its own transaction, in declared order, and is logged
+through `Options.Logger` as `extension activated` with its name, the default version, and the
+installed version it came from. A failed activation stops the run with an `*ExtensionError` over
+the mapped driver error, leaving the activations before it in place and no set applied. `Down`,
+a negative `Steps`, `Reset`, and `Force` do not run the stage.
+
+`Up` alone removes. After every set is applied, it reads each removed declaration in declared
+order, on the same pinned connection and inside the same lock, or without the lock under
+`Unlocked`. Each one still installed runs `RemoveExtension`'s statement in its own transaction
+and is logged as `extension removed` with its name and the installed version. A removed
+declaration whose extension is not installed, whether or not the database offers it, runs no
+statement. Because the drop is `RESTRICT`, an object still depending on the extension, such as a
+column of its type, fails the run with an `*ExtensionError` naming the extension, over the
+driver's error mapped through the dialect; the sets stay applied, the drops before it stay in
+place, and no later declaration is dropped. A set migration that drops the dependent object lets
+the next `Up` remove the extension. `Steps`, positive or negative, `Down`, `Reset`, and `Force`
+never remove. Deleting a declaration only stops the migrator from managing the extension: it is
+never dropped, and an extension no declaration names runs no statement.
+
+`Verify` checks the declarations before any set, on the pool and without the lock, in declared
+order, and returns the first fault as an `*ExtensionError` naming the extension. An active
+declaration missing but offered, or installed behind its default with an update path, and a
+removed declaration still installed, are over an `*ExtensionPendingError`, so they unwrap to
+`ErrPending`. One the database does not offer is over `ErrExtensionUnavailable`, and an installed
+version with no update path to the default is over a `*NoUpdatePathError`; neither is
+`ErrPending`, since `Up` would refuse them rather than resolve them. A declaration at its default,
+and a removed one not installed, pass. Once every declaration passes, `Verify` checks the sets.
+These verdicts match `Up`'s checks and `Extensions`' `Pending`. The migrator's `Status` reads no
+extension.
+
 **Errors.** `ErrNoLocker`, `ErrDirty` (`DirtyError`), `ErrPending` (`PendingError`, the
 unapplied versions), `ErrUnknownVersion` (`UnknownVersionError`, an applied row the set does
 not contain), `ErrNoDown`, `ErrVersionNotFound`, `ErrAboveApplied`, and `ErrBelowPending`. An
 error from one set's history or migrations is a `*SetError` whose `Set` names the set; it
-unwraps to the set's own error, so `errors.Is` and `errors.As` reach the error inside it.
+unwraps to the set's own error, so `errors.Is` and `errors.As` reach the error inside it. An
+error from one extension declaration is an `*ExtensionError` whose `Extension` names the
+extension, over its class: `ErrExtensionUnavailable`, an extension the database does not offer;
+`ErrNoUpdatePath` (`NoUpdatePathError`, naming the installed and default versions), an installed
+version with no update path to the default, which covers one newer than the default; or
+`ErrPending` (`ExtensionPendingError`), a declaration the database does not match yet.
 
 ## sqltest: the scripted driver
 
@@ -619,6 +689,18 @@ is altered on the next `Up`, `Steps`, `Down`, `Reset`, or `Force`. The column be
 `ServerVersion` returns `SELECT version()`, the statement an administrative read runs to report
 the engine's version.
 
+`ExtensionState`, `ActivateExtension`, and `RemoveExtension` implement `migrate.ExtensionCatalog`,
+so a migrator under `postgres.Dialect{}` accepts extension declarations. `ExtensionState` reads
+`pg_available_extensions` for the name bound at `$1`: its `installed_version` and
+`default_version`, and an update-path flag, true when `pg_extension_update_paths` lists a path
+from the installed version to the default. The flag is irrelevant once the installed version is
+the default, and false when nothing is installed. An extension the server does not offer
+yields no row. `ActivateExtension` is `CREATE EXTENSION IF NOT EXISTS` and then
+`ALTER EXTENSION ... UPDATE`, so a missing extension is created at its default version and an
+older one is updated to it. `RemoveExtension` is `DROP EXTENSION IF EXISTS ... RESTRICT`, whose
+refusal while an object depends on the extension is SQLSTATE 2BP01, `sqlate.ErrDependentObjects`
+through `MapError`. Each statement quotes the name as an identifier.
+
 `postgres.Patterns()` is the library's patterns with one overlaid: the keyset predicate a
 cursor continues by, spelled as the row-value comparison `(a, b) > (x, y)` in place of the
 standard chain of disjuncts. The engine accepts every other library pattern as written. A
@@ -633,11 +715,15 @@ The module's `sqlint.toml` exports the engine's native forms and the overlay dir
 integration tier, behind the `integration` build tag, is the proofs only an engine can give:
 non-transactional DDL, dirty state and repair, concurrent starters in one process and across
 processes, the cancelled context, request values parsed by the engine, and both forms of a
-returning command returning the same row. For the total, they prove that a counted page
-agrees with its total when writes commit between the statement and the caller, where a count
-read as its own statement does not; that it agrees under concurrent writers; and that the
-counted page scans its base once under one window while the uncounted page keeps the key's
-index order. `mise run acceptance` runs them against a compose PostgreSQL and tears it down.
+returning command returning the same row. For extensions, they prove that an extension installed
+behind its default is pending until `Up` updates it, that an extension the image lacks refuses
+`Up` before any set, that a removal waits for a set migration to drop the column depending on
+it, that `Reset` leaves an extension installed, and that two concurrent `Up` runs activate an
+extension once. For the total, they prove that a counted page agrees with its total when writes
+commit between the statement and the caller, where a count read as its own statement does not;
+that it agrees under concurrent writers; and that the counted page scans its base once under one
+window while the uncounted page keeps the key's index order. `mise run acceptance` runs them
+against a compose PostgreSQL and tears it down.
 
 ### pgtest: a test's throwaway database
 
@@ -648,6 +734,9 @@ fails the test when `env` is unset. It returns a `*Database` holding a pinged po
 database (`Pool`) and the admin DSN pointed at it (`DSN`), which a test hands to a process it
 starts. `Migrated(t, env, prefix, sets...)` is `Create` with the `migrate.Set`s applied in order
 under the PostgreSQL dialect, and `Database.Session()` wraps the pool under `Dialect`.
+`MigratedWith(t, env, prefix, opts, sets...)` is `Migrated` under the caller's
+`migrate.Options`, so a test can declare extensions, name the lock, or take the migrator's log;
+`Migrated` is `MigratedWith` under empty options.
 
 When the test ends the pool is closed and the database dropped `WITH (FORCE)`, so a session
 still open on it, such as a started process's pool, is ended rather than holding the drop back;

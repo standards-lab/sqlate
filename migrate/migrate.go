@@ -25,9 +25,14 @@ type Options struct {
 	// a lock of its own around every run; concurrent starters without one
 	// are unsafe.
 	Unlocked bool
-	// Logger records each applied and reverted migration, each forced
-	// version, and each history table Reset drops; nil is silent.
+	// Logger records each activated and removed extension, each applied and
+	// reverted migration, each forced version, and each history table Reset
+	// drops; nil is silent.
 	Logger *slog.Logger
+	// Extensions declares the database extensions the migrator manages, in
+	// order, each by a distinct, non-empty name. Declaring any requires a
+	// dialect with the ExtensionCatalog capability.
+	Extensions []Extension
 }
 
 // Version is the history's head: the highest applied version and whether
@@ -42,11 +47,13 @@ type Version struct {
 // connection under one lock. Its methods without a set act on the top set,
 // except Up, Verify, Reset, and Status, which cover every set.
 type Migrator struct {
-	db     *sqlate.DB
-	layers []*layer
-	opts   Options
-	locker sqlate.Locker
-	after  func(time.Duration) <-chan time.Time
+	db             *sqlate.DB
+	layers         []*layer
+	opts           Options
+	locker         sqlate.Locker
+	after          func(time.Duration) <-chan time.Time
+	extensions     ExtensionCatalog
+	extensionQuery string
 }
 
 const (
@@ -60,8 +67,11 @@ var tableName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 // with a name no other set uses and a history table (DefaultTable when
 // empty, so at most one set may leave it empty) no other set uses, and each
 // set's migrations with positive, strictly increasing versions and names
-// and up texts present. The lock capability and the Catalog are taken from
-// the dialect when it has them. New performs no I/O.
+// and up texts present. Each extension declaration needs a non-empty name
+// no other declaration uses, and any declaration needs a dialect with the
+// ExtensionCatalog capability. The lock capability, the Catalog, and the
+// ExtensionCatalog are taken from the dialect when it has them. New
+// performs no I/O.
 func New(db *sqlate.DB, sets []Set, opts Options) (*Migrator, error) {
 	if db == nil {
 		return nil, errors.New("migrate: nil db")
@@ -106,10 +116,27 @@ func New(db *sqlate.DB, sets []Set, opts Options) (*Migrator, error) {
 			sql:        history(table, db.Dialect().Placeholder, catalog),
 		})
 	}
+	extensions, _ := db.Dialect().(ExtensionCatalog)
+	if err := validateExtensions(opts.Extensions, extensions); err != nil {
+		return nil, err
+	}
+	var extensionQuery string
+	if extensions != nil {
+		extensionQuery = extensions.ExtensionState(db.Dialect().Placeholder(1))
+	}
+	opts.Extensions = slices.Clone(opts.Extensions)
 	if opts.LockName == "" {
 		opts.LockName = "migrate." + layers[len(layers)-1].table
 	}
-	return &Migrator{db: db, layers: layers, opts: opts, locker: locker, after: time.After}, nil
+	return &Migrator{
+		db:             db,
+		layers:         layers,
+		opts:           opts,
+		locker:         locker,
+		after:          time.After,
+		extensions:     extensions,
+		extensionQuery: extensionQuery,
+	}, nil
 }
 
 func validate(set Set) error {
@@ -159,10 +186,20 @@ func (m *Migrator) Migrations() []Migration { return m.topLayer().Migrations() }
 // missing history table is the zero Version.
 func (m *Migrator) Version(ctx context.Context) (Version, error) { return m.topLayer().Version(ctx) }
 
-// Verify checks every set in declared order, without the lock, that its
-// history is a clean, complete prefix of its migrations, and returns the
-// first fault as a *SetError naming the set.
+// Verify checks, on the pool and without the lock, every extension
+// declaration and then every set, each in declared order, and returns the
+// first fault. An extension fault is an *ExtensionError naming the
+// extension: an active declaration missing but offered, or installed behind
+// its default with an update path, and a removed declaration still
+// installed, are over an *ExtensionPendingError (ErrPending); one the
+// database does not offer is over ErrExtensionUnavailable, and an installed
+// version with no update path to the default over a *NoUpdatePathError,
+// neither of them ErrPending. A set fault is a *SetError naming the set
+// whose history is not a clean, complete prefix of its migrations.
 func (m *Migrator) Verify(ctx context.Context) error {
+	if err := m.verifyExtensions(ctx); err != nil {
+		return err
+	}
 	for _, l := range m.layers {
 		if err := m.verify(ctx, l); err != nil {
 			return err
@@ -171,15 +208,28 @@ func (m *Migrator) Verify(ctx context.Context) error {
 	return nil
 }
 
-// Up applies every pending migration of every set, sets in declared order,
-// under one lock on one connection. Every set's history is checked first,
-// so a dirty set or a history that does not match its set refuses the run
-// before any migration runs. The first failure stops the run; the sets
-// before it stay applied.
+// Up activates the declared extensions and then applies every pending
+// migration of every set, sets in declared order, under one lock on one
+// connection. Every set's history is checked first, so a dirty set or a
+// history that does not match its set refuses the run before any migration
+// runs. Every active extension declaration is checked next, before any is
+// activated: one the database does not offer refuses the run with an
+// *ExtensionError over ErrExtensionUnavailable, and an installed version
+// with no update path to the default with one over a *NoUpdatePathError.
+// Each declaration not at its default is then activated in its own
+// transaction, in declared order, before any set. After every set, each
+// removed declaration whose extension is still installed is dropped with
+// RESTRICT, in its own transaction, in declared order; a removed one not
+// installed runs no statement, and an object left depending on the
+// extension fails the run with an *ExtensionError over the mapped driver
+// error. The first failure stops the run; what ran before it stays applied.
 func (m *Migrator) Up(ctx context.Context) error {
 	return m.locked(ctx, func(ctx context.Context, conn *sql.Conn) error {
 		applied, err := m.preflight(ctx, conn)
 		if err != nil {
+			return err
+		}
+		if err := m.activateExtensions(ctx, conn); err != nil {
 			return err
 		}
 		for i, l := range m.layers {
@@ -187,7 +237,7 @@ func (m *Migrator) Up(ctx context.Context) error {
 				return err
 			}
 		}
-		return nil
+		return m.removeExtensions(ctx, conn)
 	})
 }
 
@@ -197,8 +247,9 @@ func (m *Migrator) Up(ctx context.Context) error {
 func (m *Migrator) Down(ctx context.Context, n int) error { return m.topLayer().Down(ctx, n) }
 
 // Steps applies the top set's next n pending migrations when n is positive,
-// or reverts its last -n applied when negative; fewer remaining is not an
-// error.
+// after checking and activating the declared extensions as Up does but
+// removing none, or reverts its last -n applied when negative; fewer
+// remaining is not an error.
 func (m *Migrator) Steps(ctx context.Context, n int) error { return m.topLayer().Steps(ctx, n) }
 
 // Force sets the top set's history to version as an operator override.
@@ -213,7 +264,8 @@ func (m *Migrator) Force(ctx context.Context, version int) error {
 // is reverted, so a set above never blocks the revert of the set it
 // references. A later Up replays every set from zero. A caller that wants
 // every set reverted with the tables left in place iterates Layers in
-// reverse and calls Down(ctx, len(l.Migrations())) on each.
+// reverse and calls Down(ctx, len(l.Migrations())) on each. Reset leaves
+// every extension installed.
 func (m *Migrator) Reset(ctx context.Context) error {
 	return m.locked(ctx, func(ctx context.Context, conn *sql.Conn) error {
 		applied, err := m.preflight(ctx, conn)

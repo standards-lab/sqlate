@@ -11,7 +11,8 @@ var (
 	ErrNoLocker = errors.New("migrate: dialect has no lock capability")
 	// ErrDirty is the class a *DirtyError unwraps to.
 	ErrDirty = errors.New("migrate: schema is dirty")
-	// ErrPending is the class a *PendingError unwraps to.
+	// ErrPending is the class a *PendingError and an *ExtensionPendingError
+	// unwrap to.
 	ErrPending = errors.New("migrate: migrations pending")
 	// ErrUnknownVersion is the class an *UnknownVersionError unwraps to.
 	ErrUnknownVersion = errors.New("migrate: history does not match the migration set")
@@ -25,6 +26,11 @@ var (
 	// ErrBelowPending reports an apply on a layer refused because a layer
 	// below it still has pending migrations; Up applies every layer in order.
 	ErrBelowPending = errors.New("migrate: a layer below has pending migrations")
+	// ErrExtensionUnavailable reports a declared extension the database does
+	// not offer; an *ExtensionError names it.
+	ErrExtensionUnavailable = errors.New("migrate: extension not available")
+	// ErrNoUpdatePath is the class a *NoUpdatePathError unwraps to.
+	ErrNoUpdatePath = errors.New("migrate: extension has no update path to its default version")
 )
 
 // SetError is an error from one set's history or migrations, naming the
@@ -83,3 +89,52 @@ func (e *UnknownVersionError) Error() string {
 }
 
 func (e *UnknownVersionError) Unwrap() error { return ErrUnknownVersion }
+
+// ExtensionError is an error from one extension declaration, naming the
+// extension. It unwraps to the declaration's own error, so errors.Is
+// classifies it (ErrExtensionUnavailable, ErrNoUpdatePath, ErrPending) and
+// errors.As reaches the detail (*NoUpdatePathError, *ExtensionPendingError).
+type ExtensionError struct {
+	Extension string
+	Err       error
+}
+
+func (e *ExtensionError) Error() string { return fmt.Sprintf("extension %q: %v", e.Extension, e.Err) }
+
+func (e *ExtensionError) Unwrap() error { return e.Err }
+
+// NoUpdatePathError reports an installed extension version from which no
+// update path leads to the default version the database offers, which
+// covers an installed version newer than the default.
+type NoUpdatePathError struct {
+	Installed string
+	Default   string
+}
+
+func (e *NoUpdatePathError) Error() string {
+	return fmt.Sprintf("%v: installed %s, default %s", ErrNoUpdatePath, e.Installed, e.Default)
+}
+
+func (e *NoUpdatePathError) Unwrap() error { return ErrNoUpdatePath }
+
+// ExtensionPendingError reports a declaration the database does not match
+// yet: an active one whose extension is missing (Installed empty) or not at
+// Default, or a Removed one whose extension is still installed.
+type ExtensionPendingError struct {
+	Removed   bool
+	Installed string
+	Default   string
+}
+
+func (e *ExtensionPendingError) Error() string {
+	switch {
+	case e.Removed:
+		return fmt.Sprintf("%v: removed, still installed at %s", ErrPending, e.Installed)
+	case e.Installed == "":
+		return fmt.Sprintf("%v: not installed, default %s", ErrPending, e.Default)
+	default:
+		return fmt.Sprintf("%v: installed %s, default %s", ErrPending, e.Installed, e.Default)
+	}
+}
+
+func (e *ExtensionPendingError) Unwrap() error { return ErrPending }

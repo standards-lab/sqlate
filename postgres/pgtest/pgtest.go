@@ -48,12 +48,19 @@ func Create(t testing.TB, env, prefix string) *Database {
 	return &Database{Pool: pool(t, dsn), DSN: dsn}
 }
 
-// Migrated is Create with sets applied, in order, through migrate.New and
-// Up under postgres.Dialect.
+// Migrated is MigratedWith under empty options.
 func Migrated(t testing.TB, env, prefix string, sets ...migrate.Set) *Database {
 	t.Helper()
+	return MigratedWith(t, env, prefix, migrate.Options{}, sets...)
+}
+
+// MigratedWith is Create with sets applied, in order, through migrate.New
+// with opts and Up under postgres.Dialect, so a test can declare
+// extensions, name the lock, or take the migrator's log.
+func MigratedWith(t testing.TB, env, prefix string, opts migrate.Options, sets ...migrate.Set) *Database {
+	t.Helper()
 	d := Create(t, env, prefix)
-	m, err := migrate.New(d.Session(), sets, migrate.Options{})
+	m, err := migrate.New(d.Session(), sets, opts)
 	if err != nil {
 		t.Fatalf("migrate.New: %v", err)
 	}

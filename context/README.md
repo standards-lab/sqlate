@@ -25,8 +25,8 @@ express.
   ([header/doc.go](../header/doc.go)).
 - **query** (built): compiles authored statements against the pattern catalog and binds them to
   typed handles ([query/doc.go](../query/doc.go)).
-- **migrate** (built): versions a schema over authored SQL under the engine's lock
-  ([migrate/doc.go](../migrate/doc.go)).
+- **migrate** (built): versions a schema over authored SQL, and reconciles the extensions an
+  application declares, under the engine's lock ([migrate/doc.go](../migrate/doc.go)).
 - **sqltest** (built): the scripted `database/sql` driver for hermetic tests
   ([sqltest/doc.go](../sqltest/doc.go)).
 - **postgres** (built): the PostgreSQL dialect sub-module, with `pgtest` for integration tests'
