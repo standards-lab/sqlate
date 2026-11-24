@@ -25,9 +25,9 @@ type Options struct {
 	// a lock of its own around every run; concurrent starters without one
 	// are unsafe.
 	Unlocked bool
-	// Logger records each activated extension, each applied and reverted
-	// migration, each forced version, and each history table Reset drops;
-	// nil is silent.
+	// Logger records each activated and removed extension, each applied and
+	// reverted migration, each forced version, and each history table Reset
+	// drops; nil is silent.
 	Logger *slog.Logger
 	// Extensions declares the database extensions the migrator manages, in
 	// order, each by a distinct, non-empty name. Declaring any requires a
@@ -218,8 +218,12 @@ func (m *Migrator) Verify(ctx context.Context) error {
 // *ExtensionError over ErrExtensionUnavailable, and an installed version
 // with no update path to the default with one over a *NoUpdatePathError.
 // Each declaration not at its default is then activated in its own
-// transaction, in declared order, before any set. The first failure stops
-// the run; what ran before it stays applied.
+// transaction, in declared order, before any set. After every set, each
+// removed declaration whose extension is still installed is dropped with
+// RESTRICT, in its own transaction, in declared order; a removed one not
+// installed runs no statement, and an object left depending on the
+// extension fails the run with an *ExtensionError over the mapped driver
+// error. The first failure stops the run; what ran before it stays applied.
 func (m *Migrator) Up(ctx context.Context) error {
 	return m.locked(ctx, func(ctx context.Context, conn *sql.Conn) error {
 		applied, err := m.preflight(ctx, conn)
@@ -234,7 +238,7 @@ func (m *Migrator) Up(ctx context.Context) error {
 				return err
 			}
 		}
-		return nil
+		return m.removeExtensions(ctx, conn)
 	})
 }
 
@@ -244,9 +248,9 @@ func (m *Migrator) Up(ctx context.Context) error {
 func (m *Migrator) Down(ctx context.Context, n int) error { return m.topLayer().Down(ctx, n) }
 
 // Steps applies the top set's next n pending migrations when n is positive,
-// after checking and activating the declared extensions as Up does, or
-// reverts its last -n applied when negative; fewer remaining is not an
-// error.
+// after checking and activating the declared extensions as Up does but
+// removing none, or reverts its last -n applied when negative; fewer
+// remaining is not an error.
 func (m *Migrator) Steps(ctx context.Context, n int) error { return m.topLayer().Steps(ctx, n) }
 
 // Force sets the top set's history to version as an operator override.
@@ -261,7 +265,8 @@ func (m *Migrator) Force(ctx context.Context, version int) error {
 // is reverted, so a set above never blocks the revert of the set it
 // references. A later Up replays every set from zero. A caller that wants
 // every set reverted with the tables left in place iterates Layers in
-// reverse and calls Down(ctx, len(l.Migrations())) on each.
+// reverse and calls Down(ctx, len(l.Migrations())) on each. Reset leaves
+// every extension installed.
 func (m *Migrator) Reset(ctx context.Context) error {
 	return m.locked(ctx, func(ctx context.Context, conn *sql.Conn) error {
 		applied, err := m.preflight(ctx, conn)

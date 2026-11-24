@@ -401,11 +401,11 @@ set acts on that set. `Up`, `Verify`, `Reset`, and `Status` cover every set.
 
 | Method | Sets | Effect |
 |---|---|---|
-| `Up(ctx)` | every | Activates the declared extensions, then applies every pending migration, sets in declared order. |
+| `Up(ctx)` | every | Activates the declared extensions, applies every pending migration, sets in declared order, then removes the extensions declared removed. |
 | `Down(ctx, n)` | top | Reverts the n most recently applied; a migration without down text is `ErrNoDown`. |
-| `Steps(ctx, n)` | top | Applies the next n when positive, after activating the declared extensions as `Up` does, reverts the last -n when negative; fewer remaining is not an error. |
+| `Steps(ctx, n)` | top | Applies the next n when positive, after activating the declared extensions as `Up` does but removing none, reverts the last -n when negative; fewer remaining is not an error. |
 | `Force(ctx, version)` | top | Sets the history to the version as an operator override: every migration through it recorded clean, those above it removed, a dirty row cleared; nothing runs against the schema. |
-| `Reset(ctx)` | every | Reverts every set in reverse declared order and drops each set's history table once that set is reverted, so a later `Up` replays every set from zero. |
+| `Reset(ctx)` | every | Reverts every set in reverse declared order and drops each set's history table once that set is reverted, so a later `Up` replays every set from zero; extensions stay installed. |
 | `Verify(ctx)` | every | Checks, without the lock, every extension declaration and then that each history is a clean, complete prefix of its set, and returns the first fault. |
 | `Status(ctx)` | every | Reads, without the lock, a `SetStatus` per set: `Name`, `Table`, `Version` (the highest applied), `Latest`, `Pending`, and `Dirty`. |
 | `Version(ctx)` | top | Reads the history's head: the highest applied version and whether it is dirty. |
@@ -492,6 +492,20 @@ statements in its own transaction, in declared order, and is logged through `Opt
 from. A failed activation stops the run with an `*ExtensionError` over the mapped driver error,
 leaving the activations before it in place and no set applied. `Down`, a negative `Steps`,
 `Reset`, and `Force` do not run the stage.
+
+`Up` alone removes. After every set is applied, it reads each removed declaration in declared
+order, on the same pinned connection and inside the same lock, or without the lock under
+`Unlocked`. Each one still installed runs `RemoveExtension`'s statement in its own transaction
+and is logged as `extension removed` with its name and the installed version. A removed
+declaration whose extension is not installed, whether or not the database offers it, runs no
+statement. Because the drop is `RESTRICT`, an object still depending on the extension, such as a
+column of its type, fails the run with an `*ExtensionError` naming the extension, over the
+driver's error mapped through the dialect; the sets stay applied, the drops before it stay in
+place, and no later declaration is dropped. A set migration that drops the dependent object lets
+the next `Up` remove the extension. `Steps`, positive or negative, `Down`, `Reset`, and `Force`
+never remove. Deleting a declaration only stops the migrator from managing the extension: it is
+never dropped, and an extension no declaration names runs no statement. `Reset` leaves every
+extension installed.
 
 `Verify` checks the declarations before any set, on the pool and without the lock, in declared
 order, and returns the first fault as an `*ExtensionError` naming the extension. An active

@@ -182,3 +182,27 @@ func (m *Migrator) activateExtensions(ctx context.Context, conn *sql.Conn) error
 	}
 	return nil
 }
+
+func (m *Migrator) removeExtensions(ctx context.Context, conn *sql.Conn) error {
+	for _, e := range m.extensions {
+		if !e.Removed {
+			continue
+		}
+		st, err := m.extensionState(ctx, conn, e)
+		if err != nil {
+			return err
+		}
+		if classify(e, st) == nil {
+			continue
+		}
+		err = m.inTx(ctx, conn, func(tx *sql.Tx) error {
+			_, err := tx.ExecContext(ctx, m.extCatalog.RemoveExtension(e.Name))
+			return err
+		})
+		if err != nil {
+			return &ExtensionError{Extension: e.Name, Err: err}
+		}
+		m.log("extension removed", "extension", e.Name, "version", st.installed)
+	}
+	return nil
+}

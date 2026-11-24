@@ -83,9 +83,9 @@ func (l Layer) Status(ctx context.Context) (SetStatus, error) {
 // error, so -len(Migrations()) reverts the whole set. Every set's history
 // is checked first. A positive n is refused with ErrBelowPending while a
 // layer below has pending migrations, and otherwise checks and activates
-// the declared extensions as Migrator.Up does before applying anything; a
-// negative n is refused with ErrAboveApplied while a layer above has
-// applied ones and touches no extension.
+// the declared extensions as Migrator.Up does before applying anything,
+// but removes none; a negative n is refused with ErrAboveApplied while a
+// layer above has applied ones and touches no extension.
 func (l Layer) Steps(ctx context.Context, n int) error {
 	if n == 0 {
 		return nil
