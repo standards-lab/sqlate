@@ -4,8 +4,9 @@ SQL templating for Go: authored `.sql` files made dynamic and composable, with a
 dialect and a conventions linter.
 
 `github.com/standards-lab/sqlate` is the base module, and it imports only the standard library.
-The PostgreSQL dialect is the `postgres` sub-module and the linter is the `sqlint` sub-module,
-each released on its own tags.
+The PostgreSQL dialect is the `postgres` sub-module, the pgvector extension's names are the
+`postgres/pgvector` sub-module, and the linter is the `sqlint` sub-module, each released on its
+own tags.
 
 ## The problem
 
@@ -114,12 +115,16 @@ Three conventions the library keeps are stricter than a reader might expect:
   advisory lock, the extension statements, and the engine's native forms. Its `pgtest` package
   gives an integration test its own throwaway database, migrated or empty, dropped when the test
   ends.
+- `postgres/pgvector` (sub-module) names the pgvector extension: its catalog name, `vector`, and
+  the metric table of the `vector` type, each metric's distance operator and index operator
+  class. Its `sqlint.toml` exports pgvector's native forms. It imports only the standard
+  library.
 - `sqlint` (sub-module) is the conventions linter as a package, with the command at
   `sqlint/cmd/sqlint`.
 
 ## Development
 
-The repository is a Go workspace of three modules. Tasks run through
+The repository is a Go workspace of four modules. Tasks run through
 [mise](https://mise.jdx.dev):
 
 ```sh

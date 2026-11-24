@@ -10,7 +10,7 @@ jq = "1.8.2"
 "aqua:google/go-containerregistry" = "0.22.1"
 
 [env]
-GO_MODULES = ". postgres sqlint"
+GO_MODULES = ". postgres postgres/pgvector sqlint"
 SQLATE_DSN = "postgres://app:app@127.0.0.1:{{ get_env(name='POSTGRES_PORT', default='5433') }}/app?sslmode=disable"
 
 [tasks.check]

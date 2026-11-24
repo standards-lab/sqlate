@@ -1,6 +1,7 @@
 # See docs/features.md
 
 engine = "postgres"
+extensions = ["github.com/standards-lab/sqlate/postgres/pgvector"]
 
 [export]
 patterns = "query/patterns"

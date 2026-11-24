@@ -6,8 +6,8 @@ The package documentation (`go doc`) is the reference for each name's exact sign
 The packages form two layers. The root package is the session layer every statement runs
 through. `query` and `migrate` are the two capabilities built over it: authored statements, and
 schema versioning that replaces a third-party migration dependency. `header` is the grammar
-both read, `sqltest` is the driver their tests run over, and the two sub-modules are the
-engine and the linter.
+both read, `sqltest` is the driver their tests run over, and the three sub-modules are the
+engine, an extension of the engine, and the linter.
 
 ## sqlate: the session layer
 
@@ -571,7 +571,7 @@ role's, every check is on, and no source is registered.
 # The engine whose export names the native forms, and the pattern sources.
 engine = "github.com/standards-lab/sqlate/postgres"
 # Modules whose exported native forms join the engine's; listing any requires an engine.
-# extensions = ["github.com/example/sqlate-pgvector"]
+# extensions = ["github.com/standards-lab/sqlate/postgres/pgvector"]
 
 [sources]
 sql = "github.com/standards-lab/sqlate"
@@ -645,8 +645,9 @@ failures against `sqlint.toml` and lints the rest of the tree with what resolved
   error; the module's other forms still apply.
 
 An accepted module's forms are matched exactly where the engine's are, and a finding from one names
-the entry beside the form: `"<=>" (cosine_distance, from github.com/example/sqlate-pgvector) in a
-standard-tier file; declare the tier native and name the port`. A name the engine and an extension
+the entry beside the form:
+`"<=>" (cosine_distance, from github.com/standards-lab/sqlate/postgres/pgvector) in a standard-tier
+file; declare the tier native and name the port`. A name the engine and an extension
 both export is matched and reported for each. A native file that uses an extension's syntax names
 the extension in its free-text `native:` header, `native: postgres, pgvector — <=> cosine distance`;
 the linter does not read that header, so review checks it. The linter cannot read Go values either,
@@ -773,3 +774,48 @@ still open on it, such as a started process's pool, is ended rather than holding
 the drop is retried while the server reports a session still closing. A create that fails is
 followed by a drop too, since a create that timed out can still finish on the server. The
 package imports `testing`, so only test files import it.
+
+## postgres/pgvector: the pgvector extension
+
+`github.com/standards-lab/sqlate/postgres/pgvector` names what a program needs to know of
+pgvector, PostgreSQL's vector similarity extension. It imports only the standard library, so a
+module that builds queries over pgvector takes its names without taking a driver. It is tagged
+`postgres/pgvector/vX.Y.Z`.
+
+`pgvector.Extension` is the extension's catalog name, `vector`: the name an application declares
+in `migrate.Options.Extensions` and `CREATE EXTENSION` installs. `pgvector.Metrics()` returns
+the metric table of the `vector` type, one `Metric` per distance metric, each with its distance
+operator and the operator class an HNSW or IVFFlat index builds for it:
+
+| `Metric` | `Name` | `Operator` | `OpClass` |
+|---|---|---|---|
+| `L2` | `l2` | `<->` | `vector_l2_ops` |
+| `Cosine` | `cosine` | `<=>` | `vector_cosine_ops` |
+| `InnerProduct` | `inner product` | `<#>` | `vector_ip_ops` |
+
+The table covers `vector` only; `halfvec`, `sparsevec`, `bit`, and the L1 metric are left out
+until a space needs them.
+
+The module's `sqlint.toml` exports pgvector's native forms, for a consumer that lists the module
+under sqlint's `extensions`. Each form is named for pgvector's own name for what it matches:
+
+- the distance operators, named for their functions: `l2_distance` (`<->`),
+  `negative_inner_product` (`<#>`), `cosine_distance` (`<=>`), `l1_distance` (`<+>`),
+  `hamming_distance` (`<~>`), and `jaccard_distance` (`<%>`);
+- `vector` where a type goes, a cast's `AS vector` before `)` or `[`, and `vector(` with a
+  dimension; `halfvec` and `sparsevec` anywhere as words;
+- `hnsw` and `ivfflat`, the index methods after `USING`;
+- the functions, named with `()` so they stay apart from the operators that share their names:
+  `l2_distance()`, `inner_product()`, `cosine_distance()`, `l1_distance()`,
+  `hamming_distance()`, `jaccard_distance()`, `vector_dims()`, `vector_norm()`, `l2_norm()`,
+  `l2_normalize()`, `binary_quantize()`, `subvector()`, `array_to_vector()`,
+  `array_to_halfvec()`, and `array_to_sparsevec()`, each matched as a call;
+- `hnsw.*` and `ivfflat.*`, the extension's settings.
+
+A column, table, or alias named `vector` matches no form, and neither does a portable statement.
+The engine's `cast` form already denies `::vector`.
+
+sqlate's own `sqlint.toml` lists the module under `extensions` although no `Options.Extensions`
+in the repository declares pgvector. The listing is a test: the root check resolves the module
+through the committed `go.work`, so the check fails when sqlint refuses the module's export or
+a form does not compile.

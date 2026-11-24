@@ -3,5 +3,6 @@ go 1.27
 use (
 	.
 	./postgres
+	./postgres/pgvector
 	./sqlint
 )
