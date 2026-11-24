@@ -7,6 +7,12 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+### Changed
+
+- The `sqlate` requirement is v0.8.0. The linter's API and findings are unchanged.
+
+Requires `github.com/standards-lab/sqlate v0.8.0`.
+
 ## [v0.4.0] - 2026-11-11
 
 ### Changed
