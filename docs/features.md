@@ -604,19 +604,19 @@ single_statement = true
 [export]
 patterns = "patterns"
 # overlay = "overlay"
-# [export.native_forms]
-# returning = '(?i)\bRETURNING\b'
 # An extension module that adds no syntax declares the table empty and says why:
 # reason = "the extension adds functions, not syntax"
 # native_forms = {}
+# [export.native_forms]
+# returning = '(?i)\bRETURNING\b'
 ```
 
 A glob is slash-separated; each segment is a `path.Match` pattern and `**` matches any run of
-segments. A source, the engine, or an extension is a path: a directory of the tree, or a module path (its
-first segment contains a dot). A producer, a module or a directory that contains its own
-`sqlint.toml`, declares in `[export]` what a consumer reads: the directory its patterns
-publish, the overlay directory an engine supplies, and the native forms an engine or an
-extension names. A bare directory is the pattern files themselves. An engine is always a producer. The `sql`
+segments. A source, the engine, or an extension is a path: a directory of the tree, or a module
+path (its first segment contains a dot). A producer, a module or a directory that contains its own
+`sqlint.toml`, declares in `[export]` what a consumer reads: the directory its patterns publish,
+the overlay directory an engine supplies, and the native forms an engine or an extension names. A
+bare directory is the pattern files themselves. An engine is always a producer. The `sql`
 namespace always resolves to the patterns the library embeds: the linter does not read the path
 of a `sql` entry, and applies the entry's overlay, when one is declared, to those patterns.
 
@@ -627,17 +627,16 @@ and comments stripped first. The PostgreSQL module exports `returning`, `on_conf
 `concurrently`, `limit`, `serial`, `jsonb`, `timestamptz`, `cast` (the `::` operator),
 `pg_catalog` (any `pg_` function), `now`, and `uuidv7`.
 
-`extensions` lists the module paths whose native forms join the engine's. An extension module
+`extensions` lists the modules whose native forms join the engine's. An extension module
 exports its own forms in `[export.native_forms]`, or declares the table empty, `native_forms = {}`,
 beside a `reason`, a string saying why it names none; a `reason` may also accompany forms.
 `Load` refuses an `extensions` that is not a list of strings, an empty entry, an entry listed
 twice, and any `extensions` while `engine` is unset, one line each.
 
-`Lint` finds each entry the way it finds the engine: a module path through the `Resolver`, to the
-version `go.mod` pins, a workspace or replace directive included, and anything else as a directory
-of the tree. It accepts a module whose export names at least one native form, or declares the table
-empty beside a non-empty `reason`. Each of these is a finding against `sqlint.toml`, and the rest of
-the tree is linted with what resolved:
+`Lint` finds each entry the way it finds the engine: a module path through the `Resolver`, and
+anything else as a directory of the tree. It accepts a module whose export names at least one
+native form, or declares the table empty beside a non-empty `reason`. `Lint` reports each of these
+failures against `sqlint.toml` and lints the rest of the tree with what resolved:
 
 - an entry that does not resolve, or has no `sqlint.toml`: `extensions: <entry>: ` and the error;
 - a refused module, one with no `native_forms` table or an empty table and no reason:
