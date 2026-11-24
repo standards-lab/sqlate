@@ -570,6 +570,8 @@ role's, every check is on, and no source is registered.
 ```toml
 # The engine whose export names the native forms, and the pattern sources.
 engine = "github.com/standards-lab/sqlate/postgres"
+# Modules whose exported native forms join the engine's; listing any requires an engine.
+# extensions = ["github.com/example/sqlate-pgvector"]
 
 [sources]
 sql = "github.com/standards-lab/sqlate"
@@ -604,6 +606,9 @@ patterns = "patterns"
 # overlay = "overlay"
 # [export.native_forms]
 # returning = '(?i)\bRETURNING\b'
+# An extension module that adds no syntax declares the table empty and says why:
+# reason = "the extension adds functions, not syntax"
+# native_forms = {}
 ```
 
 A glob is slash-separated; each segment is a `path.Match` pattern and `**` matches any run of
@@ -621,6 +626,12 @@ which spelling. The linter matches them against code only, with string literals,
 and comments stripped first. The PostgreSQL module exports `returning`, `on_conflict`, `ilike`,
 `concurrently`, `limit`, `serial`, `jsonb`, `timestamptz`, `cast` (the `::` operator),
 `pg_catalog` (any `pg_` function), `now`, and `uuidv7`.
+
+`extensions` lists the module paths whose native forms join the engine's. An extension module
+exports its own forms in `[export.native_forms]`, or declares the table empty, `native_forms = {}`,
+beside a `reason`, a string saying why it names none; a `reason` may also accompany forms.
+`Load` refuses an `extensions` that is not a list of strings, an empty entry, an entry listed
+twice, and any `extensions` while `engine` is unset, one line each.
 
 ### The checks
 

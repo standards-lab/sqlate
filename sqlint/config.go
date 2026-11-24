@@ -22,6 +22,9 @@ type Config struct {
 	// Engine is the path of the engine whose export declares the native
 	// forms; empty means the native-forms check has no list.
 	Engine string
+	// Extensions are the module paths whose exported native forms join
+	// the engine's; listing any requires an engine.
+	Extensions []string
 	// Sources maps a namespace to the source registered under it.
 	Sources map[string]Source
 	// Roles maps each role's name to the role.
@@ -39,13 +42,17 @@ type Source struct {
 
 // Export is a producer's declaration: the directory its namespace
 // publishes, the overlay directory an engine supplies, and the native
-// forms an engine names, each a regular expression under the name the
-// finding reports, so the engine states in what position a spelling
-// counts, word boundaries and case, and not only which spelling.
+// forms an engine or an extension names, each a regular expression under
+// the name the finding reports, so the producer states in what position a
+// spelling counts, word boundaries and case, and not only which spelling.
+// NativeForms is nil when the export declares no native_forms table, and
+// empty, not nil, when it declares the table empty; Reason is the
+// producer's account of why it names the forms it does, or none.
 type Export struct {
 	Patterns    string            `toml:"patterns"`
 	Overlay     string            `toml:"overlay"`
 	NativeForms map[string]string `toml:"native_forms"`
+	Reason      string            `toml:"reason"`
 }
 
 // Role is one role's directory globs and switches, with any per-glob
@@ -76,6 +83,7 @@ func defaults() *Config {
 
 type raw struct {
 	Engine     string                    `toml:"engine"`
+	Extensions toml.Primitive            `toml:"extensions"`
 	Sources    map[string]toml.Primitive `toml:"sources"`
 	Statements map[string]toml.Primitive `toml:"statements"`
 	Patterns   map[string]toml.Primitive `toml:"patterns"`
@@ -124,6 +132,12 @@ func parseConfig(text string) (*Config, error) {
 		}
 		c.Sources[ns] = s
 	}
+	if md.IsDefined("extensions") {
+		c.Extensions = parseExtensions(md, r.Extensions, fail)
+		if r.Engine == "" {
+			fail("extensions: listed without an engine")
+		}
+	}
 	for name, table := range map[string]map[string]toml.Primitive{"statements": r.Statements, "patterns": r.Patterns, "migrations": r.Migrations} {
 		if table == nil {
 			continue
@@ -136,6 +150,26 @@ func parseConfig(text string) (*Config, error) {
 		fail("unknown key %s", k)
 	}
 	return c, errors.Join(errs...)
+}
+
+func parseExtensions(md toml.MetaData, prim toml.Primitive, fail func(string, ...any)) []string {
+	var list []string
+	if err := md.PrimitiveDecode(prim, &list); err != nil {
+		fail("extensions: a list of module paths")
+		return nil
+	}
+	var out []string
+	for i, ext := range list {
+		switch {
+		case ext == "":
+			fail("extensions[%d]: empty", i)
+		case slices.Contains(out, ext):
+			fail("extensions[%d]: %q is listed twice", i, ext)
+		default:
+			out = append(out, ext)
+		}
+	}
+	return out
 }
 
 func parseRole(md toml.MetaData, name string, table map[string]toml.Primitive, role *Role) error {

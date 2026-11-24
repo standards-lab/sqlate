@@ -156,6 +156,66 @@ func TestLoad_ReportsConfigurationErrors(t *testing.T) {
 	}
 }
 
+func TestLoad_RefusesMalformedExtensions(t *testing.T) {
+	cases := []struct{ line, want string }{
+		{`extensions = "example.com/ext"`, "extensions: a list of module paths"},
+		{`extensions = ["example.com/ext", 3]`, "extensions: a list of module paths"},
+		{`extensions = ["example.com/ext", ""]`, "extensions[1]: empty"},
+		{`extensions = ["example.com/ext", "example.com/other", "example.com/ext"]`, `extensions[2]: "example.com/ext" is listed twice`},
+	}
+	for _, tc := range cases {
+		c, err := sqlint.Load(tree(tc.line + "\n" + config))
+		if err == nil || err.Error() != "sqlint.toml: "+tc.want {
+			t.Errorf("Load(%s) error = %v, want the one line %q", tc.line, err, tc.want)
+		}
+		if c == nil || c.Engine != "engine" {
+			t.Errorf("Load(%s) returned no configuration beside the error", tc.line)
+		}
+	}
+	_, err := sqlint.Load(tree(`extensions = ["example.com/ext"]`))
+	if err == nil || err.Error() != "sqlint.toml: extensions: listed without an engine" {
+		t.Errorf("extensions without an engine: error = %v", err)
+	}
+}
+
+func TestLoad_ReadsExtensions(t *testing.T) {
+	c, err := sqlint.Load(tree(`extensions = ["example.com/ext", "example.com/other"]` + "\n" + config))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"example.com/ext", "example.com/other"}; !slices.Equal(c.Extensions, want) {
+		t.Errorf("Extensions = %q, want %q", c.Extensions, want)
+	}
+}
+
+func TestLoad_ExportsDeclaredEmptyFormsWithAReason(t *testing.T) {
+	cases := map[string]struct {
+		text   string
+		forms  map[string]string
+		reason string
+	}{
+		"empty with a reason": {"[export]\nreason = \"the module adds functions, not syntax\"\nnative_forms = {}\n", map[string]string{}, "the module adds functions, not syntax"},
+		"forms with a reason": {"[export]\nreason = \"vectors\"\n[export.native_forms]\ndistance = '<->'\n", map[string]string{"distance": "<->"}, "vectors"},
+		"absent":              {"[export]\npatterns = \"patterns\"\n", nil, ""},
+	}
+	for name, tc := range cases {
+		c, err := sqlint.Load(tree(tc.text))
+		if err != nil {
+			t.Errorf("%s: Load error = %v", name, err)
+			continue
+		}
+		if (c.Export.NativeForms == nil) != (tc.forms == nil) || !maps.Equal(c.Export.NativeForms, tc.forms) {
+			t.Errorf("%s: NativeForms = %#v, want %#v", name, c.Export.NativeForms, tc.forms)
+		}
+		if c.Export.Reason != tc.reason {
+			t.Errorf("%s: Reason = %q, want %q", name, c.Export.Reason, tc.reason)
+		}
+	}
+	if _, err := sqlint.Load(tree("[export]\nreason = 3\n")); err == nil || !strings.HasPrefix(err.Error(), "sqlint.toml: ") {
+		t.Errorf("a reason that is not a string: error = %v", err)
+	}
+}
+
 func TestLint_ReportsResolutionFailures(t *testing.T) {
 	cases := map[string]string{
 		"sources.app: open missing":                      source(`app = "missing"`),
