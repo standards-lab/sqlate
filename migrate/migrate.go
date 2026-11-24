@@ -187,10 +187,20 @@ func (m *Migrator) Migrations() []Migration { return m.topLayer().Migrations() }
 // missing history table is the zero Version.
 func (m *Migrator) Version(ctx context.Context) (Version, error) { return m.topLayer().Version(ctx) }
 
-// Verify checks every set in declared order, without the lock, that its
-// history is a clean, complete prefix of its migrations, and returns the
-// first fault as a *SetError naming the set.
+// Verify checks, on the pool and without the lock, every extension
+// declaration and then every set, each in declared order, and returns the
+// first fault. An extension fault is an *ExtensionError naming the
+// extension: an active declaration missing but offered, or installed behind
+// its default with an update path, and a removed declaration still
+// installed, are over an *ExtensionPendingError (ErrPending); one the
+// database does not offer is over ErrExtensionUnavailable, and an installed
+// version with no update path to the default over a *NoUpdatePathError,
+// neither of them ErrPending. A set fault is a *SetError naming the set
+// whose history is not a clean, complete prefix of its migrations.
 func (m *Migrator) Verify(ctx context.Context) error {
+	if err := m.verifyExtensions(ctx); err != nil {
+		return err
+	}
 	for _, l := range m.layers {
 		if err := m.verify(ctx, l); err != nil {
 			return err

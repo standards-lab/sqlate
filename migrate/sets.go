@@ -70,6 +70,7 @@ func (l Layer) Version(ctx context.Context) (Version, error) {
 // complete prefix of its migrations. Every fault is a *SetError naming the
 // set: a dirty row unwraps to a *DirtyError, a row the set does not carry
 // to an *UnknownVersionError, and unapplied migrations to a *PendingError.
+// It reads no extension; Migrator.Verify checks them.
 func (l Layer) Verify(ctx context.Context) error { return l.m.verify(ctx, l.m.layers[l.i]) }
 
 // Status reads the set's state without the lock.

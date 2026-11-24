@@ -582,3 +582,154 @@ func TestRevertsAndForce_RunNoExtensionStatement(t *testing.T) {
 		})
 	}
 }
+
+func TestVerify_ClassifiesEachExtensionFault(t *testing.T) {
+	classes := []error{migrate.ErrExtensionUnavailable, migrate.ErrNoUpdatePath, migrate.ErrPending}
+	cases := []struct {
+		name    string
+		decl    migrate.Extension
+		state   sqltest.Response
+		class   error
+		pending *migrate.ExtensionPendingError
+		noPath  *migrate.NoUpdatePathError
+	}{
+		{"missing", migrate.Extension{Name: "pg_trgm"}, state(nil, "1.6", false), migrate.ErrPending, &migrate.ExtensionPendingError{Default: "1.6"}, nil},
+		{"behind", migrate.Extension{Name: "pg_trgm"}, state("1.4", "1.8", true), migrate.ErrPending, &migrate.ExtensionPendingError{Installed: "1.4", Default: "1.8"}, nil},
+		{"removed installed", migrate.Extension{Name: "old", Removed: true}, state("1.0", "1.0", false), migrate.ErrPending, &migrate.ExtensionPendingError{Removed: true, Installed: "1.0", Default: "1.0"}, nil},
+		{"removed installed, not offered", migrate.Extension{Name: "old", Removed: true}, state("0.9", nil, false), migrate.ErrPending, &migrate.ExtensionPendingError{Removed: true, Installed: "0.9"}, nil},
+		{"unavailable", migrate.Extension{Name: "vector"}, state(nil, nil, false), migrate.ErrExtensionUnavailable, nil, nil},
+		{"installed, not offered", migrate.Extension{Name: "vector"}, state("0.5", nil, false), migrate.ErrExtensionUnavailable, nil, nil},
+		{"newer than the default", migrate.Extension{Name: "hstore"}, state("2.0", "1.8", false), migrate.ErrNoUpdatePath, nil, &migrate.NoUpdatePathError{Installed: "2.0", Default: "1.8"}},
+		{"behind with no path", migrate.Extension{Name: "hstore"}, state("1.1", "1.8", false), migrate.ErrNoUpdatePath, nil, &migrate.NoUpdatePathError{Installed: "1.1", Default: "1.8"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m, rec := newExtensionMigrator(t, []migrate.Extension{{Name: "citext"}, c.decl},
+				state("1.6", "1.6", false),
+				c.state,
+			)
+			err := m.Verify(context.Background())
+			if e, ok := errors.AsType[*migrate.ExtensionError](err); !ok || e.Extension != c.decl.Name {
+				t.Fatalf("Verify = %v, want an *ExtensionError naming %s", err, c.decl.Name)
+			}
+			if !strings.Contains(err.Error(), `"`+c.decl.Name+`"`) {
+				t.Errorf("%q does not name %s", err.Error(), c.decl.Name)
+			}
+			for _, class := range classes {
+				if got := errors.Is(err, class); got != (class == c.class) {
+					t.Errorf("errors.Is(%v, %v) = %v", err, class, got)
+				}
+			}
+			e, ok := errors.AsType[*migrate.ExtensionPendingError](err)
+			if ok != (c.pending != nil) || ok && *e != *c.pending {
+				t.Errorf("pending detail = %+v, %v; want %+v", e, ok, c.pending)
+			}
+			n, ok := errors.AsType[*migrate.NoUpdatePathError](err)
+			if ok != (c.noPath != nil) || ok && *n != *c.noPath {
+				t.Errorf("no-path detail = %+v, %v; want %+v", n, ok, c.noPath)
+			}
+			if _, ok := errors.AsType[*migrate.SetError](err); ok {
+				t.Errorf("Verify = %v, an extension fault inside a *SetError", err)
+			}
+			assertOps(t, rec, sqltest.OpQuery, sqltest.OpQuery)
+		})
+	}
+}
+
+func TestVerify_ChecksExtensionsInDeclaredOrderOnThePoolThenTheSets(t *testing.T) {
+	declared := []migrate.Extension{{Name: "hstore"}, {Name: "gone", Removed: true}, {Name: "citext"}}
+	t.Run("passing", func(t *testing.T) {
+		m, rec := newExtensionMigrator(t, declared,
+			state("1.8", "1.8", false),
+			state(nil, "1.2", false),
+			state("1.6", "1.6", true),
+			exists(true), allApplied,
+		)
+		if err := m.Verify(context.Background()); err != nil {
+			t.Fatalf("Verify = %v", err)
+		}
+		assertOps(t, rec, slices.Repeat([]sqltest.Op{sqltest.OpQuery}, 5)...)
+		calls := rec.Calls()
+		for i, e := range declared {
+			if i < len(calls) && (calls[i].SQL != stateQuery || calls[i].Args[0] != e.Name) {
+				t.Errorf("call %d = %+v, want the state query bound to %q", i, calls[i], e.Name)
+			}
+		}
+		assertNoLock(t, rec)
+	})
+	t.Run("set pending after passing extensions", func(t *testing.T) {
+		m, rec := newExtensionMigrator(t, declared,
+			state("1.8", "1.8", false),
+			state(nil, "1.2", false),
+			state("1.6", "1.6", true),
+			exists(true), history([]driver.Value{int64(1), "a", false}),
+		)
+		err := m.Verify(context.Background())
+		if e, ok := errors.AsType[*migrate.SetError](err); !ok || e.Set != "app" || !errors.Is(err, migrate.ErrPending) {
+			t.Fatalf("Verify = %v, want a pending *SetError naming app", err)
+		}
+		if _, ok := errors.AsType[*migrate.ExtensionError](err); ok {
+			t.Errorf("Verify = %v, a set fault inside an *ExtensionError", err)
+		}
+		assertOps(t, rec, slices.Repeat([]sqltest.Op{sqltest.OpQuery}, 5)...)
+		assertNoLock(t, rec)
+	})
+	t.Run("extension fault before a pending set", func(t *testing.T) {
+		m, rec := newExtensionMigrator(t, declared,
+			state("1.8", "1.8", false),
+			state("1.0", "1.2", false),
+			exists(false),
+		)
+		err := m.Verify(context.Background())
+		if e, ok := errors.AsType[*migrate.ExtensionError](err); !ok || e.Extension != "gone" || !errors.Is(err, migrate.ErrPending) {
+			t.Fatalf("Verify = %v, want a pending *ExtensionError naming gone", err)
+		}
+		if _, ok := errors.AsType[*migrate.SetError](err); ok {
+			t.Errorf("Verify = %v, reported the set", err)
+		}
+		if got := len(rec.Calls()); got != 2 {
+			t.Errorf("Verify made %d calls, want the two state reads", got)
+		}
+		if err := m.Layers()[0].Verify(context.Background()); !errors.Is(err, migrate.ErrPending) {
+			t.Errorf("Layer.Verify = %v, want the set pending", err)
+		}
+		assertOps(t, rec, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery)
+		assertNoLock(t, rec)
+	})
+}
+
+func TestVerify_StateFailureNamesTheExtension(t *testing.T) {
+	m, rec := newExtensionMigrator(t, []migrate.Extension{{Name: "hstore"}}, failed)
+	err := m.Verify(context.Background())
+	if !errors.Is(err, errDriver) {
+		t.Fatalf("Verify = %v, want the engine error", err)
+	}
+	if e, ok := errors.AsType[*migrate.ExtensionError](err); !ok || e.Extension != "hstore" {
+		t.Errorf("Verify = %v, want an *ExtensionError naming hstore", err)
+	}
+	assertOps(t, rec, sqltest.OpQuery)
+}
+
+func TestLayerVerifyAndStatus_ReadNoExtension(t *testing.T) {
+	m, rec := newExtensionMigrator(t, []migrate.Extension{{Name: "pg_trgm"}, {Name: "old", Removed: true}},
+		exists(true), allApplied,
+		exists(true), allApplied,
+	)
+	if err := m.Layers()[0].Verify(context.Background()); err != nil {
+		t.Errorf("Layer.Verify = %v", err)
+	}
+	if _, err := m.Status(context.Background()); err != nil {
+		t.Errorf("Status = %v", err)
+	}
+	assertOps(t, rec, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery)
+	assertNoExtensionStatement(t, rec)
+}
+
+func assertNoLock(t *testing.T, rec *sqltest.Recorder) {
+	t.Helper()
+	for _, c := range rec.Calls() {
+		if strings.Contains(c.SQL, "lock(") {
+			t.Errorf("ran lock statement %q", c.SQL)
+		}
+	}
+}

@@ -406,7 +406,7 @@ set acts on that set. `Up`, `Verify`, `Reset`, and `Status` cover every set.
 | `Steps(ctx, n)` | top | Applies the next n when positive, after activating the declared extensions as `Up` does, reverts the last -n when negative; fewer remaining is not an error. |
 | `Force(ctx, version)` | top | Sets the history to the version as an operator override: every migration through it recorded clean, those above it removed, a dirty row cleared; nothing runs against the schema. |
 | `Reset(ctx)` | every | Reverts every set in reverse declared order and drops each set's history table once that set is reverted, so a later `Up` replays every set from zero. |
-| `Verify(ctx)` | every | Checks, without the lock, that each history is a clean, complete prefix of its set, and returns the first fault. |
+| `Verify(ctx)` | every | Checks, without the lock, every extension declaration and then that each history is a clean, complete prefix of its set, and returns the first fault. |
 | `Status(ctx)` | every | Reads, without the lock, a `SetStatus` per set: `Name`, `Table`, `Version` (the highest applied), `Latest`, `Pending`, and `Dirty`. |
 | `Version(ctx)` | top | Reads the history's head: the highest applied version and whether it is dirty. |
 | `Extensions(ctx)` | none | Reads, without the lock, an `ExtensionStatus` per extension declaration, in declared order. |
@@ -415,7 +415,7 @@ set acts on that set. `Up`, `Verify`, `Reset`, and `Status` cover every set.
 **Layers.** `Layers()` returns a `Layer` handle on every set in declared order, and
 `Layer(name)` returns the one named, reporting whether it exists. A `Layer` has `Name`, `Table`,
 `Migrations`, `Version`, `Verify`, `Status`, `Steps`, `Down`, and `Force`, each acting on that
-set alone. The ordering between sets holds for every verb that runs migrations: a revert is
+set alone; `Layer.Verify` and `Layer.Status` read no extension. The ordering between sets holds for every verb that runs migrations: a revert is
 refused with `ErrAboveApplied` while a set above has applied migrations, and an apply is refused
 with `ErrBelowPending` while a set below has pending ones. The top set's `Down` and `Steps` on
 the migrator follow the same rule.
@@ -492,6 +492,17 @@ statements in its own transaction, in declared order, and is logged through `Opt
 from. A failed activation stops the run with an `*ExtensionError` over the mapped driver error,
 leaving the activations before it in place and no set applied. `Down`, a negative `Steps`,
 `Reset`, and `Force` do not run the stage.
+
+`Verify` checks the declarations before any set, on the pool and without the lock, in declared
+order, and returns the first fault as an `*ExtensionError` naming the extension. An active
+declaration missing but offered, or installed behind its default with an update path, and a
+removed declaration still installed, are over an `*ExtensionPendingError`, so they unwrap to
+`ErrPending`. One the database does not offer is over `ErrExtensionUnavailable`, and an installed
+version with no update path to the default is over a `*NoUpdatePathError`; neither is
+`ErrPending`, since `Up` would refuse them rather than resolve them. A declaration at its default,
+and a removed one not installed, pass. Once every declaration passes, `Verify` checks the sets.
+These verdicts match `Up`'s checks and `Extensions`' `Pending`. `Layer.Verify` and `Status` read
+no extension.
 
 **Errors.** `ErrNoLocker`, `ErrDirty` (`DirtyError`), `ErrPending` (`PendingError`, the
 unapplied versions), `ErrUnknownVersion` (`UnknownVersionError`, an applied row the set does

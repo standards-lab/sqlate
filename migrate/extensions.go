@@ -91,13 +91,13 @@ func (m *Migrator) Extensions(ctx context.Context) ([]ExtensionStatus, error) {
 		if err != nil {
 			return nil, err
 		}
-		s := ExtensionStatus{Name: e.Name, Removed: e.Removed, Installed: st.installed, Default: st.def}
-		if e.Removed {
-			s.Pending = st.installed != ""
-		} else {
-			s.Pending = st.def != "" && (st.installed == "" || st.installed != st.def && st.path)
-		}
-		out = append(out, s)
+		out = append(out, ExtensionStatus{
+			Name:      e.Name,
+			Removed:   e.Removed,
+			Installed: st.installed,
+			Default:   st.def,
+			Pending:   errors.Is(classify(e, st), ErrPending),
+		})
 	}
 	return out, nil
 }
@@ -109,6 +109,35 @@ func (m *Migrator) extensionState(ctx context.Context, q querier, e Extension) (
 		return extensionState{}, &ExtensionError{Extension: e.Name, Err: err}
 	}
 	return extensionState{installed: installed.String, def: def.String, path: path.Bool}, nil
+}
+
+func classify(e Extension, st extensionState) error {
+	switch {
+	case e.Removed && st.installed != "":
+		return &ExtensionPendingError{Removed: true, Installed: st.installed, Default: st.def}
+	case e.Removed:
+		return nil
+	case st.def == "":
+		return ErrExtensionUnavailable
+	case st.installed == st.def:
+		return nil
+	case st.installed != "" && !st.path:
+		return &NoUpdatePathError{Installed: st.installed, Default: st.def}
+	}
+	return &ExtensionPendingError{Installed: st.installed, Default: st.def}
+}
+
+func (m *Migrator) verifyExtensions(ctx context.Context) error {
+	for _, e := range m.extensions {
+		st, err := m.extensionState(ctx, m.db, e)
+		if err != nil {
+			return err
+		}
+		if err := classify(e, st); err != nil {
+			return &ExtensionError{Extension: e.Name, Err: err}
+		}
+	}
+	return nil
 }
 
 func (m *Migrator) activateExtensions(ctx context.Context, conn *sql.Conn) error {
@@ -125,13 +154,11 @@ func (m *Migrator) activateExtensions(ctx context.Context, conn *sql.Conn) error
 		if err != nil {
 			return err
 		}
-		switch {
-		case st.def == "":
-			return &ExtensionError{Extension: e.Name, Err: ErrExtensionUnavailable}
-		case st.installed == st.def:
+		switch err := classify(e, st); {
+		case err == nil:
 			continue
-		case st.installed != "" && !st.path:
-			return &ExtensionError{Extension: e.Name, Err: &NoUpdatePathError{Installed: st.installed, Default: st.def}}
+		case !errors.Is(err, ErrPending):
+			return &ExtensionError{Extension: e.Name, Err: err}
 		}
 		due = append(due, activation{e: e, st: st})
 	}
