@@ -1,9 +1,11 @@
 package migrate_test
 
 import (
+	"bytes"
 	"context"
 	"database/sql/driver"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
@@ -35,9 +37,13 @@ func state(installed, def driver.Value, path bool) sqltest.Response {
 
 func newExtensionMigrator(t *testing.T, declared []migrate.Extension, responses ...sqltest.Response) (*migrate.Migrator, *sqltest.Recorder) {
 	t.Helper()
+	return newExtensionSets(t, []migrate.Set{{Name: "app", Migrations: set}}, migrate.Options{Extensions: declared}, responses...)
+}
+
+func newExtensionSets(t *testing.T, sets []migrate.Set, opts migrate.Options, responses ...sqltest.Response) (*migrate.Migrator, *sqltest.Recorder) {
+	t.Helper()
 	pool, rec := sqltest.Open(t, responses...)
-	db := sqlate.Wrap(pool, extensionDialect{})
-	m, err := migrate.New(db, []migrate.Set{{Name: "app", Migrations: set}}, migrate.Options{Extensions: declared})
+	m, err := migrate.New(sqlate.Wrap(pool, extensionDialect{}), sets, opts)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -205,5 +211,374 @@ func TestExtensionError_ClassifiesAndReachesTheDetail(t *testing.T) {
 				t.Errorf("%q does not name %s", c.err.Error(), w)
 			}
 		}
+	}
+}
+
+var (
+	stateQuery = extensionDialect{}.ExtensionState("$1")
+	allApplied = history([]driver.Value{int64(1), "a", false}, []driver.Value{int64(2), "b", false})
+)
+
+func trace(calls []sqltest.Call) []string {
+	out := make([]string, len(calls))
+	for i, c := range calls {
+		out[i] = string(c.Op) + " " + c.SQL
+	}
+	return out
+}
+
+func activation(name string) []string {
+	out := []string{"begin "}
+	for _, stmt := range (extensionDialect{}).ActivateExtension(name) {
+		out = append(out, "exec "+stmt)
+	}
+	return append(out, "commit ")
+}
+
+func assertNoExtensionStatement(t *testing.T, rec *sqltest.Recorder) {
+	t.Helper()
+	for _, c := range rec.Calls() {
+		if c.SQL == stateQuery || strings.Contains(c.SQL, "EXTENSION") {
+			t.Errorf("ran extension statement %q", c.SQL)
+		}
+	}
+}
+
+func TestUp_ActivatesInDeclaredOrderEachInItsOwnTransactionBeforeTheSets(t *testing.T) {
+	var logs bytes.Buffer
+	pool, rec := sqltest.Open(t,
+		locked, created, history(),
+		state("1.4", "1.8", true),
+		state("1.6", "1.6", false),
+		state(nil, "1.6", false),
+		ran, ran,
+		ran, ran,
+		ran, rowWritten,
+		rowWritten, ran, rowWritten,
+		unlocked,
+	)
+	m, err := migrate.New(sqlate.Wrap(pool, extensionDialect{}), []migrate.Set{{Name: "app", Migrations: set}}, migrate.Options{
+		Logger: slog.New(slog.NewTextHandler(&logs, nil)),
+		Extensions: []migrate.Extension{
+			{Name: "hstore"},
+			{Name: "citext"},
+			{Name: "old", Removed: true},
+			{Name: "pg_trgm"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if err := m.Up(context.Background()); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	assertOps(t, rec,
+		sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery,
+		sqltest.OpQuery, sqltest.OpQuery, sqltest.OpQuery,
+		sqltest.OpBegin, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+		sqltest.OpBegin, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+		sqltest.OpBegin, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+		sqltest.OpExec, sqltest.OpExec, sqltest.OpExec,
+		sqltest.OpQuery,
+	)
+	calls := rec.Calls()
+	if len(calls) != 22 {
+		t.Fatalf("%d calls, want 22", len(calls))
+	}
+	for i, name := range []string{"hstore", "citext", "pg_trgm"} {
+		if c := calls[3+i]; c.SQL != stateQuery || c.Args[0] != name {
+			t.Errorf("state read %d = %+v, want %s", i, c, name)
+		}
+	}
+	want := slices.Concat(activation("hstore"), activation("pg_trgm"))
+	if got := trace(calls[6:14]); !slices.Equal(got, want) {
+		t.Errorf("activations =\n%q\nwant\n%q", got, want)
+	}
+	if calls[15].SQL != set[0].Up || calls[19].SQL != set[1].Up {
+		t.Errorf("sets ran %q and %q after the activations", calls[15].SQL, calls[19].SQL)
+	}
+	lines := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	if len(lines) != 4 {
+		t.Fatalf("log =\n%s\nwant two activations and two applies", logs.String())
+	}
+	for i, w := range [][]string{
+		{"extension activated", "extension=hstore", "version=1.8", "from=1.4"},
+		{"extension activated", "extension=pg_trgm", "version=1.6"},
+		{"migration applied", "version=1"},
+		{"migration applied", "version=2"},
+	} {
+		for _, part := range w {
+			if !strings.Contains(lines[i], part) {
+				t.Errorf("log line %d = %q, want %q", i, lines[i], part)
+			}
+		}
+	}
+	if strings.Contains(lines[1], "from=") {
+		t.Errorf("log line %q names an installed version for a missing extension", lines[1])
+	}
+}
+
+func TestUp_DeclarationsAtTheDefaultRunNoStatement(t *testing.T) {
+	m, rec := newExtensionMigrator(t, []migrate.Extension{{Name: "hstore"}, {Name: "citext"}},
+		locked, created, allApplied,
+		state("1.8", "1.8", false),
+		state("1.6", "1.6", true),
+		unlocked,
+	)
+	if err := m.Up(context.Background()); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	assertOps(t, rec,
+		sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery,
+		sqltest.OpQuery, sqltest.OpQuery,
+		sqltest.OpQuery,
+	)
+}
+
+func TestApply_ChecksEveryDeclarationBeforeActivatingAnyOrApplyingASet(t *testing.T) {
+	declared := []migrate.Extension{{Name: "hstore"}, {Name: "citext"}}
+	runs := map[string]func(*migrate.Migrator) error{
+		"Up":             func(m *migrate.Migrator) error { return m.Up(context.Background()) },
+		"Migrator.Steps": func(m *migrate.Migrator) error { return m.Steps(context.Background(), 1) },
+		"Layer.Steps":    func(m *migrate.Migrator) error { return m.Layers()[0].Steps(context.Background(), 1) },
+	}
+	for run, fn := range runs {
+		t.Run(run+"/newer than the default", func(t *testing.T) {
+			m, rec := newExtensionMigrator(t, declared,
+				locked, created, history(),
+				state(nil, "1.8", false),
+				state("2.0", "1.8", false),
+				unlocked,
+			)
+			err := fn(m)
+			if e, ok := errors.AsType[*migrate.ExtensionError](err); !ok || e.Extension != "citext" {
+				t.Fatalf("%s = %v, want an *ExtensionError naming citext", run, err)
+			}
+			if e, ok := errors.AsType[*migrate.NoUpdatePathError](err); !ok || e.Installed != "2.0" || e.Default != "1.8" {
+				t.Errorf("%s = %v, want a *NoUpdatePathError naming 2.0 and 1.8", run, err)
+			}
+			assertOps(t, rec,
+				sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery,
+				sqltest.OpQuery, sqltest.OpQuery,
+				sqltest.OpQuery,
+			)
+		})
+		t.Run(run+"/behind with no path", func(t *testing.T) {
+			m, rec := newExtensionMigrator(t, declared,
+				locked, created, history(),
+				state("1.4", "1.8", true),
+				state("1.1", "1.6", false),
+				unlocked,
+			)
+			if e, ok := errors.AsType[*migrate.NoUpdatePathError](fn(m)); !ok || e.Installed != "1.1" || e.Default != "1.6" {
+				t.Errorf("%s = %+v, want a *NoUpdatePathError naming 1.1 and 1.6", run, e)
+			}
+			assertOps(t, rec,
+				sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery,
+				sqltest.OpQuery, sqltest.OpQuery,
+				sqltest.OpQuery,
+			)
+		})
+		t.Run(run+"/unavailable", func(t *testing.T) {
+			m, rec := newExtensionMigrator(t, declared,
+				locked, created, history(),
+				state(nil, "1.8", false),
+				state(nil, nil, false),
+				unlocked,
+			)
+			err := fn(m)
+			if !errors.Is(err, migrate.ErrExtensionUnavailable) {
+				t.Fatalf("%s = %v, want ErrExtensionUnavailable", run, err)
+			}
+			if e, ok := errors.AsType[*migrate.ExtensionError](err); !ok || e.Extension != "citext" {
+				t.Errorf("%s = %v, want an *ExtensionError naming citext", run, err)
+			}
+			assertOps(t, rec,
+				sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery,
+				sqltest.OpQuery, sqltest.OpQuery,
+				sqltest.OpQuery,
+			)
+		})
+	}
+}
+
+func TestUp_ActivationFailureStopsBeforeTheNextDeclarationAndTheSets(t *testing.T) {
+	m, rec := newExtensionMigrator(t, []migrate.Extension{{Name: "hstore"}, {Name: "pg_trgm"}},
+		locked, created, history(),
+		state(nil, "1.8", false),
+		state(nil, "1.6", false),
+		failed,
+		unlocked,
+	)
+	err := m.Up(context.Background())
+	if !errors.Is(err, errDriver) {
+		t.Fatalf("Up = %v, want the engine error", err)
+	}
+	if _, ok := errors.AsType[*sqltest.MappedError](err); !ok {
+		t.Error("engine error did not cross the mapping boundary")
+	}
+	if e, ok := errors.AsType[*migrate.ExtensionError](err); !ok || e.Extension != "hstore" {
+		t.Errorf("Up = %v, want an *ExtensionError naming hstore", err)
+	}
+	assertOps(t, rec,
+		sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery,
+		sqltest.OpQuery, sqltest.OpQuery,
+		sqltest.OpBegin, sqltest.OpExec, sqltest.OpRollback,
+		sqltest.OpQuery,
+	)
+}
+
+func TestSteps_PositiveActivatesBeforeApplying(t *testing.T) {
+	declared := []migrate.Extension{{Name: "pg_trgm"}}
+	t.Run("Migrator.Steps", func(t *testing.T) {
+		m, rec := newExtensionMigrator(t, declared,
+			locked, created, history(),
+			state(nil, "1.6", false),
+			ran, ran,
+			ran, rowWritten,
+			unlocked,
+		)
+		if err := m.Steps(context.Background(), 1); err != nil {
+			t.Fatalf("Steps: %v", err)
+		}
+		calls := rec.Calls()
+		assertOps(t, rec,
+			sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery,
+			sqltest.OpQuery,
+			sqltest.OpBegin, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+			sqltest.OpBegin, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+			sqltest.OpQuery,
+		)
+		if len(calls) == 13 {
+			if got := trace(calls[4:8]); !slices.Equal(got, activation("pg_trgm")) {
+				t.Errorf("activation = %q", got)
+			}
+			if calls[9].SQL != set[0].Up {
+				t.Errorf("applied %q after the activation, want %q", calls[9].SQL, set[0].Up)
+			}
+		}
+	})
+	t.Run("Layer.Steps", func(t *testing.T) {
+		m, rec := newExtensionSets(t, []migrate.Set{library, app}, migrate.Options{Extensions: declared},
+			locked, created, history(), created, history(),
+			state(nil, "1.6", false),
+			ran, ran,
+			step, rowWritten,
+			unlocked,
+		)
+		lib, _ := m.Layer("lib")
+		if err := lib.Steps(context.Background(), 1); err != nil {
+			t.Fatalf("Steps: %v", err)
+		}
+		calls := rec.Calls()
+		assertOps(t, rec,
+			sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery, sqltest.OpExec, sqltest.OpQuery,
+			sqltest.OpQuery,
+			sqltest.OpBegin, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+			sqltest.OpBegin, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+			sqltest.OpQuery,
+		)
+		if len(calls) == 15 {
+			if got := trace(calls[6:10]); !slices.Equal(got, activation("pg_trgm")) {
+				t.Errorf("activation = %q", got)
+			}
+			if calls[11].SQL != library.Migrations[0].Up {
+				t.Errorf("applied %q after the activation, want %q", calls[11].SQL, library.Migrations[0].Up)
+			}
+		}
+	})
+	t.Run("refused below pending", func(t *testing.T) {
+		m, rec := newExtensionSets(t, []migrate.Set{library, app}, migrate.Options{Extensions: declared},
+			locked, created, history(), created, history(),
+			unlocked,
+		)
+		top, _ := m.Layer("app")
+		if err := top.Steps(context.Background(), 1); !errors.Is(err, migrate.ErrBelowPending) {
+			t.Fatalf("Steps = %v, want ErrBelowPending", err)
+		}
+		assertOps(t, rec,
+			sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery, sqltest.OpExec, sqltest.OpQuery,
+			sqltest.OpQuery,
+		)
+		assertNoExtensionStatement(t, rec)
+	})
+}
+
+func TestUp_UnlockedRunsTheStageWithoutTheLock(t *testing.T) {
+	m, rec := newExtensionSets(t, []migrate.Set{{Name: "app", Migrations: set}}, migrate.Options{
+		Unlocked:   true,
+		Extensions: []migrate.Extension{{Name: "pg_trgm"}},
+	},
+		created, allApplied,
+		state(nil, "1.6", false),
+		ran, ran,
+	)
+	if err := m.Up(context.Background()); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	assertOps(t, rec,
+		sqltest.OpExec, sqltest.OpQuery,
+		sqltest.OpQuery,
+		sqltest.OpBegin, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+	)
+	if got := trace(rec.Calls()); len(got) == 7 && !slices.Equal(got[3:], activation("pg_trgm")) {
+		t.Errorf("activation = %q", got[3:])
+	}
+}
+
+func TestRevertsAndForce_RunNoExtensionStatement(t *testing.T) {
+	declared := []migrate.Extension{{Name: "pg_trgm"}}
+	revert := []sqltest.Op{
+		sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery,
+		sqltest.OpExec, sqltest.OpExec, sqltest.OpExec,
+		sqltest.OpQuery,
+	}
+	cases := []struct {
+		name      string
+		run       func(*migrate.Migrator) error
+		responses []sqltest.Response
+		ops       []sqltest.Op
+	}{
+		{
+			"Down", func(m *migrate.Migrator) error { return m.Down(context.Background(), 1) },
+			[]sqltest.Response{locked, created, allApplied, rowWritten, ran, rowWritten, unlocked},
+			revert,
+		},
+		{
+			"Steps negative", func(m *migrate.Migrator) error { return m.Steps(context.Background(), -1) },
+			[]sqltest.Response{locked, created, allApplied, rowWritten, ran, rowWritten, unlocked},
+			revert,
+		},
+		{
+			"Steps zero", func(m *migrate.Migrator) error { return m.Steps(context.Background(), 0) },
+			nil,
+			nil,
+		},
+		{
+			"Reset", func(m *migrate.Migrator) error { return m.Reset(context.Background()) },
+			[]sqltest.Response{locked, created, allApplied, rowWritten, ran, rowWritten, ran, rowWritten, ran, unlocked},
+			[]sqltest.Op{
+				sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery,
+				sqltest.OpExec, sqltest.OpExec, sqltest.OpExec,
+				sqltest.OpBegin, sqltest.OpExec, sqltest.OpExec, sqltest.OpCommit,
+				sqltest.OpExec,
+				sqltest.OpQuery,
+			},
+		},
+		{
+			"Force", func(m *migrate.Migrator) error { return m.Force(context.Background(), 1) },
+			[]sqltest.Response{locked, created, rowWritten, rowMissing, rowWritten, unlocked},
+			[]sqltest.Op{sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpExec, sqltest.OpQuery},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			m, rec := newExtensionMigrator(t, declared, c.responses...)
+			if err := c.run(m); err != nil {
+				t.Fatalf("%s: %v", c.name, err)
+			}
+			assertOps(t, rec, c.ops...)
+			assertNoExtensionStatement(t, rec)
+		})
 	}
 }

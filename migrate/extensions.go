@@ -110,3 +110,48 @@ func (m *Migrator) extensionState(ctx context.Context, q querier, e Extension) (
 	}
 	return extensionState{installed: installed.String, def: def.String, path: path.Bool}, nil
 }
+
+func (m *Migrator) activateExtensions(ctx context.Context, conn *sql.Conn) error {
+	type activation struct {
+		e  Extension
+		st extensionState
+	}
+	var due []activation
+	for _, e := range m.extensions {
+		if e.Removed {
+			continue
+		}
+		st, err := m.extensionState(ctx, conn, e)
+		if err != nil {
+			return err
+		}
+		switch {
+		case st.def == "":
+			return &ExtensionError{Extension: e.Name, Err: ErrExtensionUnavailable}
+		case st.installed == st.def:
+			continue
+		case st.installed != "" && !st.path:
+			return &ExtensionError{Extension: e.Name, Err: &NoUpdatePathError{Installed: st.installed, Default: st.def}}
+		}
+		due = append(due, activation{e: e, st: st})
+	}
+	for _, a := range due {
+		err := m.inTx(ctx, conn, func(tx *sql.Tx) error {
+			for _, stmt := range m.extCatalog.ActivateExtension(a.e.Name) {
+				if _, err := tx.ExecContext(ctx, stmt); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			return &ExtensionError{Extension: a.e.Name, Err: err}
+		}
+		if a.st.installed == "" {
+			m.log("extension activated", "extension", a.e.Name, "version", a.st.def)
+		} else {
+			m.log("extension activated", "extension", a.e.Name, "version", a.st.def, "from", a.st.installed)
+		}
+	}
+	return nil
+}

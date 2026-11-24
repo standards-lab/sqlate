@@ -401,9 +401,9 @@ set acts on that set. `Up`, `Verify`, `Reset`, and `Status` cover every set.
 
 | Method | Sets | Effect |
 |---|---|---|
-| `Up(ctx)` | every | Applies every pending migration, sets in declared order. |
+| `Up(ctx)` | every | Activates the declared extensions, then applies every pending migration, sets in declared order. |
 | `Down(ctx, n)` | top | Reverts the n most recently applied; a migration without down text is `ErrNoDown`. |
-| `Steps(ctx, n)` | top | Applies the next n when positive, reverts the last -n when negative; fewer remaining is not an error. |
+| `Steps(ctx, n)` | top | Applies the next n when positive, after activating the declared extensions as `Up` does, reverts the last -n when negative; fewer remaining is not an error. |
 | `Force(ctx, version)` | top | Sets the history to the version as an operator override: every migration through it recorded clean, those above it removed, a dirty row cleared; nothing runs against the schema. |
 | `Reset(ctx)` | every | Reverts every set in reverse declared order and drops each set's history table once that set is reverted, so a later `Up` replays every set from zero. |
 | `Verify(ctx)` | every | Checks, without the lock, that each history is a clean, complete prefix of its set, and returns the first fault. |
@@ -476,6 +476,22 @@ while its extension is missing but offered, or installed behind the default with
 it; an extension the database does not offer, or one with no update path, is not pending. A
 removed declaration is pending while it is still installed. An extension the database does not offer reports an empty
 `Default` and is not an error.
+
+`Up` and a positive `Steps`, on the migrator or on a layer, activate the declarations. The stage
+runs inside the run's lock, on its pinned connection, or without the lock under `Unlocked`, as
+the sets do. It comes after every set's history is checked and after a layer's ordering refusal,
+and before any migration runs. It reads every active declaration first, skipping removed ones,
+and refuses the run before activating any. An extension the database does not offer fails with
+an `*ExtensionError` over `ErrExtensionUnavailable`. An installed version that differs from the
+default with no update path to it, which covers one newer than the default, fails with an
+`*ExtensionError` over a `*NoUpdatePathError` naming both versions. Once every declaration passes,
+a declaration already at the default runs no statement, so a pre-installed database passes under
+a role that cannot create extensions. Each missing or older one runs `ActivateExtension`'s
+statements in its own transaction, in declared order, and is logged through `Options.Logger` as
+`extension activated` with its name, the default version, and the installed version it came
+from. A failed activation stops the run with an `*ExtensionError` over the mapped driver error,
+leaving the activations before it in place and no set applied. `Down`, a negative `Steps`,
+`Reset`, and `Force` do not run the stage.
 
 **Errors.** `ErrNoLocker`, `ErrDirty` (`DirtyError`), `ErrPending` (`PendingError`, the
 unapplied versions), `ErrUnknownVersion` (`UnknownVersionError`, an applied row the set does

@@ -25,8 +25,9 @@ type Options struct {
 	// a lock of its own around every run; concurrent starters without one
 	// are unsafe.
 	Unlocked bool
-	// Logger records each applied and reverted migration, each forced
-	// version, and each history table Reset drops; nil is silent.
+	// Logger records each activated extension, each applied and reverted
+	// migration, each forced version, and each history table Reset drops;
+	// nil is silent.
 	Logger *slog.Logger
 	// Extensions declares the database extensions the migrator manages, in
 	// order, each by a distinct, non-empty name. Declaring any requires a
@@ -198,15 +199,24 @@ func (m *Migrator) Verify(ctx context.Context) error {
 	return nil
 }
 
-// Up applies every pending migration of every set, sets in declared order,
-// under one lock on one connection. Every set's history is checked first,
-// so a dirty set or a history that does not match its set refuses the run
-// before any migration runs. The first failure stops the run; the sets
-// before it stay applied.
+// Up activates the declared extensions and then applies every pending
+// migration of every set, sets in declared order, under one lock on one
+// connection. Every set's history is checked first, so a dirty set or a
+// history that does not match its set refuses the run before any migration
+// runs. Every active extension declaration is checked next, before any is
+// activated: one the database does not offer refuses the run with an
+// *ExtensionError over ErrExtensionUnavailable, and an installed version
+// with no update path to the default with one over a *NoUpdatePathError.
+// Each declaration not at its default is then activated in its own
+// transaction, in declared order, before any set. The first failure stops
+// the run; what ran before it stays applied.
 func (m *Migrator) Up(ctx context.Context) error {
 	return m.locked(ctx, func(ctx context.Context, conn *sql.Conn) error {
 		applied, err := m.preflight(ctx, conn)
 		if err != nil {
+			return err
+		}
+		if err := m.activateExtensions(ctx, conn); err != nil {
 			return err
 		}
 		for i, l := range m.layers {
@@ -224,7 +234,8 @@ func (m *Migrator) Up(ctx context.Context) error {
 func (m *Migrator) Down(ctx context.Context, n int) error { return m.topLayer().Down(ctx, n) }
 
 // Steps applies the top set's next n pending migrations when n is positive,
-// or reverts its last -n applied when negative; fewer remaining is not an
+// after checking and activating the declared extensions as Up does, or
+// reverts its last -n applied when negative; fewer remaining is not an
 // error.
 func (m *Migrator) Steps(ctx context.Context, n int) error { return m.topLayer().Steps(ctx, n) }
 
