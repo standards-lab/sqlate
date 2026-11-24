@@ -29,7 +29,7 @@ func (l *linter) lintBody(p, text string, end int, delimiter, forms, guard bool)
 		if forms {
 			for _, f := range l.forms {
 				if m := f.re.FindString(code); m != "" {
-					l.report(p, line, fmt.Sprintf("%q (%s) in a standard-tier file; declare the tier native and name the port", m, f.name))
+					l.report(p, line, fmt.Sprintf("%q (%s) in a standard-tier file; declare the tier native and name the port", m, f.label()))
 				}
 			}
 		}
@@ -95,4 +95,11 @@ func codeOnly(line string, inBlock bool) (string, bool) {
 		}
 	}
 	return b.String(), inBlock
+}
+
+func (f form) label() string {
+	if f.from == "" {
+		return f.name
+	}
+	return f.name + ", from " + f.from
 }

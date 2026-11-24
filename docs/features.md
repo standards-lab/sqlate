@@ -612,11 +612,11 @@ patterns = "patterns"
 ```
 
 A glob is slash-separated; each segment is a `path.Match` pattern and `**` matches any run of
-segments. A source or the engine is a path: a directory of the tree, or a module path (its
+segments. A source, the engine, or an extension is a path: a directory of the tree, or a module path (its
 first segment contains a dot). A producer, a module or a directory that contains its own
 `sqlint.toml`, declares in `[export]` what a consumer reads: the directory its patterns
-publish, the overlay directory an engine supplies, and the native forms an engine names. A
-bare directory is the pattern files themselves. An engine is always a producer. The `sql`
+publish, the overlay directory an engine supplies, and the native forms an engine or an
+extension names. A bare directory is the pattern files themselves. An engine is always a producer. The `sql`
 namespace always resolves to the patterns the library embeds: the linter does not read the path
 of a `sql` entry, and applies the entry's overlay, when one is declared, to those patterns.
 
@@ -633,6 +633,26 @@ beside a `reason`, a string saying why it names none; a `reason` may also accomp
 `Load` refuses an `extensions` that is not a list of strings, an empty entry, an entry listed
 twice, and any `extensions` while `engine` is unset, one line each.
 
+`Lint` finds each entry the way it finds the engine: a module path through the `Resolver`, to the
+version `go.mod` pins, a workspace or replace directive included, and anything else as a directory
+of the tree. It accepts a module whose export names at least one native form, or declares the table
+empty beside a non-empty `reason`. Each of these is a finding against `sqlint.toml`, and the rest of
+the tree is linted with what resolved:
+
+- an entry that does not resolve, or has no `sqlint.toml`: `extensions: <entry>: ` and the error;
+- a refused module, one with no `native_forms` table or an empty table and no reason:
+  `extensions: <entry> exports neither native forms nor a reason`; it adds no forms;
+- a form whose expression does not compile: `extensions: <entry>: native_forms.<name>: ` and the
+  error; the module's other forms still apply.
+
+An accepted module's forms are matched exactly where the engine's are, and a finding from one names
+the entry beside the form: `"<=>" (cosine_distance, from github.com/example/sqlate-pgvector) in a
+standard-tier file; declare the tier native and name the port`. A name the engine and an extension
+both export is matched and reported for each. A native file that uses an extension's syntax names
+the extension in its free-text `native:` header, `native: postgres, pgvector — <=> cosine distance`;
+the linter does not read that header, so review checks it. The linter cannot read Go values either,
+so review keeps the `extensions` list in step with `migrate.Options.Extensions`.
+
 ### The checks
 
 | Role | Check | Switch |
@@ -640,7 +660,7 @@ twice, and any `extensions` while `engine` is unset, one line each.
 | statements | The directory compiles against the configured sources, the way a program compiles it: the header grammar, the parameter syntax, the field contract, includes resolving. | always |
 | statements | A file is named for its operation, not its SQL verb (`insert_`, `select_`, `update_`, `upsert_`, `merge_`). | `verb_named` |
 | statements, patterns | `{{` appears in no comment and no string literal. | `delimiter` |
-| statements, patterns | A standard-tier file matches none of the engine's native forms. | `native_forms` |
+| statements, patterns | A standard-tier file matches none of the native forms of the engine and the accepted extensions. | `native_forms` |
 | statements | A statement that includes one of the guard protocol's patterns includes both: a statement with a `SET` list that includes `guard_where` also includes `guard_set`, and a statement that includes `guard_set` also includes `guard_where`. The guard's check and a guarded delete include `guard_where` alone. The include is matched by pattern name under any namespace. | `guard` |
 | patterns | The directory validates as a catalog source: a tier on every file, a port on every native file, parameters only. | always |
 | migrations | A file headed `transaction: none` contains exactly one statement. | `single_statement` |
@@ -652,7 +672,7 @@ twice, and any `extensions` while `engine` is unset, one line each.
 renders `path:line: message`. A nil configuration is the defaults. The `Resolver` turns a
 module path into the filesystem of the module's root; `GoList(root)` resolves through
 `go list -m` in the module at `root`, to the version its `go.mod` pins, a workspace or replace
-directive included. A source or engine that does not resolve is a finding against
+directive included. A source, engine, or extension that does not resolve is a finding against
 `sqlint.toml`, and the rest of the tree is linted with what did. Errors in the file's own
 syntax are `Load`'s, one line each.
 

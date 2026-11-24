@@ -467,3 +467,81 @@ func TestLint_MisspelledNotNull(t *testing.T) {
 	fsys["domain/f/statements/sized.sql"] = &fstest.MapFile{Data: []byte("--| tier: standard\n--| key: id\n--| field: id uuid not null\n--| field: size bigint nott null\nSELECT id, size FROM t")}
 	want(t, lint(fsys, nil), `domain/f/statements: query: sized.sql: field declaration "size bigint nott null": the type contains "not" or "null"`)
 }
+
+func extensionTree(entries ...string) fstest.MapFS {
+	cfg := `extensions = ["` + strings.Join(entries, `", "`) + `"]` + "\n" + config + "\n[statements.\"admin/*/statements\"]\nnative_forms = false\n"
+	fsys := tree(cfg)
+	fsys["vec/sqlint.toml"] = &fstest.MapFile{Data: []byte("[export.native_forms]\ncosine_distance = '<=>'\nreturning = '(?i)\\bRETURNING\\b'\n")}
+	fsys["bare/notes.md"] = &fstest.MapFile{Data: []byte("no export")}
+	fsys["formless/sqlint.toml"] = &fstest.MapFile{Data: []byte("[export]\nreason = \"no table\"\n")}
+	fsys["unexplained/sqlint.toml"] = &fstest.MapFile{Data: []byte("[export]\nnative_forms = {}\n")}
+	fsys["functions/sqlint.toml"] = &fstest.MapFile{Data: []byte("[export]\nreason = \"the extension adds functions, not syntax\"\nnative_forms = {}\n")}
+	fsys["halfbad/sqlint.toml"] = &fstest.MapFile{Data: []byte("[export.native_forms]\nbad = '(unclosed'\ncontains = '@>'\n")}
+	fsys["domain/v/statements/nearest.sql"] = &fstest.MapFile{Data: []byte("--| tier: standard\nSELECT id FROM t\nORDER BY v <=> {{q}}\n, '<=>' -- <=>\nWHERE area && {{box}} AND tags @> {{tags}}")}
+	fsys["domain/v/statements/native.sql"] = &fstest.MapFile{Data: []byte("--| tier: native\n--| native: postgres, pgvector — <=> cosine distance\nSELECT id FROM t ORDER BY v <=> {{q}} WHERE area && {{box}} AND tags @> {{tags}}")}
+	fsys["admin/x/statements/nearest.sql"] = &fstest.MapFile{Data: []byte("--| tier: standard\nSELECT id FROM t ORDER BY v <=> {{q}} WHERE area && {{box}}")}
+	return fsys
+}
+
+var extensionModules = sqlint.Resolver(func(module string) (fs.FS, error) {
+	if module == "example.com/geo" {
+		return fstest.MapFS{"sqlint.toml": {Data: []byte("[export.native_forms]\noverlaps = '&&'\n")}}, nil
+	}
+	return nil, fmt.Errorf("no module %s", module)
+})
+
+func TestLint_ExtensionFormsJoinTheEngines(t *testing.T) {
+	findings := lint(extensionTree("vec", "example.com/geo"), extensionModules)
+	want(t, findings,
+		`domain/v/statements/nearest.sql:3: "<=>" (cosine_distance, from vec) in a standard-tier file; declare the tier native and name the port`,
+		`domain/v/statements/nearest.sql:5: "&&" (overlaps, from example.com/geo) in a standard-tier file; declare the tier native and name the port`,
+		`domain/a/statements/list.sql:4: "RETURNING" (returning, from vec) in a standard-tier file; declare the tier native and name the port`,
+	)
+	if !slices.Contains(findings, `domain/a/statements/list.sql:4: "RETURNING" (returning) in a standard-tier file; declare the tier native and name the port`) {
+		t.Errorf("the engine's finding changed:\n%s", strings.Join(findings, "\n"))
+	}
+	reject(t, findings, "nearest.sql:4:", "domain/v/statements/native.sql", "admin/x/statements/nearest.sql", "sqlint.toml")
+	n := 0
+	for _, f := range findings {
+		if strings.Contains(f, "nearest.sql") {
+			n++
+		}
+	}
+	if n != 2 {
+		t.Errorf("nearest.sql: %d findings, want 2:\n%s", n, strings.Join(findings, "\n"))
+	}
+}
+
+func TestLint_ReportsExtensionFailures(t *testing.T) {
+	cases := map[string]string{
+		"nowhere":             "sqlint.toml: extensions: nowhere: open nowhere: file does not exist",
+		"example.com/missing": "sqlint.toml: extensions: example.com/missing: no module example.com/missing",
+		"bare":                "sqlint.toml: extensions: bare: bare declares no sqlint.toml",
+		"formless":            "sqlint.toml: extensions: formless exports neither native forms nor a reason",
+		"unexplained":         "sqlint.toml: extensions: unexplained exports neither native forms nor a reason",
+		"halfbad":             "sqlint.toml: extensions: halfbad: native_forms.bad: error parsing regexp",
+	}
+	for entry, wantMsg := range cases {
+		findings := lint(extensionTree(entry, "vec"), extensionModules)
+		want(t, findings, wantMsg, `nearest.sql:3: "<=>" (cosine_distance, from vec)`, "insert_thing.sql: named for its SQL verb")
+		sqlintFindings := 0
+		for _, f := range findings {
+			if strings.HasPrefix(f, "sqlint.toml: ") {
+				sqlintFindings++
+			}
+		}
+		if sqlintFindings != 1 {
+			t.Errorf("%s: %d findings against sqlint.toml, want 1:\n%s", entry, sqlintFindings, strings.Join(findings, "\n"))
+		}
+	}
+	want(t, lint(extensionTree("halfbad"), nil), `nearest.sql:5: "@>" (contains, from halfbad)`)
+}
+
+func TestLint_ExtensionWithAReasonAddsNothing(t *testing.T) {
+	with := lint(extensionTree("functions", "vec"), nil)
+	without := lint(extensionTree("vec"), nil)
+	if !slices.Equal(with, without) {
+		t.Errorf("findings with an empty table and a reason:\n%s\nwant those without the entry:\n%s", strings.Join(with, "\n"), strings.Join(without, "\n"))
+	}
+	reject(t, with, "sqlint.toml", "functions")
+}
