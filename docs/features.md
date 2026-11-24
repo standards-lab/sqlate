@@ -819,3 +819,56 @@ sqlate's own `sqlint.toml` lists the module under `extensions` although no `Opti
 in the repository declares pgvector. The listing is a test: the root check resolves the module
 through the committed `go.work`, so the check fails when sqlint refuses the module's export or
 a form does not compile.
+
+### An image with pgvector
+
+The official PostgreSQL image does not ship pgvector, so sqlate's compose image builds it from
+source. `compose/postgres/Dockerfile` is the canonical Dockerfile: a consumer that declares
+pgvector copies it to its own `compose/postgres/Dockerfile` and keeps its pins current.
+
+```dockerfile
+FROM postgres:19.0-alpine
+
+ARG PGVECTOR_VERSION=0.8.7
+
+ADD https://github.com/pgvector/pgvector.git#v${PGVECTOR_VERSION} /usr/src/pgvector
+
+RUN apk add --no-cache --virtual .build-deps build-base \
+    && cd /usr/src/pgvector \
+    && make with_llvm=no OPTFLAGS="" \
+    && make install with_llvm=no \
+    && cd / \
+    && rm -rf /usr/src/pgvector \
+    && apk del .build-deps
+
+ENV POSTGRES_USER=app \
+    POSTGRES_PASSWORD=app \
+    POSTGRES_DB=app
+
+HEALTHCHECK --start-period=30s --start-interval=1s --interval=5s --timeout=3s --retries=5 \
+    CMD ["pg_isready", "-h", "127.0.0.1", "-U", "app", "-d", "app"]
+```
+
+The image has two pins. `FROM` pins PostgreSQL; `ARG PGVECTOR_VERSION` pins pgvector, and the
+`ADD` line fetches pgvector's git repository at the tag `v${PGVECTOR_VERSION}`, so the `ARG` is
+the extension's one version source. `pg_available_extensions` then offers `vector` at that
+version, and `CREATE EXTENSION vector` installs it.
+
+The build flags:
+
+- `with_llvm=no`, on both `make` and `make install`, skips the LLVM bitcode for PostgreSQL's
+  JIT. The image's PostgreSQL is built with LLVM support, so without the flag `make install`
+  looks for the matching `clang`, which the Alpine build tools do not provide, and fails.
+- `OPTFLAGS=""`, on `make`, drops pgvector's default `-march=native`, so the build does not tie
+  the image to the CPU of the machine that built it.
+
+The build tools are installed as a virtual package and removed, with the source, in the same
+layer, so the image grows by only the extension, about 5 MB.
+
+`mise run currency` reads both pins. It compares the `FROM` tag with the image's tags, and an
+`ARG <NAME>_VERSION=<v>` whose `ADD` line fetches
+`https://github.com/<owner>/<repo>.git#v${<NAME>_VERSION}` with that repository's highest
+semver tag, read from the repository's tags since pgvector publishes no GitHub releases. A
+trailing `ARG` is reported as `compose/postgres/Dockerfile: pgvector/pgvector 0.8.6 -> 0.8.7`
+and fails currency; a lookup that fails fails it too. Other `ARG`s are not read. `mise run
+upgrade` does not move the `ARG`; it is raised by hand.

@@ -3,7 +3,9 @@
 # release, one line each, and exits non-zero when it reports any. It reads the
 # network and writes nothing. Run it through `mise run currency`. The actions it
 # checks are those of the project root's workflows and, when the repository nests
-# the project in a subdirectory, of the git top-level's. A scan command that fails
+# the project in a subdirectory, of the git top-level's. A compose Dockerfile's
+# `ARG <NAME>_VERSION` whose `ADD` fetches a GitHub repository at `v${<NAME>_VERSION}`
+# is compared with that repository's highest semver tag. A scan command that fails
 # fails currency.
 set -euo pipefail
 cd "$MISE_PROJECT_ROOT"
@@ -98,6 +100,29 @@ report_outdated_dockerfile_bases() {
 	done
 }
 
+latest_semver_git_tag() {
+	local repo=$1 tags latest
+	tags=$(GIT_TERMINAL_PROMPT=0 git ls-remote --tags --refs "https://github.com/$repo.git") || return
+	latest=$(echo "$tags" | sed -n 's|.*refs/tags/v\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)$|\1|p' | sort -V | tail -n1)
+	[ -n "$latest" ] || return 1
+	echo "$latest"
+}
+
+report_outdated_dockerfile_args() {
+	local dockerfile args name pin repo latest
+	for dockerfile in compose/*/Dockerfile; do
+		[ -e "$dockerfile" ] || continue
+		args=$(sed -n 's/^ARG  *\([A-Za-z0-9_]*_VERSION\)=\([^ ]*\) *$/\1 \2/p' "$dockerfile")
+		while read -r name pin; do
+			[ -n "$name" ] || continue
+			repo=$(sed -n "s|^ADD  *https://github\.com/\([^/ ]*/[^/ ]*\)\.git#v\\\${$name} .*|\1|p" "$dockerfile")
+			[ -n "$repo" ] || continue
+			latest=$(latest_semver_git_tag "$repo")
+			[ "$pin" = "$latest" ] || report "$dockerfile: $repo $pin -> $latest"
+		done <<<"$args"
+	done
+}
+
 root=$(pwd -P)
 top=$(git rev-parse --show-toplevel 2>/dev/null || echo "$root")
 workflows=("$root"/.github/workflows/*.yml)
@@ -112,4 +137,5 @@ report_outdated_mise_tools
 report_outdated_actions
 report_outdated_image_lines
 report_outdated_dockerfile_bases
+report_outdated_dockerfile_args
 exit "$stale"

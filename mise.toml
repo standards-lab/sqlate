@@ -46,7 +46,7 @@ exit "$fail"
 '''
 
 [tasks.currency]
-description = "Report every requirement, Go version, tool, action pin, and image tag behind its latest; writes nothing"
+description = "Report every requirement, Go version, tool, action pin, image tag, and Dockerfile source ARG behind its latest; writes nothing"
 run = "scripts/currency.sh"
 
 [tasks.upgrade]
