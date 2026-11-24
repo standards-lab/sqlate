@@ -3,7 +3,7 @@
 task.run_auto_install = false
 
 [tools]
-"github:standards-lab/claude-plugins" = { version = "0.22.0", version_prefix = "marathon/v" }
+"github:standards-lab/claude-plugins" = { version = "0.24.0", version_prefix = "marathon/v" }
 go = "1.27.4"
 golangci-lint = "2.15.0"
 jq = "1.8.2"
