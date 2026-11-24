@@ -29,6 +29,9 @@
 //
 //   - [Migrator], which runs one or more sets, built by [New] with its
 //     [Options]
+//   - [Extension], one extension declaration, [ExtensionStatus], one
+//     declaration's state, and [ExtensionCatalog], the dialect capability
+//     that supplies the extension statements
 //   - [Set], one migration layer, with [DefaultTable], the history table a
 //     set without one uses
 //   - [Migration], one schema step, and [Files], which reads the file
@@ -41,6 +44,9 @@
 //   - [SetError], an error naming its set, over the details [DirtyError],
 //     [PendingError], and [UnknownVersionError] and their classes
 //     [ErrDirty], [ErrPending], and [ErrUnknownVersion]
+//   - [ExtensionError], an error naming its extension, over the details
+//     [NoUpdatePathError] and [ExtensionPendingError] and the classes
+//     [ErrExtensionUnavailable], [ErrNoUpdatePath], and [ErrPending]
 //   - [ErrNoLocker], [ErrNoDown], [ErrVersionNotFound], [ErrAboveApplied],
 //     and [ErrBelowPending], the refusals of a run, a revert, a force, and
 //     the layer ordering

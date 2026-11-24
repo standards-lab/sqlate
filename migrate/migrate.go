@@ -28,6 +28,10 @@ type Options struct {
 	// Logger records each applied and reverted migration, each forced
 	// version, and each history table Reset drops; nil is silent.
 	Logger *slog.Logger
+	// Extensions declares the database extensions the migrator manages, in
+	// order, each by a distinct, non-empty name. Declaring any requires a
+	// dialect with the ExtensionCatalog capability.
+	Extensions []Extension
 }
 
 // Version is the history's head: the highest applied version and whether
@@ -42,11 +46,14 @@ type Version struct {
 // connection under one lock. Its methods without a set act on the top set,
 // except Up, Verify, Reset, and Status, which cover every set.
 type Migrator struct {
-	db     *sqlate.DB
-	layers []*layer
-	opts   Options
-	locker sqlate.Locker
-	after  func(time.Duration) <-chan time.Time
+	db             *sqlate.DB
+	layers         []*layer
+	opts           Options
+	locker         sqlate.Locker
+	after          func(time.Duration) <-chan time.Time
+	extensions     []Extension
+	extCatalog     ExtensionCatalog
+	extensionQuery string
 }
 
 const (
@@ -60,8 +67,11 @@ var tableName = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 // with a name no other set uses and a history table (DefaultTable when
 // empty, so at most one set may leave it empty) no other set uses, and each
 // set's migrations with positive, strictly increasing versions and names
-// and up texts present. The lock capability and the Catalog are taken from
-// the dialect when it has them. New performs no I/O.
+// and up texts present. Each extension declaration needs a non-empty name
+// no other declaration uses, and any declaration needs a dialect with the
+// ExtensionCatalog capability. The lock capability, the Catalog, and the
+// ExtensionCatalog are taken from the dialect when it has them. New
+// performs no I/O.
 func New(db *sqlate.DB, sets []Set, opts Options) (*Migrator, error) {
 	if db == nil {
 		return nil, errors.New("migrate: nil db")
@@ -106,10 +116,27 @@ func New(db *sqlate.DB, sets []Set, opts Options) (*Migrator, error) {
 			sql:        history(table, db.Dialect().Placeholder, catalog),
 		})
 	}
+	extCatalog, _ := db.Dialect().(ExtensionCatalog)
+	if err := validateExtensions(opts.Extensions, extCatalog); err != nil {
+		return nil, err
+	}
+	var extensionQuery string
+	if extCatalog != nil {
+		extensionQuery = extCatalog.ExtensionState(db.Dialect().Placeholder(1))
+	}
 	if opts.LockName == "" {
 		opts.LockName = "migrate." + layers[len(layers)-1].table
 	}
-	return &Migrator{db: db, layers: layers, opts: opts, locker: locker, after: time.After}, nil
+	return &Migrator{
+		db:             db,
+		layers:         layers,
+		opts:           opts,
+		locker:         locker,
+		after:          time.After,
+		extensions:     slices.Clone(opts.Extensions),
+		extCatalog:     extCatalog,
+		extensionQuery: extensionQuery,
+	}, nil
 }
 
 func validate(set Set) error {

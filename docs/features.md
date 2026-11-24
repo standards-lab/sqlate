@@ -391,9 +391,10 @@ m, err := migrate.New(db, []migrate.Set{
 
 **The migrator.** `New(db, sets, options)` validates the sets (at least one, names and history
 tables distinct, and in each set versions positive and strictly increasing, names and up texts
-present) and takes the lock capability and the `Catalog` from the dialect when it has them. It
-performs no I/O. `Options` has defaults for every field: `LockName` (`migrate.<table>`, over the
-top set's table), `Unlocked`, and `Logger`.
+present), validates the extension declarations, and takes the lock capability, the `Catalog`,
+and the `ExtensionCatalog` from the dialect when it has them. It performs no I/O. `Options` has
+defaults for every field: `LockName` (`migrate.<table>`, over the top set's table), `Unlocked`,
+`Logger`, and `Extensions`.
 
 A method that names no set acts on the top set, the last one declared, so a migrator over one
 set acts on that set. `Up`, `Verify`, `Reset`, and `Status` cover every set.
@@ -408,6 +409,7 @@ set acts on that set. `Up`, `Verify`, `Reset`, and `Status` cover every set.
 | `Verify(ctx)` | every | Checks, without the lock, that each history is a clean, complete prefix of its set, and returns the first fault. |
 | `Status(ctx)` | every | Reads, without the lock, a `SetStatus` per set: `Name`, `Table`, `Version` (the highest applied), `Latest`, `Pending`, and `Dirty`. |
 | `Version(ctx)` | top | Reads the history's head: the highest applied version and whether it is dirty. |
+| `Extensions(ctx)` | none | Reads, without the lock, an `ExtensionStatus` per extension declaration, in declared order. |
 | `Migrations()` | top | Returns a copy of the set's migrations. |
 
 **Layers.** `Layers()` returns a `Layer` handle on every set in declared order, and
@@ -452,11 +454,38 @@ name in every schema, so the `postgres` dialect implements `Catalog` itself. The
 then checks the table after creating it, before reading it, and alters it in place only when
 the check reports it outdated, so a current table is never rewritten.
 
+**Extensions.** `Options.Extensions` declares, in order, the database extensions the migrator
+manages. An `Extension` has a `Name` and a `Removed` flag and no version: the version is the
+default the database image offers. `New` refuses an empty or repeated name, and refuses any
+declaration when the dialect lacks the `ExtensionCatalog` capability. That capability returns
+the engine's statements as text, as `Catalog` does, and quotes the name itself:
+
+- `ExtensionState(param)` is the query that reads one extension, its name bound at `param`, as
+  one row of three columns: the installed version (NULL when not installed), the default version
+  the database offers (NULL when it does not offer the extension), and whether an update path
+  leads from the installed version to the default. No row reads as neither installed nor offered.
+- `ActivateExtension(name)` is the statements that create the extension when it does not exist
+  and then update it to its default.
+- `RemoveExtension(name)` is the statement that drops the extension when it exists, with
+  `RESTRICT`.
+
+`Extensions(ctx)` reads each declaration's state on the pool, without the lock. Each
+`ExtensionStatus` has `Name`, `Removed`, `Installed` (empty when not installed), `Default` (empty
+when the database does not offer the extension), and `Pending`. An active declaration is pending
+while its installed version is not the default, which covers a missing extension; a removed one
+is pending while it is still installed. An extension the database does not offer reports an empty
+`Default` and is not an error.
+
 **Errors.** `ErrNoLocker`, `ErrDirty` (`DirtyError`), `ErrPending` (`PendingError`, the
 unapplied versions), `ErrUnknownVersion` (`UnknownVersionError`, an applied row the set does
 not contain), `ErrNoDown`, `ErrVersionNotFound`, `ErrAboveApplied`, and `ErrBelowPending`. An
 error from one set's history or migrations is a `*SetError` whose `Set` names the set; it
-unwraps to the set's own error, so `errors.Is` and `errors.As` reach the error inside it.
+unwraps to the set's own error, so `errors.Is` and `errors.As` reach the error inside it. An
+error from one extension declaration is an `*ExtensionError` whose `Extension` names the
+extension, over its class: `ErrExtensionUnavailable`, an extension the database does not offer;
+`ErrNoUpdatePath` (`NoUpdatePathError`, naming the installed and default versions), an installed
+version with no update path to the default, which covers one newer than the default; or
+`ErrPending` (`ExtensionPendingError`), a declaration the database does not match yet.
 
 ## sqltest: the scripted driver
 
