@@ -908,8 +908,8 @@ is reported as `compose/postgres/Dockerfile: pgvector/pgvector 0.8.6 -> 0.8.7` a
 currency, and a failed lookup fails it too. Currency ignores every other `ARG`. `mise run upgrade`
 moves both pins to their latest: it rewrites the `FROM` tag and the `ARG`'s value.
 
-`mise run currency` and `mise run upgrade` are the two modes of `scripts/currency.sh`, `report`
-and `upgrade`, and run the same scans, so `upgrade` moves exactly what `report` lists. The scans
+`mise run currency` and `mise run upgrade` run `scripts/currency.sh`'s two modes, `report` and
+`upgrade`, which run the same scans, so `upgrade` moves exactly what `report` lists. The scans
 cover the mise tools; each module's `go` directive, against the current Go minor, and its direct
 requirements; the workflows' action pins; the `image:` lines of the compose files and workflows;
 and each compose Dockerfile's `FROM` tag and source `ARG`. `report` prints one line for each pin

@@ -129,8 +129,8 @@ The repository is a Go workspace of four modules. Tasks run through
 
 ```sh
 mise run check         # build, vet, format, fix, tidy, unit tier, lint, sqlint, lint-context, lint-references; writes nothing
-mise run currency      # report tools, Go, requirements, actions, images, and Dockerfile source ARGs behind their latest, but a held one; writes nothing
-mise run upgrade       # move every pin currency reports to its latest, but a held one: tools, then Go and requirements, actions, images, and Dockerfile source ARGs
+mise run currency      # report tools, Go, requirements, actions, images, and Dockerfile source ARGs behind their latest, except a held one; writes nothing
+mise run upgrade       # move every pin currency reports to its latest, except a held one: tools, then Go and requirements, actions, images, and Dockerfile source ARGs
 mise run db:up         # build and start the compose PostgreSQL and wait until it is healthy
 mise run db:down       # stop PostgreSQL, keeping its data
 mise run db:reset      # stop PostgreSQL and drop its data
