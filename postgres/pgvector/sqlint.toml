@@ -1,0 +1,35 @@
+# See docs/features.md
+
+[export.native_forms]
+l2_distance            = '<->'
+negative_inner_product = '<#>'
+cosine_distance        = '<=>'
+l1_distance            = '<\+>'
+hamming_distance       = '<~>'
+jaccard_distance       = '<%>'
+
+vector    = '(?i)\bAS\s+vector\s*[)\[]|\bvector\s*\(\s*\d'
+halfvec   = '(?i)\bhalfvec\b'
+sparsevec = '(?i)\bsparsevec\b'
+
+hnsw    = '(?i)\bUSING\s+hnsw\b'
+ivfflat = '(?i)\bUSING\s+ivfflat\b'
+
+"l2_distance()"        = '(?i)\bl2_distance\s*\('
+"inner_product()"      = '(?i)\binner_product\s*\('
+"cosine_distance()"    = '(?i)\bcosine_distance\s*\('
+"l1_distance()"        = '(?i)\bl1_distance\s*\('
+"hamming_distance()"   = '(?i)\bhamming_distance\s*\('
+"jaccard_distance()"   = '(?i)\bjaccard_distance\s*\('
+"vector_dims()"        = '(?i)\bvector_dims\s*\('
+"vector_norm()"        = '(?i)\bvector_norm\s*\('
+"l2_norm()"            = '(?i)\bl2_norm\s*\('
+"l2_normalize()"       = '(?i)\bl2_normalize\s*\('
+"binary_quantize()"    = '(?i)\bbinary_quantize\s*\('
+"subvector()"          = '(?i)\bsubvector\s*\('
+"array_to_vector()"    = '(?i)\barray_to_vector\s*\('
+"array_to_halfvec()"   = '(?i)\barray_to_halfvec\s*\('
+"array_to_sparsevec()" = '(?i)\barray_to_sparsevec\s*\('
+
+"hnsw.*"    = '(?i)\bhnsw\.\w+'
+"ivfflat.*" = '(?i)\bivfflat\.\w+'

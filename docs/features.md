@@ -6,8 +6,8 @@ The package documentation (`go doc`) is the reference for each name's exact sign
 The packages form two layers. The root package is the session layer every statement runs
 through. `query` and `migrate` are the two capabilities built over it: authored statements, and
 schema versioning that replaces a third-party migration dependency. `header` is the grammar
-both read, `sqltest` is the driver their tests run over, and the two sub-modules are the
-engine and the linter.
+both read, `sqltest` is the driver their tests run over, and the three sub-modules are the
+engine, an extension of the engine, and the linter.
 
 ## sqlate: the session layer
 
@@ -571,7 +571,7 @@ role's, every check is on, and no source is registered.
 # The engine whose export names the native forms, and the pattern sources.
 engine = "github.com/standards-lab/sqlate/postgres"
 # Modules whose exported native forms join the engine's; listing any requires an engine.
-# extensions = ["github.com/example/sqlate-pgvector"]
+# extensions = ["github.com/standards-lab/sqlate/postgres/pgvector"]
 
 [sources]
 sql = "github.com/standards-lab/sqlate"
@@ -645,10 +645,11 @@ failures against `sqlint.toml` and lints the rest of the tree with what resolved
   error; the module's other forms still apply.
 
 An accepted module's forms are matched exactly where the engine's are, and a finding from one names
-the entry beside the form: `"<=>" (cosine_distance, from github.com/example/sqlate-pgvector) in a
-standard-tier file; declare the tier native and name the port`. A name the engine and an extension
-both export is matched and reported for each. A native file that uses an extension's syntax names
-the extension in its free-text `native:` header, `native: postgres, pgvector — <=> cosine distance`;
+the entry beside the form:
+`"<=>" (cosine_distance, from github.com/standards-lab/sqlate/postgres/pgvector) in a standard-tier
+file; declare the tier native and name the port`. A name the engine and an extension both export
+is matched and reported for each. A native file that uses an extension's syntax names the
+extension in its free-text `native:` header, `native: postgres, pgvector — <=> cosine distance`;
 the linter does not read that header, so review checks it. The linter cannot read Go values either,
 so review keeps the `extensions` list in step with `migrate.Options.Extensions`.
 
@@ -773,3 +774,156 @@ still open on it, such as a started process's pool, is ended rather than holding
 the drop is retried while the server reports a session still closing. A create that fails is
 followed by a drop too, since a create that timed out can still finish on the server. The
 package imports `testing`, so only test files import it.
+
+## postgres/pgvector: the pgvector extension
+
+`github.com/standards-lab/sqlate/postgres/pgvector` names what a program needs to know of
+pgvector, PostgreSQL's vector similarity extension. It imports only the standard library, so a
+module that builds queries over pgvector takes its names without taking a driver. It is tagged
+`postgres/pgvector/vX.Y.Z`.
+
+`pgvector.Extension` is the extension's catalog name, `vector`: the name an application declares
+in `migrate.Options.Extensions` and `CREATE EXTENSION` installs. `pgvector.Metrics()` returns
+the metric table of the `vector` type, one `Metric` per distance metric, each with its distance
+operator and the operator class an HNSW or IVFFlat index builds for it:
+
+| `Metric` | `Name` | `Operator` | `OpClass` |
+|---|---|---|---|
+| `L2` | `l2` | `<->` | `vector_l2_ops` |
+| `Cosine` | `cosine` | `<=>` | `vector_cosine_ops` |
+| `InnerProduct` | `inner product` | `<#>` | `vector_ip_ops` |
+
+The table covers `vector` only. `halfvec`, `sparsevec`, `bit`, and the L1 metric are left out
+until an application's space, described [below](#a-space-per-dimension-on-one-column), needs
+them.
+
+The module's `sqlint.toml` exports pgvector's native forms, for a consumer that lists the module
+under sqlint's `extensions`. Each form is named for pgvector's own name for what it matches:
+
+- the distance operators, named for their functions: `l2_distance` (`<->`),
+  `negative_inner_product` (`<#>`), `cosine_distance` (`<=>`), `l1_distance` (`<+>`),
+  `hamming_distance` (`<~>`), and `jaccard_distance` (`<%>`);
+- `vector` where a type goes, a cast's `AS vector` before `)` or `[`, and `vector(` with a
+  dimension; `halfvec` and `sparsevec` anywhere as words;
+- `hnsw` and `ivfflat`, the index methods after `USING`;
+- the functions, named with `()` so they stay apart from the operators that share their names:
+  `l2_distance()`, `inner_product()`, `cosine_distance()`, `l1_distance()`,
+  `hamming_distance()`, `jaccard_distance()`, `vector_dims()`, `vector_norm()`, `l2_norm()`,
+  `l2_normalize()`, `binary_quantize()`, `subvector()`, `array_to_vector()`,
+  `array_to_halfvec()`, and `array_to_sparsevec()`, each matched as a call;
+- `hnsw.*` and `ivfflat.*`, the extension's settings.
+
+A column, table, or alias named `vector` matches no form, and neither does a portable statement.
+The engine's `cast` form already denies `::vector`.
+
+sqlate's own `sqlint.toml` lists the module under `extensions` although no `Options.Extensions`
+in the repository declares pgvector. The listing is a test: the root check resolves the module
+through the committed `go.work`, so the check fails when sqlint refuses the module's export or
+a form does not compile.
+
+### A space per dimension on one column
+
+An application that stores embeddings of several models, each with its own dimension, keeps them
+in one untyped `vector` column and a `space` column naming the model. Each space gets a partial
+HNSW index over the column cast to its dimension, with the operator class of its metric:
+
+```sql
+CREATE TABLE item (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    space integer NOT NULL,
+    embedding vector NOT NULL
+);
+
+CREATE INDEX item_space1_l2 ON item
+    USING hnsw ((embedding::vector(3)) vector_l2_ops) WHERE space = 1;
+CREATE INDEX item_space2_cosine ON item
+    USING hnsw ((embedding::vector(4)) vector_cosine_ops) WHERE space = 2;
+```
+
+A query uses a space's index only when it repeats both the cast and the space predicate, and
+orders by the cast expression with the metric's operator under a `LIMIT`:
+
+```sql
+SELECT id FROM item WHERE space = 1 ORDER BY embedding::vector(3) <-> $1 LIMIT 5;
+```
+
+Without the cast, `ORDER BY embedding <-> $1` does not match the index's expression, and the
+engine scans the space's rows instead. The cast also checks the dimension: an insert into an
+indexed space computes the index's expression, so a vector of the wrong dimension fails with
+`expected 3 dimensions` and the row is not written. A space with no index accepts any dimension.
+
+The operator and the operator class come from the module's metric table, so a program builds
+both statements from a `Metric` rather than spelling them.
+
+### An image with pgvector
+
+The official PostgreSQL image does not ship pgvector, so sqlate's compose image builds it from
+source. `compose/postgres/Dockerfile` is the canonical Dockerfile: a consumer that declares
+pgvector copies it to its own `compose/postgres/Dockerfile` and keeps its pins current.
+
+```dockerfile
+FROM postgres:19.0-alpine
+
+ARG PGVECTOR_VERSION=0.8.7
+
+ADD https://github.com/pgvector/pgvector.git#v${PGVECTOR_VERSION} /usr/src/pgvector
+
+RUN apk add --no-cache --virtual .build-deps build-base \
+    && cd /usr/src/pgvector \
+    && make with_llvm=no OPTFLAGS="" \
+    && make install with_llvm=no \
+    && cd / \
+    && rm -rf /usr/src/pgvector \
+    && apk del .build-deps
+
+ENV POSTGRES_USER=app \
+    POSTGRES_PASSWORD=app \
+    POSTGRES_DB=app
+
+HEALTHCHECK --start-period=30s --start-interval=1s --interval=5s --timeout=3s --retries=5 \
+    CMD ["pg_isready", "-h", "127.0.0.1", "-U", "app", "-d", "app"]
+```
+
+The image has two pins. `FROM` pins PostgreSQL; `ARG PGVECTOR_VERSION` pins pgvector, and the
+`ADD` line fetches pgvector's git repository at the tag `v${PGVECTOR_VERSION}`, so the `ARG` is
+the extension's one version source. `pg_available_extensions` then offers `vector` at that
+version, and `CREATE EXTENSION vector` installs it.
+
+The build flags:
+
+- `with_llvm=no`, on both `make` and `make install`, skips the LLVM bitcode for PostgreSQL's
+  JIT. The image's PostgreSQL is built with LLVM support, so without the flag `make install`
+  looks for the matching `clang`, which the Alpine build tools do not provide, and fails.
+- `OPTFLAGS=""`, on `make`, drops pgvector's default `-march=native`, so the build does not tie
+  the image to the CPU of the machine that built it.
+
+The build tools are installed as a virtual package and removed, with the source, in the same
+layer, so the image grows by only the extension, about 5 MB.
+
+`mise run currency` reads both pins. It compares the `FROM` tag with the image's tags. It
+compares an `ARG <NAME>_VERSION=<v>` whose `ADD` line fetches
+`https://github.com/<owner>/<repo>.git#v${<NAME>_VERSION}` with that repository's highest semver
+tag; it reads tags, not GitHub releases, because pgvector publishes no releases. A trailing `ARG`
+is reported as `compose/postgres/Dockerfile: pgvector/pgvector 0.8.6 -> 0.8.7` and fails
+currency, and a failed lookup fails it too. Currency ignores every other `ARG`. `mise run upgrade`
+does not move the `ARG`, so a maintainer raises it by hand.
+
+### The integration tier
+
+The module's integration tier, behind the `integration` build tag, runs against the compose
+image through `SQLATE_DSN` and `pgtest`, with a throwaway database per test. For the extension
+stage, it proves that:
+
+- a declaration of `pgvector.Extension` in `migrate.Options.Extensions` installs `vector` at the
+  image's default version, after which `Extensions` reports it current and `Verify` passes;
+- a removal is refused while a `vector` column depends on the extension, and succeeds once a set
+  migration drops the column.
+
+For the per-space recipe, with one space per metric of the table, it proves that:
+
+- a query that repeats the cast and the space predicate plans an index scan on its space's index;
+- the same query without the cast uses none of the indexes;
+- an insert of the wrong dimension into an indexed space fails.
+
+`mise run integration` runs this tier with the `postgres` module's, and `mise run acceptance`
+starts the compose PostgreSQL, runs both tiers, and drops its data.

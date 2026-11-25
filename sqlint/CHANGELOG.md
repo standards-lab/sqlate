@@ -7,6 +7,8 @@ changelog covers this sub-module only; the base module keeps its own.
 
 ## [Unreleased]
 
+## [v0.5.0] - 2026-11-24
+
 ### Added
 
 - An `extensions` key in `sqlint.toml` lists the modules whose exported native forms join the
@@ -113,7 +115,8 @@ The first release of the linter, against `github.com/standards-lab/sqlate v0.1.0
 - `cmd/sqlint`, the command: one root argument, findings as `path:line: message`, exit 1 on
   any finding.
 
-[Unreleased]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.4.0...HEAD
+[Unreleased]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.5.0...HEAD
+[v0.5.0]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.4.0...sqlint/v0.5.0
 [v0.4.0]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.3.0...sqlint/v0.4.0
 [v0.3.0]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.2.1...sqlint/v0.3.0
 [v0.2.1]: https://github.com/standards-lab/sqlate/compare/sqlint/v0.2.0...sqlint/v0.2.1

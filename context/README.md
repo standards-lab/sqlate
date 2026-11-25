@@ -31,6 +31,10 @@ express.
   ([sqltest/doc.go](../sqltest/doc.go)).
 - **postgres** (built): the PostgreSQL dialect sub-module, with `pgtest` for integration tests'
   throwaway databases ([postgres/doc.go](../postgres/doc.go)).
+- **postgres/pgvector** (built): the pgvector extension sub-module. It names the extension's
+  catalog name, `vector`, and the `vector` type's metric table, exports pgvector's native forms
+  to sqlint, and proves the extension stage and the per-space index recipe in its own
+  integration tier ([postgres/pgvector/doc.go](../postgres/pgvector/doc.go)).
 - **sqlint** (built): the conventions linter sub-module and its command
   ([sqlint/doc.go](../sqlint/doc.go)).
 - **Dollar-quoted strings in sqlint** (planned): `sqlint` strips PostgreSQL dollar-quoted bodies
