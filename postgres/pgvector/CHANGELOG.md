@@ -23,8 +23,9 @@ The first release of the pgvector extension module. It imports only the standard
   anywhere, `USING hnsw` and `USING ivfflat`, fifteen functions called by name, and the
   `hnsw.*` and `ivfflat.*` settings.
 
-Requires `github.com/standards-lab/sqlate v0.8.0` and `github.com/standards-lab/sqlate/postgres
-v0.9.0`, for the integration tier only; the package imports neither.
+Requires `github.com/standards-lab/sqlate v0.8.0` and
+`github.com/standards-lab/sqlate/postgres v0.9.0` for the integration tier only; the package
+imports neither.
 
 [Unreleased]: https://github.com/standards-lab/sqlate/compare/postgres/pgvector/v0.1.0...HEAD
 [v0.1.0]: https://github.com/standards-lab/sqlate/releases/tag/postgres/pgvector/v0.1.0

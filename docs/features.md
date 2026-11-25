@@ -647,9 +647,9 @@ failures against `sqlint.toml` and lints the rest of the tree with what resolved
 An accepted module's forms are matched exactly where the engine's are, and a finding from one names
 the entry beside the form:
 `"<=>" (cosine_distance, from github.com/standards-lab/sqlate/postgres/pgvector) in a standard-tier
-file; declare the tier native and name the port`. A name the engine and an extension
-both export is matched and reported for each. A native file that uses an extension's syntax names
-the extension in its free-text `native:` header, `native: postgres, pgvector — <=> cosine distance`;
+file; declare the tier native and name the port`. A name the engine and an extension both export
+is matched and reported for each. A native file that uses an extension's syntax names the
+extension in its free-text `native:` header, `native: postgres, pgvector — <=> cosine distance`;
 the linter does not read that header, so review checks it. The linter cannot read Go values either,
 so review keeps the `extensions` list in step with `migrate.Options.Extensions`.
 
@@ -793,8 +793,9 @@ operator and the operator class an HNSW or IVFFlat index builds for it:
 | `Cosine` | `cosine` | `<=>` | `vector_cosine_ops` |
 | `InnerProduct` | `inner product` | `<#>` | `vector_ip_ops` |
 
-The table covers `vector` only; `halfvec`, `sparsevec`, `bit`, and the L1 metric are left out
-until a space needs them.
+The table covers `vector` only. `halfvec`, `sparsevec`, `bit`, and the L1 metric are left out
+until an application's space, described [below](#a-space-per-dimension-on-one-column), needs
+them.
 
 The module's `sqlint.toml` exports pgvector's native forms, for a consumer that lists the module
 under sqlint's `extensions`. Each form is named for pgvector's own name for what it matches:
@@ -839,8 +840,8 @@ CREATE INDEX item_space2_cosine ON item
     USING hnsw ((embedding::vector(4)) vector_cosine_ops) WHERE space = 2;
 ```
 
-A query uses a space's index only when it repeats both the cast and the space predicate, ordering
-by the cast column with the metric's operator under a `LIMIT`:
+A query uses a space's index only when it repeats both the cast and the space predicate, and
+orders by the cast expression with the metric's operator under a `LIMIT`:
 
 ```sql
 SELECT id FROM item WHERE space = 1 ORDER BY embedding::vector(3) <-> $1 LIMIT 5;
@@ -899,23 +900,30 @@ The build flags:
 The build tools are installed as a virtual package and removed, with the source, in the same
 layer, so the image grows by only the extension, about 5 MB.
 
-`mise run currency` reads both pins. It compares the `FROM` tag with the image's tags, and an
-`ARG <NAME>_VERSION=<v>` whose `ADD` line fetches
-`https://github.com/<owner>/<repo>.git#v${<NAME>_VERSION}` with that repository's highest
-semver tag, read from the repository's tags since pgvector publishes no GitHub releases. A
-trailing `ARG` is reported as `compose/postgres/Dockerfile: pgvector/pgvector 0.8.6 -> 0.8.7`
-and fails currency; a lookup that fails fails it too. Other `ARG`s are not read. `mise run
-upgrade` does not move the `ARG`; it is raised by hand.
+`mise run currency` reads both pins. It compares the `FROM` tag with the image's tags. It
+compares an `ARG <NAME>_VERSION=<v>` whose `ADD` line fetches
+`https://github.com/<owner>/<repo>.git#v${<NAME>_VERSION}` with that repository's highest semver
+tag; it reads tags, not GitHub releases, because pgvector publishes no releases. A trailing `ARG`
+is reported as `compose/postgres/Dockerfile: pgvector/pgvector 0.8.6 -> 0.8.7` and fails
+currency, and a failed lookup fails it too. Currency ignores every other `ARG`. `mise run upgrade`
+does not move the `ARG`, so a maintainer raises it by hand.
 
 ### The integration tier
 
 The module's integration tier, behind the `integration` build tag, runs against the compose
-image through `SQLATE_DSN` and `pgtest`, with a throwaway database per test. It proves that a
-declaration of `pgvector.Extension` in `migrate.Options.Extensions` installs `vector` at the
-image's default version, that `Extensions` then reports it current and `Verify` passes, and that
-a removal is refused while a `vector` column depends on the extension and succeeds once a set
-migration drops the column. For the per-space recipe, with one space per metric of the table, it
-proves that a query repeating the cast and the space predicate plans an index scan on its
-space's index, that the same query without the cast uses none of them, and that an insert of the
-wrong dimension into an indexed space fails. `mise run integration` runs this tier with the
-`postgres` module's, and `mise run acceptance` starts the stack, runs both, and drops it.
+image through `SQLATE_DSN` and `pgtest`, with a throwaway database per test. For the extension
+stage, it proves that:
+
+- a declaration of `pgvector.Extension` in `migrate.Options.Extensions` installs `vector` at the
+  image's default version, after which `Extensions` reports it current and `Verify` passes;
+- a removal is refused while a `vector` column depends on the extension, and succeeds once a set
+  migration drops the column.
+
+For the per-space recipe, with one space per metric of the table, it proves that:
+
+- a query that repeats the cast and the space predicate plans an index scan on its space's index;
+- the same query without the cast uses none of the indexes;
+- an insert of the wrong dimension into an indexed space fails.
+
+`mise run integration` runs this tier with the `postgres` module's, and `mise run acceptance`
+starts the compose PostgreSQL, runs both tiers, and drops its data.

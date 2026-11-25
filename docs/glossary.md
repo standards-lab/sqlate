@@ -123,8 +123,8 @@ text.
 - **Producer**: a module, or a directory with its own `sqlint.toml`, whose `[export]` table
   declares what a consumer reads from it: a pattern directory, an overlay directory, native
   forms.
-- **Native form**: one entry of the deny list an engine or an extension exports: a regular expression, keyed
-  by a name, that detects one of the engine's native operations in a standard-tier file. A
-  match fails the linter under that name.
+- **Native form**: one entry of the deny list an engine or an extension exports: a regular
+  expression, keyed by a name, that detects one of that engine's or extension's native operations
+  in a standard-tier file. A match fails the linter under that name.
 - **Finding**: one convention a file fails: the path, the line when the check has one, and the
   message.

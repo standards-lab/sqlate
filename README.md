@@ -4,9 +4,9 @@ SQL templating for Go: authored `.sql` files made dynamic and composable, with a
 dialect and a conventions linter.
 
 `github.com/standards-lab/sqlate` is the base module, and it imports only the standard library.
-The PostgreSQL dialect is the `postgres` sub-module, the pgvector extension's names are the
-`postgres/pgvector` sub-module, and the linter is the `sqlint` sub-module, each released on its
-own tags.
+The `postgres` sub-module is the PostgreSQL dialect, the `postgres/pgvector` sub-module names
+the pgvector extension, and the `sqlint` sub-module is the linter. Each sub-module is released on
+its own tags.
 
 ## The problem
 
@@ -140,16 +140,17 @@ mise run acceptance    # run db:up and integration, then db:reset whatever the r
 
 `compose.yml` runs PostgreSQL on port 5433, beside a service's own on 5432; `POSTGRES_PORT`
 moves it. The service builds from `compose/postgres/Dockerfile`, whose `FROM` line is its one
-image pin and which carries its configuration and health check. On that image it builds pgvector
+image pin and which carries its configuration and health check. The Dockerfile builds pgvector
 from source at `ARG PGVECTOR_VERSION`, the extension's one version pin
 ([the image](docs/features.md#an-image-with-pgvector)). `mise run currency` reports either pin
-behind its latest: the `FROM` tag against the image's tags, and the `ARG` against the highest
-semver tag of the GitHub repository its `ADD` line fetches. `mise.toml` sets `SQLATE_DSN`, whose port follows the same variable.
+when it trails its latest: it compares the `FROM` tag with the image's tags, and the `ARG` with
+the highest semver tag of the GitHub repository that the `ADD` line fetches. `mise.toml` sets
+`SQLATE_DSN`, whose port follows `POSTGRES_PORT`.
 
 The integration tier covers two modules, `postgres` and `postgres/pgvector`, each behind the
-`integration` build tag; `mise run integration` runs both against the running PostgreSQL, and
-`mise run acceptance` starts the stack, runs both, and drops it. The tier runs on a developer's
-machine, not in CI.
+`integration` build tag. `mise run integration` runs both against the running PostgreSQL, and
+`mise run acceptance` starts the compose PostgreSQL, runs both, and drops its data. The tier runs
+on a developer's machine, not in CI.
 
 The compose PostgreSQL reports healthy once it accepts TCP connections to the app database. The
 probe goes over TCP, not the socket, because the first start's initialization runs a temporary
