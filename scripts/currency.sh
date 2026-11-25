@@ -12,7 +12,6 @@
 # Run it through `mise run currency` or `mise run upgrade`.
 #
 # usage: scripts/currency.sh <report|upgrade>
-# See docs/features.md
 # See architecture/principles/rolling-currency.md
 set -euo pipefail
 cd "$MISE_PROJECT_ROOT"
