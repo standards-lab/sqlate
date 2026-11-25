@@ -129,8 +129,8 @@ The repository is a Go workspace of four modules. Tasks run through
 
 ```sh
 mise run check         # build, vet, format, fix, tidy, unit tier, lint, sqlint, lint-context, lint-references; writes nothing
-mise run currency      # report requirements, Go, tools, actions, images, and Dockerfile source ARGs behind their latest
-mise run upgrade       # upgrade every module's go directive and requirements, and the tools, to their latest
+mise run currency      # report tools, Go, requirements, actions, images, and Dockerfile source ARGs behind their latest, but a held one; writes nothing
+mise run upgrade       # move every pin currency reports to its latest, but a held one: tools, then Go and requirements, actions, images, and Dockerfile source ARGs
 mise run db:up         # build and start the compose PostgreSQL and wait until it is healthy
 mise run db:down       # stop PostgreSQL, keeping its data
 mise run db:reset      # stop PostgreSQL and drop its data
@@ -144,8 +144,10 @@ image pin and which carries its configuration and health check. The Dockerfile b
 from source at `ARG PGVECTOR_VERSION`, the extension's one version pin
 ([the image](docs/features.md#an-image-with-pgvector)). `mise run currency` reports either pin
 when it trails its latest: it compares the `FROM` tag with the image's tags, and the `ARG` with
-the highest semver tag of the GitHub repository that the `ADD` line fetches. `mise.toml` sets
-`SQLATE_DSN`, whose port follows `POSTGRES_PORT`.
+the highest semver tag of the GitHub repository that the `ADD` line fetches; `mise run upgrade`
+moves it. A pin named in `mise.toml`'s `HOLDS` list, one `<item> <pin>: <reason>` line each, is
+reported as held and never moved. `mise.toml` sets `SQLATE_DSN`, whose port follows
+`POSTGRES_PORT`.
 
 The integration tier covers two modules, `postgres` and `postgres/pgvector`, each behind the
 `integration` build tag. `mise run integration` runs both against the running PostgreSQL, and
