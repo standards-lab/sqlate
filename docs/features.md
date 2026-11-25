@@ -906,7 +906,27 @@ compares an `ARG <NAME>_VERSION=<v>` whose `ADD` line fetches
 tag; it reads tags, not GitHub releases, because pgvector publishes no releases. A trailing `ARG`
 is reported as `compose/postgres/Dockerfile: pgvector/pgvector 0.8.6 -> 0.8.7` and fails
 currency, and a failed lookup fails it too. Currency ignores every other `ARG`. `mise run upgrade`
-does not move the `ARG`, so a maintainer raises it by hand.
+moves both pins to their latest: it rewrites the `FROM` tag and the `ARG`'s value.
+
+`mise run currency` and `mise run upgrade` run `scripts/currency.sh`'s two modes, `report` and
+`upgrade`, which run the same scans, so `upgrade` moves exactly what `report` lists. The scans
+cover the mise tools; each module's `go` directive, against the current Go minor, and its direct
+requirements; the workflows' action pins; the `image:` lines of the compose files and workflows;
+and each compose Dockerfile's `FROM` tag and source `ARG`. `report` prints one line for each pin
+that trails, `<where>: <item> <pin> -> <latest>`, reads the network, writes nothing, and exits 1
+when any pin it lists is not held. `upgrade` moves every trailing pin in that order: the mise
+pins first, so the modules then move under the Go just pinned; then each module's `go` directive,
+to the current Go minor with no toolchain line, its direct requirements, and a tidy; then the
+action pins, the `image:` lines, the `FROM` tags, and the `ARG`s. It prints one `upgrade:` line
+for each pin it moves, and on a current tree it changes nothing. Review the diff and run the check
+after it.
+
+`HOLDS`, in `mise.toml`'s `[env]`, holds a pin for a stated reason, one `<item> <pin>: <reason>`
+line each, the item named as `report` names it: a requirement by its module path, the `go`
+directive as `go`, a mise tool by its name, an action by its path, an image by its image, and a
+source `ARG` by its repository, as in `pgvector/pgvector 0.8.6: <reason>`. `report` shows a held
+pin with `held:` and its reason and does not count it as trailing, and `upgrade` skips it. The
+hold names the pin it holds, so moving the pin ends the hold. The list ships empty.
 
 ### The integration tier
 

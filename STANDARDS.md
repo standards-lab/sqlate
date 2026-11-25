@@ -8,6 +8,7 @@ The judgement calls the standards-reviewer applies to sqlate, beyond what `mise 
 - `architecture/standards/go-elemental/principles/topology-and-naming.md`: the base module and the `postgres`, `postgres/pgvector`, and `sqlint` sub-modules, and their tags.
 - `architecture/standards/go-elemental/principles/release-and-ci.md`: the check, currency, and a changelog per module.
 - `architecture/standards/go-elemental/principles/dsl-driven-services.md`: `query`, `header`, and every authored `.sql` file, the library's patterns included.
+- `architecture/standards/go-elemental/principles/database-extensions.md`: `migrate`'s extension declarations, `postgres`'s extension statements, the `postgres/pgvector` sub-module, and the compose Dockerfile.
 - `architecture/standards/go-elemental/principles/baseline-standards.md`: `query`'s guards and projections, which take every name and bound from their caller.
 - `architecture/standards/go-elemental/principles/utc-times.md`: `query.Scanner` and `query.Scalar`, which return every time in UTC, a cursor's keyed time, and the `postgres` dialect's `timestamp with time zone` history.
 - `architecture/standards/go-elemental/principles/construction-and-execution.md`: `DB.Begin`, `DB.Transact`, and `Transact` take their transaction's configuration as a trailing `*sql.TxOptions` whose nil keeps a default transaction, and a new runner that takes configuration does the same.

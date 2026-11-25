@@ -12,6 +12,8 @@ jq = "1.8.2"
 [env]
 GO_MODULES = ". postgres postgres/pgvector sqlint"
 SQLATE_DSN = "postgres://app:app@127.0.0.1:{{ get_env(name='POSTGRES_PORT', default='5433') }}/app?sslmode=disable"
+HOLDS = '''
+'''
 
 [tasks.check]
 description = "Build, vet, format, fix, tidy, test, and lint every module, then sqlint the repository under the committed go.work, through which it resolves the modules sqlint.toml names, then run lint-context and lint-references; writes nothing"
@@ -46,25 +48,12 @@ exit "$fail"
 '''
 
 [tasks.currency]
-description = "Report every requirement, Go version, tool, action pin, image tag, and Dockerfile source ARG behind its latest; writes nothing"
-run = "scripts/currency.sh"
+description = "Report every mise tool, Go version, requirement, action pin, image tag, and Dockerfile source ARG behind its latest, a held one with its reason; writes nothing"
+run = "scripts/currency.sh report"
 
 [tasks.upgrade]
-description = "Upgrade every module's go directive (to the current Go minor, with no toolchain line) and direct requirements and the local mise tools to their latest, rewriting go.mod and mise.toml"
-run = '''
-set -eu
-export GOWORK=off
-go_minor=$(mise latest go | cut -d. -f1,2)
-for mod in $GO_MODULES; do
-  cd "$MISE_PROJECT_ROOT/$mod"
-  go mod edit -go="$go_minor" -toolchain=none
-  direct=$(go mod edit -json | jq -r '.Require[]? | select(.Indirect | not) | .Path')
-  [ -z "$direct" ] || go get $(printf '%s@latest ' $direct)
-  go mod tidy
-done
-cd "$MISE_PROJECT_ROOT"
-mise upgrade --bump --local
-'''
+description = "Bump the mise tools, then each module's go directive (to the current Go minor, with no toolchain line) and direct requirements, with a tidy, then the action pins, image tags, Dockerfile FROM tags, and Dockerfile source ARGs, to their latest, but a held one; rewrites mise.toml, go.mod, go.sum, the workflows, and the compose files"
+run = "scripts/currency.sh upgrade"
 
 [tasks.tidy]
 description = "Run go mod tidy across all modules"
